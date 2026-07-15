@@ -135,13 +135,6 @@
 
   <div id="loadView" style="display:none">
     <div class="panel subsection">
-      <h2>Upload a test (.docx or .pdf)</h2>
-      <div class="format-help">Works best with exams formatted like the instructor's — a list of questions with 4 answer choices, followed by an answer key table (Item # / Answer). PDFs need to be text-based, not scanned/image-only (no OCR support). After uploading, the parsed questions appear below as text so you can check them before starting — feel free to fix anything that came out wrong.</div>
-      <div class="file-row"><input type="file" id="testFileInput" accept=".docx,.pdf"></div>
-      <div class="msg" id="testFileMsg"></div>
-    </div>
-
-    <div class="panel subsection">
       <h2>Retake from a PDF answer sheet (from this tool)</h2>
       <div class="format-help">Upload a PDF answer sheet you previously downloaded from this tool to continue practicing with just the questions you missed. The attempt number picks up from the sheet you upload.</div>
       <div class="file-row"><input type="file" id="pdfInput" accept=".pdf"></div>
@@ -153,24 +146,6 @@
       <div class="format-help">Upload one or more PDF answer sheets you've downloaded from this tool. Every question you missed on any of them becomes a flashcard, with the most frequently missed questions shown first.</div>
       <div class="file-row"><input type="file" id="flashInput" accept=".pdf" multiple></div>
       <div class="msg" id="flashMsg"></div>
-    </div>
-
-    <div class="panel subsection">
-      <h2>Or paste formatted text</h2>
-      <div class="format-help">Question text goes here?
-1) First option
-2) Second option
-3) Third option
-4) Fourth option
-ANSWER: 2
-
-Blank line between questions. "ANSWER:" line can use the option number or the option's exact text.</div>
-      <textarea id="pasteArea" placeholder="Paste formatted question text here…"></textarea>
-      <div style="margin-top:12px;display:flex;gap:10px;font-family:system-ui,sans-serif;">
-        <input type="text" id="titleInput" placeholder="Title for this test (optional)" style="flex:1;padding:9px 12px;border-radius:8px;border:1px solid var(--line);font-family:system-ui,sans-serif;">
-        <button class="btn btn-primary" id="parseBtn">Load This Test</button>
-      </div>
-      <div class="msg" id="loadMsg"></div>
     </div>
 
     <div class="panel subsection">
@@ -212,6 +187,11 @@ let flashcards = [];
 let flashIndex = 0;
 let flashFlipped = false;
 let reviewFilter = 'missed'; // 'missed' | 'all' — which questions renderReviewPanel shows
+let flashOnlineExams = null; // null = not yet loaded; [] | [{examKey,examTitle}] once loaded
+let flashOnlineLoading = false;
+let flashSelectedExamKeys = new Set();
+let flashProgressMsg = null; // { text, ok } | null
+let flashPickSpecificOpen = false;
 
 /* ================= elements ================= */
 const quizPanel = document.getElementById('quizPanel');
@@ -258,7 +238,10 @@ function showView(v){
   tabLibrary.classList.toggle('active', v==='library');
   tabProgress.classList.toggle('active', v==='progress');
   if(v==='quiz' && submitted) renderResults();
-  if(v==='flash') renderFlashcard();
+  if(v==='flash'){
+    renderFlashcard();
+    if(appMode==='online' && currentUser && flashOnlineExams===null && !flashOnlineLoading) loadFlashOnlineExams();
+  }
   if(v==='library') renderLibrary();
   if(v==='auth') renderAuthView();
   if(v==='progress') renderProgressView();
@@ -791,9 +774,148 @@ document.getElementById('flashInput').onchange = async (e)=>{
   }
 };
 
+/* ================= online flashcards: generate from stored progress =================
+   Pulls every missed question (selected_option !== correct_option, on any
+   completed attempt — full or missed-only retake) for the checked exam(s)
+   straight from Supabase, so a user can build a flashcard set covering any
+   stage of failure across one or more tests without needing a downloaded
+   PDF answer sheet at all. */
+async function loadFlashOnlineExams(){
+  flashOnlineLoading = true;
+  renderFlashcard();
+  try{
+    const { data, error } = await supabaseClient.from('exam_rounds')
+      .select('exam_key, exam_title').eq('user_id', currentUser.id);
+    if(error) throw error;
+    const seen = new Map();
+    (data||[]).forEach(r=>{ if(!seen.has(r.exam_key)) seen.set(r.exam_key, r.exam_title); });
+    flashOnlineExams = Array.from(seen, ([examKey,examTitle])=>({examKey,examTitle}))
+      .sort((a,b)=>a.examTitle.localeCompare(b.examTitle));
+    flashSelectedExamKeys = new Set(flashOnlineExams.map(e=>e.examKey));
+  } catch(err){
+    flashOnlineExams = [];
+    flashProgressMsg = { text: 'Could not load your exams: ' + err.message, ok:false };
+  } finally {
+    flashOnlineLoading = false;
+    renderFlashcard();
+  }
+}
+
+async function generateFlashcardsFromOnlineProgress(examKeys){
+  /* examKeys === null means "every test" — no exam filter at all, so nothing
+     about this path is limited to picking a test first. A non-null array is
+     only used by the optional "pick specific exams" refinement below it. */
+  const scoped = Array.isArray(examKeys);
+  if(scoped && !examKeys.length){
+    flashProgressMsg = { text: 'Select at least one exam first.', ok:false };
+    renderFlashcard();
+    return;
+  }
+  flashProgressMsg = { text: 'Generating flashcards from your progress…', ok:true };
+  renderFlashcard();
+  try{
+    let roundsQuery = supabaseClient.from('exam_rounds').select('id').eq('user_id', currentUser.id);
+    if(scoped) roundsQuery = roundsQuery.in('exam_key', examKeys);
+    const { data: rounds, error: rErr } = await roundsQuery;
+    if(rErr) throw rErr;
+    if(!rounds.length) throw new Error(scoped ? 'No rounds found for the selected exam(s).' : 'No online attempts yet.');
+    const { data: attempts, error: aErr } = await supabaseClient.from('exam_attempts')
+      .select('id').in('round_id', rounds.map(r=>r.id)).eq('status','completed');
+    if(aErr) throw aErr;
+    if(!attempts.length) throw new Error('No completed attempts found — nothing to build flashcards from yet.');
+    const { data: rows, error: ansErr } = await supabaseClient.from('exam_attempt_answers')
+      .select('*').in('attempt_id', attempts.map(a=>a.id));
+    if(ansErr) throw ansErr;
+    const tally = new Map();
+    rows.forEach(r=>{
+      if(r.selected_option===null || r.selected_option===undefined) return;
+      if(r.selected_option === r.correct_option) return;
+      const key = r.question_text.trim().toLowerCase();
+      if(tally.has(key)) tally.get(key).count++;
+      else tally.set(key, { text: r.question_text, options: r.options, correct: r.correct_option, count: 1 });
+    });
+    if(tally.size === 0) throw new Error('No missed questions found — nothing to build flashcards from.');
+    flashcards = Array.from(tally.values()).sort((a,b)=>b.count - a.count);
+    flashIndex = 0;
+    flashFlipped = false;
+    const scopeMsg = scoped ? `across ${examKeys.length} exam(s)` : 'across all your exams';
+    flashProgressMsg = { text: `Built ${flashcards.length} flashcard(s) from ${attempts.length} completed attempt(s) ${scopeMsg}.`, ok:true };
+  } catch(err){
+    flashProgressMsg = { text: err.message, ok:false };
+  }
+  renderFlashcard();
+}
+
+function renderOnlineFlashGeneratorHtml(){
+  let inner;
+  if(flashOnlineLoading){
+    inner = `<div class="format-help">Loading your exams…</div>`;
+  } else if(!flashOnlineExams || !flashOnlineExams.length){
+    inner = `<div class="format-help">No online attempts yet — start an exam in Online mode first, then come back here.</div>`;
+  } else {
+    const checkboxes = flashOnlineExams.map(ex=>`
+      <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-family:system-ui,sans-serif;font-size:.9rem;">
+        <input type="checkbox" data-flash-exam="${escapeHtml(ex.examKey)}" ${flashSelectedExamKeys.has(ex.examKey)?'checked':''}>
+        ${escapeHtml(ex.examTitle)}
+      </label>
+    `).join('');
+    inner = `
+      <button class="btn btn-primary" id="flashGenerateAllBtn">Generate Flashcards from All Progress</button>
+      <div style="margin-top:14px;">
+        <button class="link-btn" id="flashTogglePickBtn" type="button">${flashPickSpecificOpen ? 'Hide' : 'Or pick specific exams'}</button>
+      </div>
+      ${flashPickSpecificOpen ? `
+        <div style="margin-top:8px;">
+          <div style="display:flex;gap:14px;margin-bottom:8px;">
+            <button class="link-btn" id="flashSelectAllBtn" type="button">Select all</button>
+            <button class="link-btn" id="flashSelectNoneBtn" type="button">Clear</button>
+          </div>
+          ${checkboxes}
+          <div style="margin-top:10px;">
+            <button class="btn btn-ghost" id="flashGenerateProgressBtn">Generate from Selected</button>
+          </div>
+        </div>
+      ` : ''}
+      ${flashProgressMsg ? `<div class="msg ${flashProgressMsg.ok?'ok':'err'}">${escapeHtml(flashProgressMsg.text)}</div>` : ''}
+    `;
+  }
+  return `
+    <div class="panel subsection">
+      <h2>Generate flashcards from your progress</h2>
+      <div class="format-help">Pulls every question you've ever missed — on any attempt, at any stage of any round's funnel, across every test — into one set (most-missed first). No PDFs needed, and no need to pick a test first; picking specific exams below is optional.</div>
+      ${inner}
+    </div>
+  `;
+}
+
+function bindFlashGeneratorHandlers(){
+  const genAllBtn = document.getElementById('flashGenerateAllBtn');
+  const toggleBtn = document.getElementById('flashTogglePickBtn');
+  const selAllBtn = document.getElementById('flashSelectAllBtn');
+  const selNoneBtn = document.getElementById('flashSelectNoneBtn');
+  const genBtn = document.getElementById('flashGenerateProgressBtn');
+  if(genAllBtn) genAllBtn.onclick = ()=> generateFlashcardsFromOnlineProgress(null);
+  if(toggleBtn) toggleBtn.onclick = ()=>{ flashPickSpecificOpen = !flashPickSpecificOpen; renderFlashcard(); };
+  if(selAllBtn) selAllBtn.onclick = ()=>{ flashSelectedExamKeys = new Set((flashOnlineExams||[]).map(e=>e.examKey)); renderFlashcard(); };
+  if(selNoneBtn) selNoneBtn.onclick = ()=>{ flashSelectedExamKeys = new Set(); renderFlashcard(); };
+  if(genBtn) genBtn.onclick = ()=> generateFlashcardsFromOnlineProgress(Array.from(flashSelectedExamKeys));
+  flashPanel.querySelectorAll('[data-flash-exam]').forEach(cb=>{
+    cb.onchange = ()=>{
+      const key = cb.dataset.flashExam;
+      if(cb.checked) flashSelectedExamKeys.add(key); else flashSelectedExamKeys.delete(key);
+    };
+  });
+}
+
 function renderFlashcard(){
+  const onlineActive = appMode==='online' && currentUser;
+  const topHtml = onlineActive ? renderOnlineFlashGeneratorHtml() : '';
   if(!flashcards.length){
-    flashPanel.innerHTML = `<h2>Flashcards</h2><div class="format-help">No flashcards yet. Go to "Load / Upload a Test" and upload one or more PDF answer sheets to build flashcards from your missed questions.</div>`;
+    const fallback = onlineActive
+      ? 'Generate a set from your progress above, or go to "Load / Upload a Test" and'
+      : 'Go to "Load / Upload a Test" and';
+    flashPanel.innerHTML = topHtml + `<h2>Flashcards</h2><div class="format-help">No flashcards yet. ${fallback} upload one or more PDF answer sheets to build flashcards from your missed questions.</div>`;
+    if(onlineActive) bindFlashGeneratorHandlers();
     return;
   }
   const letters = ['1','2','3','4','5','6'];
@@ -818,390 +940,12 @@ function renderFlashcard(){
       <button class="btn btn-ghost" id="flashNextBtn" ${flashIndex===flashcards.length-1?'disabled':''}>Next →</button>
     </div>
   `;
-  flashPanel.innerHTML = html;
+  flashPanel.innerHTML = topHtml + html;
   document.getElementById('flashPrevBtn').onclick = ()=>{ if(flashIndex>0){ flashIndex--; flashFlipped=false; renderFlashcard(); } };
   document.getElementById('flashNextBtn').onclick = ()=>{ if(flashIndex<flashcards.length-1){ flashIndex++; flashFlipped=false; renderFlashcard(); } };
   document.getElementById('flashToggleBtn').onclick = ()=>{ flashFlipped=!flashFlipped; renderFlashcard(); };
+  if(onlineActive) bindFlashGeneratorHandlers();
 }
-
-/* ================= docx upload & parsing ================= */
-async function parseDocxFile(file){
-  if(!window.JSZip){ throw new Error('Docx reader library did not load. Check your network connection.'); }
-  const zip = await JSZip.loadAsync(file);
-  const docXmlFile = zip.file('word/document.xml');
-  if(!docXmlFile) throw new Error('This does not look like a valid .docx file.');
-  const xmlText = await docXmlFile.async('text');
-  const parser = new DOMParser();
-  const xdoc = parser.parseFromString(xmlText, 'application/xml');
-  const bodyEls = xdoc.getElementsByTagName('w:body');
-  if(!bodyEls.length) throw new Error('Could not read document body.');
-  const body = bodyEls[0];
-
-  const items = [];
-  for(const node of Array.from(body.childNodes)){
-    if(node.nodeName === 'w:p'){
-      items.push({type:'para', text: paraText(node)});
-    } else if(node.nodeName === 'w:tbl'){
-      items.push({type:'table', rows: tableRows(node)});
-    }
-  }
-
-  // locate start marker: last heading-style paragraph mentioning "EXAM N" (covers "EXAM 9",
-  // "National Exam 9", "Mock National Exam 9", "Mock Exam 9", etc.). Only search the front of
-  // the document — these exams often repeat "Exam N" again as a footer near the very end, and
-  // matching that would wipe out the whole question block.
-  const PREAMBLE_SEARCH_WINDOW = 40;
-  let start = 0;
-  for(let idx=0; idx<Math.min(PREAMBLE_SEARCH_WINDOW, items.length); idx++){
-    const it = items[idx];
-    if(it.type==='para'){
-      const t = it.text.trim();
-      if(/exam\s*\d+/i.test(t) && t.length < 60){
-        start = idx+1;
-      }
-    }
-  }
-  // locate end marker: first "answer key" paragraph, or the first table if no such paragraph
-  // is found (some exams embed the "Answer Key" label inside the table itself)
-  let end = items.length;
-  for(let idx=start; idx<items.length; idx++){
-    if(items[idx].type==='para' && /answer\s*key|mock\s*exam/i.test(items[idx].text)){
-      end = idx; break;
-    }
-  }
-  if(end === items.length){
-    const firstTableIdx = items.findIndex((it,idx)=> idx>=start && it.type==='table');
-    if(firstTableIdx !== -1) end = firstTableIdx;
-  }
-
-  let pool = items.slice(start,end).filter(it=>it.type==='para' && it.text.trim()!=='').map(it=>it.text);
-  pool = pool.filter(p=>!/copyright|^\d+\s*of\s*\d+$|^answer sheet/i.test(p.trim()));
-  pool = pool.filter(p=>!isPreambleLine(p));
-  const cleaned = pool.map(cleanLine);
-
-  if(cleaned.length < 5) throw new Error('Could not find any questions in this document.');
-
-  const groups = [];
-  for(let i=0;i<cleaned.length;i+=5){
-    const g = cleaned.slice(i,i+5);
-    if(g.length===5) groups.push(g);
-  }
-
-  const keyMap = extractAnswerKey(items);
-
-  const questions = groups.map((g,i)=>{
-    const ansNum = keyMap[i+1];
-    const correct = (ansNum && ansNum>=1 && ansNum<=g.length-1) ? ansNum-1 : 0;
-    return { text: g[0], options: g.slice(1), correct, explanation: '' };
-  });
-
-  const title = detectExamTitle(items.filter(it=>it.type==='para').map(it=>it.text)) || file.name.replace(/\.docx$/i,'');
-  const missingKeyCount = groups.length - Object.keys(keyMap).filter(k=>k<=groups.length).length;
-  const keyNums = Object.keys(keyMap).map(Number);
-  const expectedTotal = keyNums.length ? Math.max(...keyNums) : null;
-  let message = `Parsed ${questions.length} question(s) into the text box below.`;
-  if(expectedTotal !== null && expectedTotal !== questions.length){
-    message += ` Heads up: the answer key goes up to #${expectedTotal}, but ${questions.length} question(s) were parsed — they're likely misaligned somewhere. Check the text box carefully before loading.`;
-  } else if(missingKeyCount>0){
-    message += ` ${missingKeyCount} may be missing an answer key match, please double check.`;
-  }
-  message += ' Review, then click "Load This Test".';
-
-  return { title, questions, message };
-}
-
-function paraText(pNode){
-  const texts = pNode.getElementsByTagName('w:t');
-  let s = '';
-  for(const t of Array.from(texts)) s += t.textContent;
-  return s.trim();
-}
-function tableRows(tblNode){
-  const rows = [];
-  for(const tr of Array.from(tblNode.getElementsByTagName('w:tr'))){
-    const row = [];
-    for(const tc of Array.from(tr.getElementsByTagName('w:tc'))){
-      const parts = [];
-      for(const p of Array.from(tc.getElementsByTagName('w:p'))){
-        parts.push(paraText(p));
-      }
-      row.push(parts.filter(Boolean).join(' '));
-    }
-    rows.push(row);
-  }
-  return rows;
-}
-
-/* scans document text for an "EXAM N" style heading and returns a short "Exam N" title, or null if none found */
-function detectExamTitle(textLines){
-  for(const line of textLines){
-    const m = line.match(/EXAM\s*#?\s*(\d+)/i);
-    if(m) return `Exam ${m[1]}`;
-  }
-  return null;
-}
-
-/* known front-matter phrases that show up in this course's exam preambles (legal notice,
-   advisory, contact info, timing note) — filtering these out directly is far more reliable
-   than guessing at generic "looks like prose" heuristics, since these are confirmed real
-   patterns rather than assumptions */
-const PREAMBLE_PHRASES = [
-  'legal notice', 'advisory -', 'contact information', 'individuals enrolled',
-  'the instructor makes no', 'ultimate success in passing', 'work schedule or other commitments',
-  'this is a timed exam', 'you have exactly', 'you may contact', 'review with me first',
-  'course is a 5-week', 'licensing course', 'solely responsible for licensing exam',
-  'copyright ©', 'all rights reserved', 'stan mucinic', 'yahoo.com', '561-255-8213',
-  'examprofessional.net'
-];
-function isPreambleLine(t){
-  const lower = t.toLowerCase();
-  return PREAMBLE_PHRASES.some(p => lower.includes(p));
-}
-
-function cleanLine(line){
-  let s = line.trim();
-  s = s.replace(/^-+\s*/, '');
-  s = s.replace(/^(\d{1,3})[\.,\)]\s+/, '');
-  s = s.replace(/^(\d{1,3})\s{2,}/, '');
-  return s.trim();
-}
-function extractAnswerKey(items){
-  const map = {};
-  const tables = items.filter(i=>i.type==='table').map(i=>i.rows);
-  for(const rows of tables){
-    let matchRows=0, total=0;
-    for(const row of rows){
-      if(row.length<2) continue;
-      total++;
-      const ans = row[1].trim();
-      if(/^\d+(\s+\d+)*$/.test(ans)) matchRows++;
-    }
-    if(total>0 && matchRows/total > 0.4){
-      for(const row of rows){
-        if(row.length<2) continue;
-        const itemNums = (row[0].match(/\d+/g)||[]);
-        const ansNums = (row[1].match(/\d+/g)||[]);
-        itemNums.forEach((n,i)=>{
-          const a = ansNums[i] !== undefined ? ansNums[i] : ansNums[0];
-          if(a) map[parseInt(n)] = parseInt(a);
-        });
-      }
-    }
-  }
-  return map;
-}
-function questionsToPasteFormat(questions){
-  const letters = ['1','2','3','4','5','6'];
-  return questions.map((q,i)=>{
-    let s = `${q.text}\n`;
-    q.options.forEach((o,oi)=>{ s += `${letters[oi]}) ${o}\n`; });
-    s += `ANSWER: ${letters[q.correct]}\n`;
-    return s;
-  }).join('\n');
-}
-
-/* ================= PDF (new test) upload & parsing ================= */
-async function parsePdfTestFile(file){
-  if(!window.pdfjsLib){ throw new Error('PDF reader library did not load. Check your network connection.'); }
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  const rows = await extractPdfRows(file);
-  if(!rows.length) throw new Error('Could not extract any text from this PDF — it may be a scanned/image-only document, which needs OCR (not supported).');
-
-  // locate start marker: last heading-style row mentioning "EXAM N". Only search the front of
-  // the document — these exams often repeat "Exam N" again as a footer near the very end.
-  const PREAMBLE_SEARCH_WINDOW = 40;
-  let start = 0;
-  for(let idx=0; idx<Math.min(PREAMBLE_SEARCH_WINDOW, rows.length); idx++){
-    const t = rows[idx].raw.trim();
-    if(/exam\s*\d+/i.test(t) && t.length < 60) start = idx+1;
-  }
-  // locate end marker
-  let end = rows.length;
-  for(let idx=start; idx<rows.length; idx++){
-    if(/answer\s*key|mock\s*exam/i.test(rows[idx].raw)){ end = idx; break; }
-  }
-
-  let pool = rows.slice(start,end).map(r=>r.raw).filter(t=>t.trim()!=='');
-  pool = pool.filter(p=>!/copyright|^\d+\s*of\s*\d+$|^answer sheet/i.test(p.trim()));
-  pool = pool.filter(p=>!isPreambleLine(p));
-  const cleaned = pool.map(cleanLine).filter(Boolean);
-
-  if(cleaned.length < 5) throw new Error('Could not find any questions in this PDF. It may not match the expected format.');
-
-  const groups = [];
-  for(let i=0;i<cleaned.length;i+=5){
-    const g = cleaned.slice(i,i+5);
-    if(g.length===5) groups.push(g);
-  }
-
-  const keyMap = extractAnswerKeyFromRows(rows.slice(end));
-
-  const questions = groups.map((g,i)=>{
-    const ansNum = keyMap[i+1];
-    const correct = (ansNum && ansNum>=1 && ansNum<=g.length-1) ? ansNum-1 : 0;
-    return { text: g[0], options: g.slice(1), correct, explanation: '' };
-  });
-
-  const title = detectExamTitle(rows.map(r=>r.raw)) || file.name.replace(/\.pdf$/i,'');
-  const missingKeyCount = groups.length - Object.keys(keyMap).filter(k=>k<=groups.length).length;
-  const keyNums = Object.keys(keyMap).map(Number);
-  const expectedTotal = keyNums.length ? Math.max(...keyNums) : null;
-  let message = `Parsed ${questions.length} question(s) into the text box below.`;
-  if(expectedTotal !== null && expectedTotal !== questions.length){
-    message += ` Heads up: the answer key goes up to #${expectedTotal}, but ${questions.length} question(s) were parsed — they're likely misaligned somewhere. Check the text box carefully before loading.`;
-  } else if(missingKeyCount>0){
-    message += ` ${missingKeyCount} may be missing an answer key match (PDF answer-key tables are harder to reconstruct than Word tables), please double check.`;
-  }
-  message += ' Review, then click "Load This Test".';
-
-  return { title, questions, message };
-}
-
-/* ================= combined test-file upload (.docx or .pdf) ================= */
-document.getElementById('testFileInput').onchange = async (e)=>{
-  const file = e.target.files[0];
-  const msg = document.getElementById('testFileMsg');
-  if(!file) return;
-  const ext = (file.name.split('.').pop() || '').toLowerCase();
-  msg.textContent = 'Parsing document…'; msg.className = 'msg';
-  try{
-    let result;
-    if(ext === 'docx'){
-      result = await parseDocxFile(file);
-    } else if(ext === 'pdf'){
-      result = await parsePdfTestFile(file);
-    } else {
-      throw new Error('Please upload a .docx or .pdf file.');
-    }
-    document.getElementById('titleInput').value = result.title;
-    document.getElementById('pasteArea').value = questionsToPasteFormat(result.questions);
-    msg.textContent = result.message;
-    msg.className = 'msg ok';
-  } catch(err){
-    msg.textContent = 'Could not parse this file: ' + err.message;
-    msg.className = 'msg err';
-  }
-};
-
-/* extracts text "rows" from a PDF, reconstructing rough table cells from x-position gaps */
-async function extractPdfRows(file){
-  const buf = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({data: buf}).promise;
-  const rows = [];
-  for(let p=1; p<=pdf.numPages; p++){
-    const page = await pdf.getPage(p);
-    const content = await page.getTextContent();
-    const items = content.items
-      .map(it=>({ str: it.str, x: it.transform[4], y: it.transform[5], w: it.width || 0 }))
-      .filter(it=>it.str.trim() !== '');
-    if(!items.length) continue;
-
-    const yTol = 2.5;
-    const lineGroups = [];
-    for(const it of items){
-      let grp = lineGroups.find(g=>Math.abs(g.y - it.y) < yTol);
-      if(!grp){ grp = { y: it.y, items: [] }; lineGroups.push(grp); }
-      grp.items.push(it);
-    }
-    lineGroups.sort((a,b)=>b.y - a.y); // top of page first
-
-    for(const grp of lineGroups){
-      grp.items.sort((a,b)=>a.x - b.x);
-      const cells = [];
-      let cur = null;
-      const gapThresh = 8;
-      for(const it of grp.items){
-        if(cur && (it.x - cur.endX) > gapThresh){ cells.push(cur); cur = null; }
-        if(!cur){ cur = { text: it.str, endX: it.x + it.w }; }
-        else { cur.text += (cur.text.endsWith(' ') ? '' : ' ') + it.str; cur.endX = it.x + it.w; }
-      }
-      if(cur) cells.push(cur);
-      const cellTexts = cells.map(c=>c.text.trim()).filter(Boolean);
-      if(cellTexts.length){
-        rows.push({ page: p, raw: cellTexts.join('  ').trim(), cells: cellTexts });
-      }
-    }
-  }
-  return rows;
-}
-
-/* reconstructs an answer-key map (item# -> answer#) from PDF rows using the first two cells of each row */
-function extractAnswerKeyFromRows(rows){
-  const map = {};
-  const candidates = rows.filter(r=>r.cells.length>=2);
-  candidates.forEach(r=>{
-    const itemNums = (r.cells[0].match(/\d+/g) || []);
-    const ansNums = (r.cells[1].match(/\d+/g) || []);
-    if(!itemNums.length || !ansNums.length) return;
-    itemNums.forEach((n,i)=>{
-      const a = ansNums[i] !== undefined ? ansNums[i] : ansNums[0];
-      if(a) map[parseInt(n,10)] = parseInt(a,10);
-    });
-  });
-  return map;
-}
-
-/* ================= paste-text parser (also used after docx pre-fill) ================= */
-function parseTestText(raw){
-  const lines = raw.replace(/\r/g,'').split('\n');
-  const blocks = [];
-  let cur = [];
-  for(const line of lines){
-    if(line.trim()===''){
-      if(cur.length){ blocks.push(cur); cur=[]; }
-    } else { cur.push(line); }
-  }
-  if(cur.length) blocks.push(cur);
-
-  const questions = [];
-  const optRe = /^\s*(?:[A-Fa-f1-6][\)\.\:-]|\-)\s*(.+)$/;
-  const ansRe = /^\s*ANSWER\s*:\s*(.+)$/i;
-
-  for(const block of blocks){
-    let qtext = null;
-    const opts = [];
-    let answerRaw = null;
-    for(const line of block){
-      const aMatch = line.match(ansRe);
-      if(aMatch){ answerRaw = aMatch[1].trim(); continue; }
-      const oMatch = line.match(optRe);
-      if(oMatch && qtext !== null){ opts.push(oMatch[1].trim()); continue; }
-      if(qtext === null){ qtext = line.replace(/^\s*\d+[\)\.]\s*/, '').trim(); }
-      else if(opts.length===0){ qtext += ' ' + line.trim(); }
-    }
-    if(qtext && opts.length>=2){
-      let correctIdx = -1;
-      if(answerRaw){
-        const numMatch = answerRaw.match(/^([1-6])[\)\.]?$/);
-        const letterMatch = answerRaw.match(/^([A-Fa-f])[\)\.]?$/);
-        if(numMatch){ correctIdx = parseInt(numMatch[1],10) - 1; }
-        else if(letterMatch){ correctIdx = letterMatch[1].toUpperCase().charCodeAt(0)-65; }
-        if(correctIdx<0 || correctIdx>=opts.length){
-          correctIdx = opts.findIndex(o=>o.toLowerCase().trim()===answerRaw.toLowerCase().trim());
-        }
-      }
-      questions.push({ text: qtext, options: opts, correct: correctIdx>=0?correctIdx:0, explanation: '' });
-    }
-  }
-  return questions;
-}
-
-document.getElementById('parseBtn').onclick = async ()=>{
-  const msg = document.getElementById('loadMsg');
-  const text = document.getElementById('pasteArea').value;
-  if(!text.trim()){ msg.textContent='Paste or upload some question text first.'; msg.className='msg err'; return; }
-  const qs = parseTestText(text);
-  if(qs.length===0){ msg.textContent='Could not find any properly formatted questions. Check the format guide above.'; msg.className='msg err'; return; }
-  const title = document.getElementById('titleInput').value.trim() || 'Custom Test';
-  try{
-    await beginTrackedAttempt({ title, subtitle: 'custom upload', questions: qs, examKey: 'custom:' + newCustomExamId() }, 'full', null);
-    msg.textContent = `Loaded ${qs.length} question(s).`;
-    msg.className = 'msg ok';
-  } catch(err){
-    msg.textContent = 'Could not load this test online: ' + err.message;
-    msg.className = 'msg err';
-  }
-};
 
 /* ================= SHARED: round/attempt funnel engine =================
    Pure functions, no DOM/network calls — a "round" is one full attempt at an
@@ -1523,8 +1267,18 @@ async function handleAuthSubmit(){
       const password = document.getElementById('authPassword').value;
       const turnstileToken = (window.turnstile && turnstileWidgetId!==null) ? window.turnstile.getResponse(turnstileWidgetId) : null;
       if(!turnstileToken){ throw new Error('Please complete the CAPTCHA challenge.'); }
-      const { error } = await supabaseClient.auth.signUp({ email, password, options: { captchaToken: turnstileToken } });
+      const { data, error } = await supabaseClient.auth.signUp({ email, password, options: { captchaToken: turnstileToken } });
       if(error) throw error;
+      /* Supabase never returns an error for a duplicate signup (anti-enumeration:
+         it won't reveal whether an email is registered) — it silently returns a
+         fake user object with no confirmation email sent instead. The one
+         documented signal for an already-confirmed account is an empty
+         identities array; an empty/undefined array on a brand-new signup would
+         mean something else broke, so this check only fires for the real
+         duplicate-account case. */
+      if(data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0){
+        throw new Error('An account with this email already exists. Try signing in instead.');
+      }
       authScreen = 'verify-notice';
       authMessage = email;
       renderAuthView();
@@ -1610,6 +1364,10 @@ async function handleDeleteAccount(){
   activeOnlineRound = null;
   activeOnlineAttempt = null;
   appMode = 'offline';
+  flashOnlineExams = null;
+  flashSelectedExamKeys = new Set();
+  flashProgressMsg = null;
+  flashPickSpecificOpen = false;
   document.getElementById('modeOfflineBtn').classList.add('active');
   document.getElementById('modeOnlineBtn').classList.remove('active');
   renderStatusBar();
@@ -1621,6 +1379,10 @@ async function handleSignOut(){
   await supabaseClient.auth.signOut();
   currentUser = null;
   authScreen = 'signin'; authError=''; authMessage='';
+  flashOnlineExams = null;
+  flashSelectedExamKeys = new Set();
+  flashProgressMsg = null;
+  flashPickSpecificOpen = false;
   renderStatusBar();
   showView('auth');
 }
@@ -1652,6 +1414,7 @@ document.getElementById('modeOfflineBtn').onclick = ()=>{
 };
 document.getElementById('modeOnlineBtn').onclick = ()=>{
   appMode = 'online';
+  flashOnlineExams = null; // re-fetch so any rounds finished since last visit show up
   document.getElementById('modeOnlineBtn').classList.add('active');
   document.getElementById('modeOfflineBtn').classList.remove('active');
   if(!currentUser){
@@ -2165,7 +1928,7 @@ function renderEmptyState(){
   quizPanel.innerHTML = `
     <div style="text-align:center;padding:34px 10px;">
       <div class="qtext" style="margin-bottom:10px;">Choose a test to begin</div>
-      <div class="sub" style="margin-bottom:22px;">Pick one of the 25 exams in the Test Library, or add your own on the "Load / Upload a Test" tab.</div>
+      <div class="sub" style="margin-bottom:22px;">Pick one of the 25 exams in the Test Library.</div>
       <button class="btn btn-primary" id="goToLibraryBtn">Test Library</button>
     </div>
   `;
