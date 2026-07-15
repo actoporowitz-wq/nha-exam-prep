@@ -192,6 +192,10 @@ let flashOnlineLoading = false;
 let flashSelectedExamKeys = new Set();
 let flashProgressMsg = null; // { text, ok } | null
 let flashPickSpecificOpen = false;
+let flashOnlineAttempts = null; // null = not yet loaded; [] | [{attemptId,examTitle,roundNumber,attemptNumber,scope,correctCount,totalQuestions}]
+let flashAttemptsLoading = false;
+let flashSelectedAttemptIds = new Set();
+let flashPickAttemptsOpen = false;
 
 /* ================= elements ================= */
 const quizPanel = document.getElementById('quizPanel');
@@ -243,7 +247,10 @@ function showView(v){
     /* Always refetch on entry (mirrors renderProgressView's unconditional
        refetch below) so a just-finished exam shows up immediately without
        needing a manual page reload or a mode toggle to invalidate a cache. */
-    if(appMode==='online' && currentUser && !flashOnlineLoading) loadFlashOnlineExams();
+    if(appMode==='online' && currentUser){
+      if(!flashOnlineLoading) loadFlashOnlineExams();
+      if(!flashAttemptsLoading) loadFlashOnlineAttempts();
+    }
   }
   if(v==='library') renderLibrary();
   if(v==='auth') renderAuthView();
@@ -804,6 +811,29 @@ async function loadFlashOnlineExams(){
   }
 }
 
+/* Shared by every generation path below (all progress / specific exams /
+   specific attempts) — the only thing that differs between them is which
+   attempt_id list gets passed in. */
+async function buildFlashcardsFromAttemptIds(attemptIds, scopeMsg){
+  if(!attemptIds.length) throw new Error('No completed attempts found — nothing to build flashcards from yet.');
+  const { data: rows, error: ansErr } = await supabaseClient.from('exam_attempt_answers')
+    .select('*').in('attempt_id', attemptIds);
+  if(ansErr) throw ansErr;
+  const tally = new Map();
+  rows.forEach(r=>{
+    if(r.selected_option===null || r.selected_option===undefined) return;
+    if(r.selected_option === r.correct_option) return;
+    const key = r.question_text.trim().toLowerCase();
+    if(tally.has(key)) tally.get(key).count++;
+    else tally.set(key, { text: r.question_text, options: r.options, correct: r.correct_option, count: 1 });
+  });
+  if(tally.size === 0) throw new Error('No missed questions found — nothing to build flashcards from.');
+  flashcards = Array.from(tally.values()).sort((a,b)=>b.count - a.count);
+  flashIndex = 0;
+  flashFlipped = false;
+  flashProgressMsg = { text: `Built ${flashcards.length} flashcard(s) from ${attemptIds.length} completed attempt(s) ${scopeMsg}.`, ok:true };
+}
+
 async function generateFlashcardsFromOnlineProgress(examKeys){
   /* examKeys === null means "every test" — no exam filter at all, so nothing
      about this path is limited to picking a test first. A non-null array is
@@ -825,24 +855,63 @@ async function generateFlashcardsFromOnlineProgress(examKeys){
     const { data: attempts, error: aErr } = await supabaseClient.from('exam_attempts')
       .select('id').in('round_id', rounds.map(r=>r.id)).eq('status','completed');
     if(aErr) throw aErr;
-    if(!attempts.length) throw new Error('No completed attempts found — nothing to build flashcards from yet.');
-    const { data: rows, error: ansErr } = await supabaseClient.from('exam_attempt_answers')
-      .select('*').in('attempt_id', attempts.map(a=>a.id));
-    if(ansErr) throw ansErr;
-    const tally = new Map();
-    rows.forEach(r=>{
-      if(r.selected_option===null || r.selected_option===undefined) return;
-      if(r.selected_option === r.correct_option) return;
-      const key = r.question_text.trim().toLowerCase();
-      if(tally.has(key)) tally.get(key).count++;
-      else tally.set(key, { text: r.question_text, options: r.options, correct: r.correct_option, count: 1 });
-    });
-    if(tally.size === 0) throw new Error('No missed questions found — nothing to build flashcards from.');
-    flashcards = Array.from(tally.values()).sort((a,b)=>b.count - a.count);
-    flashIndex = 0;
-    flashFlipped = false;
-    const scopeMsg = scoped ? `across ${examKeys.length} exam(s)` : 'across all your exams';
-    flashProgressMsg = { text: `Built ${flashcards.length} flashcard(s) from ${attempts.length} completed attempt(s) ${scopeMsg}.`, ok:true };
+    await buildFlashcardsFromAttemptIds(attempts.map(a=>a.id), scoped ? `across ${examKeys.length} exam(s)` : 'across all your exams');
+  } catch(err){
+    flashProgressMsg = { text: err.message, ok:false };
+  }
+  renderFlashcard();
+}
+
+/* ================= online flashcards: pick individual attempts =================
+   Finer-grained than the exam-level picker above — lets you combine, say,
+   just the missed-only retake from Exam 1's round 2 with the full attempt
+   from Exam 3's round 1, rather than being stuck pulling every attempt of
+   whichever exam(s) you check. */
+async function loadFlashOnlineAttempts(){
+  flashAttemptsLoading = true;
+  renderFlashcard();
+  try{
+    const { data: rounds, error: rErr } = await supabaseClient.from('exam_rounds')
+      .select('id, exam_title, round_number').eq('user_id', currentUser.id);
+    if(rErr) throw rErr;
+    if(!rounds.length){ flashOnlineAttempts = []; return; }
+    const roundMap = new Map(rounds.map(r=>[r.id, r]));
+    const { data: attempts, error: aErr } = await supabaseClient.from('exam_attempts')
+      .select('id, round_id, attempt_number, attempt_scope, correct_count, total_questions')
+      .in('round_id', rounds.map(r=>r.id)).eq('status','completed').order('attempt_number');
+    if(aErr) throw aErr;
+    flashOnlineAttempts = attempts.map(a=>{
+      const round = roundMap.get(a.round_id) || { exam_title: 'Unknown exam', round_number: '?' };
+      return {
+        attemptId: a.id,
+        examTitle: round.exam_title,
+        roundNumber: round.round_number,
+        attemptNumber: a.attempt_number,
+        scope: a.attempt_scope,
+        correctCount: a.correct_count,
+        totalQuestions: a.total_questions
+      };
+    }).sort((a,b)=> a.examTitle.localeCompare(b.examTitle) || a.roundNumber - b.roundNumber || a.attemptNumber - b.attemptNumber);
+    flashSelectedAttemptIds = new Set(flashOnlineAttempts.map(a=>a.attemptId));
+  } catch(err){
+    flashOnlineAttempts = [];
+    flashProgressMsg = { text: 'Could not load your attempts: ' + err.message, ok:false };
+  } finally {
+    flashAttemptsLoading = false;
+    renderFlashcard();
+  }
+}
+
+async function generateFlashcardsFromSelectedAttempts(attemptIds){
+  if(!attemptIds.length){
+    flashProgressMsg = { text: 'Select at least one attempt first.', ok:false };
+    renderFlashcard();
+    return;
+  }
+  flashProgressMsg = { text: 'Generating flashcards from your progress…', ok:true };
+  renderFlashcard();
+  try{
+    await buildFlashcardsFromAttemptIds(attemptIds, `from the ${attemptIds.length} attempt(s) selected`);
   } catch(err){
     flashProgressMsg = { text: err.message, ok:false };
   }
@@ -879,14 +948,48 @@ function renderOnlineFlashGeneratorHtml(){
           </div>
         </div>
       ` : ''}
+      <div style="margin-top:10px;">
+        <button class="link-btn" id="flashToggleAttemptsBtn" type="button">${flashPickAttemptsOpen ? 'Hide' : 'Or pick specific attempts'}</button>
+      </div>
+      ${flashPickAttemptsOpen ? renderAttemptPickerHtml() : ''}
       ${flashProgressMsg ? `<div class="msg ${flashProgressMsg.ok?'ok':'err'}">${escapeHtml(flashProgressMsg.text)}</div>` : ''}
     `;
   }
   return `
     <div class="panel subsection">
       <h2>Generate flashcards from your progress</h2>
-      <div class="format-help">Pulls every question you've ever missed — on any attempt, at any stage of any round's funnel, across every test — into one set (most-missed first). No PDFs needed, and no need to pick a test first; picking specific exams below is optional.</div>
+      <div class="format-help">Pulls every question you've ever missed — on any attempt, at any stage of any round's funnel, across every test — into one set (most-missed first). No PDFs needed, and no need to pick a test first; picking specific exams or individual attempts below is optional.</div>
       ${inner}
+    </div>
+  `;
+}
+
+function renderAttemptPickerHtml(){
+  if(flashAttemptsLoading){
+    return `<div class="format-help" style="margin-top:8px;">Loading your attempts…</div>`;
+  }
+  if(!flashOnlineAttempts || !flashOnlineAttempts.length){
+    return `<div class="format-help" style="margin-top:8px;">No completed attempts yet.</div>`;
+  }
+  const rows = flashOnlineAttempts.map(a=>{
+    const scopeLabel = a.scope==='full' ? 'full exam' : 'missed-only retake';
+    return `
+      <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-family:system-ui,sans-serif;font-size:.9rem;">
+        <input type="checkbox" data-flash-attempt="${escapeHtml(a.attemptId)}" ${flashSelectedAttemptIds.has(a.attemptId)?'checked':''}>
+        ${escapeHtml(a.examTitle)} — Round ${escapeHtml(String(a.roundNumber))}, Attempt ${escapeHtml(String(a.attemptNumber))} (${scopeLabel}) — ${a.correctCount}/${a.totalQuestions}
+      </label>
+    `;
+  }).join('');
+  return `
+    <div style="margin-top:8px;">
+      <div style="display:flex;gap:14px;margin-bottom:8px;">
+        <button class="link-btn" id="flashSelectAllAttemptsBtn" type="button">Select all</button>
+        <button class="link-btn" id="flashSelectNoneAttemptsBtn" type="button">Clear</button>
+      </div>
+      ${rows}
+      <div style="margin-top:10px;">
+        <button class="btn btn-ghost" id="flashGenerateAttemptsBtn">Generate from Selected Attempts</button>
+      </div>
     </div>
   `;
 }
@@ -906,6 +1009,21 @@ function bindFlashGeneratorHandlers(){
     cb.onchange = ()=>{
       const key = cb.dataset.flashExam;
       if(cb.checked) flashSelectedExamKeys.add(key); else flashSelectedExamKeys.delete(key);
+    };
+  });
+
+  const toggleAttemptsBtn = document.getElementById('flashToggleAttemptsBtn');
+  const selAllAttemptsBtn = document.getElementById('flashSelectAllAttemptsBtn');
+  const selNoneAttemptsBtn = document.getElementById('flashSelectNoneAttemptsBtn');
+  const genAttemptsBtn = document.getElementById('flashGenerateAttemptsBtn');
+  if(toggleAttemptsBtn) toggleAttemptsBtn.onclick = ()=>{ flashPickAttemptsOpen = !flashPickAttemptsOpen; renderFlashcard(); };
+  if(selAllAttemptsBtn) selAllAttemptsBtn.onclick = ()=>{ flashSelectedAttemptIds = new Set((flashOnlineAttempts||[]).map(a=>a.attemptId)); renderFlashcard(); };
+  if(selNoneAttemptsBtn) selNoneAttemptsBtn.onclick = ()=>{ flashSelectedAttemptIds = new Set(); renderFlashcard(); };
+  if(genAttemptsBtn) genAttemptsBtn.onclick = ()=> generateFlashcardsFromSelectedAttempts(Array.from(flashSelectedAttemptIds));
+  flashPanel.querySelectorAll('[data-flash-attempt]').forEach(cb=>{
+    cb.onchange = ()=>{
+      const id = cb.dataset.flashAttempt;
+      if(cb.checked) flashSelectedAttemptIds.add(id); else flashSelectedAttemptIds.delete(id);
     };
   });
 }
@@ -1371,6 +1489,9 @@ async function handleDeleteAccount(){
   flashSelectedExamKeys = new Set();
   flashProgressMsg = null;
   flashPickSpecificOpen = false;
+  flashOnlineAttempts = null;
+  flashSelectedAttemptIds = new Set();
+  flashPickAttemptsOpen = false;
   document.getElementById('modeOfflineBtn').classList.add('active');
   document.getElementById('modeOnlineBtn').classList.remove('active');
   renderStatusBar();
@@ -1386,6 +1507,9 @@ async function handleSignOut(){
   flashSelectedExamKeys = new Set();
   flashProgressMsg = null;
   flashPickSpecificOpen = false;
+  flashOnlineAttempts = null;
+  flashSelectedAttemptIds = new Set();
+  flashPickAttemptsOpen = false;
   renderStatusBar();
   showView('auth');
 }
