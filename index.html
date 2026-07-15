@@ -240,7 +240,10 @@ function showView(v){
   if(v==='quiz' && submitted) renderResults();
   if(v==='flash'){
     renderFlashcard();
-    if(appMode==='online' && currentUser && flashOnlineExams===null && !flashOnlineLoading) loadFlashOnlineExams();
+    /* Always refetch on entry (mirrors renderProgressView's unconditional
+       refetch below) so a just-finished exam shows up immediately without
+       needing a manual page reload or a mode toggle to invalidate a cache. */
+    if(appMode==='online' && currentUser && !flashOnlineLoading) loadFlashOnlineExams();
   }
   if(v==='library') renderLibrary();
   if(v==='auth') renderAuthView();
