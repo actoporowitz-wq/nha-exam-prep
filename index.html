@@ -1401,11 +1401,9 @@ document.getElementById('loadProgressInput').onchange = async (e)=>{
    The service_role key must never appear in this file. */
 const SUPABASE_URL = 'https://sqllojnaofvmqypeerfu.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNxbGxvam5hb2Z2bXF5cGVlcmZ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5OTk0ODYsImV4cCI6MjA5OTU3NTQ4Nn0.G72QJR5ppUilErzQs1q6eWW5JUnOGUewQgf8NY_4HMY';
-/* Cloudflare's official public "always passes" dev test key (documented at
-   developers.cloudflare.com/turnstile/troubleshooting/testing) — works on
-   any domain including localhost with zero widget setup. Swap for a real
-   Turnstile widget's site key before deploying anywhere beyond local dev. */
-const TURNSTILE_SITE_KEY = '1x00000000000000000000AA';
+/* Real Turnstile widget ("NHA Exam Prep"), scoped to nha-exam-prep.pages.dev
+   and localhost in the Cloudflare dashboard. */
+const TURNSTILE_SITE_KEY = '0x4AAAAAAD2sW9Vf3k0VKwOZ';
 
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
