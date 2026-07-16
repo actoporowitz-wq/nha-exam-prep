@@ -728,6 +728,18 @@ async function extractRetakeDataFromPdf(file){
 }
 
 /* ================= retake from uploaded PDF ================= */
+/* PDFs generated before examKey was added to the payload (or a retake
+   chain descended from one of those) carry no exam key at all -- but they
+   still carry the exam's title, which is enough to recover the key by
+   matching against the library instead of treating the file as permanently
+   untrackable. "Retake — Exam N" titles get the prefix stripped first. */
+function resolveExamKeyFallback(data){
+  if(data.examKey) return data.examKey;
+  const title = (data.title || '').replace(/^Retake\s*[—–-]\s*/, '').trim();
+  const libEntry = EXAM_LIBRARY.find(le=>le.title===title);
+  return libEntry ? 'lib:' + slugify(libEntry.title) : null;
+}
+
 /* Shared by the single-file "retake now" upload (pdfInput) and the
    multi-file Progress-tab backfill import: finds/creates the exact round a
    PDF names and records the historical attempt it documents (real totals
@@ -735,14 +747,15 @@ async function extractRetakeDataFromPdf(file){
    Does NOT create the next live attempt or navigate anywhere; callers that
    want to start playing do that themselves with the returned round. */
 async function reconstructAttemptFromPdfData(data){
-  if(!data.examKey) return { skipped: true, reason: 'no exam key (custom/uploaded test, not trackable in Progress)' };
+  const examKey = resolveExamKeyFallback(data);
+  if(!examKey) return { skipped: true, reason: "no exam key, and title didn't match a library exam (custom/uploaded test, not trackable in Progress)" };
   const roundNumber = data.round || 1;
-  const libEntry = data.examKey.startsWith('lib:') ? EXAM_LIBRARY.find(le=>'lib:'+slugify(le.title)===data.examKey) : null;
+  const libEntry = examKey.startsWith('lib:') ? EXAM_LIBRARY.find(le=>'lib:'+slugify(le.title)===examKey) : null;
   const originalTotal = libEntry ? libEntry.questions.length : data.questions.length;
 
-  let round = await onlineStore.findRoundByNumber(data.examKey, roundNumber);
+  let round = await onlineStore.findRoundByNumber(examKey, roundNumber);
   if(!round){
-    round = await onlineStore.createRoundWithNumber(data.examKey, data.title || 'Missed Questions', originalTotal, roundNumber);
+    round = await onlineStore.createRoundWithNumber(examKey, data.title || 'Missed Questions', originalTotal, roundNumber);
   }
 
   const thisAttemptNumber = data.attempt || 1;
@@ -779,7 +792,8 @@ document.getElementById('pdfInput').onchange = async (e)=>{
        won't have `total`/`correctCount` embedded for the attempt they
        document -- that attempt is left unrecorded rather than guessed at,
        and shows as a gap in Progress instead of a fabricated score. */
-    if(appMode === 'online' && currentUser && data.examKey){
+    const resolvedExamKey = resolveExamKeyFallback(data);
+    if(appMode === 'online' && currentUser && resolvedExamKey){
       const result = await reconstructAttemptFromPdfData(data);
       const { round, thisAttemptNumber, sourceAttempt, hadGap, originalTotal } = result;
       const roundNumber = round.round_number;
@@ -800,9 +814,10 @@ document.getElementById('pdfInput').onchange = async (e)=>{
       round.funnel_missed_count = data.questions.length;
       if(mastered){ round.status = 'mastered'; }
 
-      loadExam({ title: 'Retake — ' + (data.title || 'Missed Questions'), subtitle: data.questions.length + ' previously missed', questions: data.questions, examKey: data.examKey }, nextAttempt);
+      loadExam({ title: 'Retake — ' + (data.title || 'Missed Questions'), subtitle: data.questions.length + ' previously missed', questions: data.questions, examKey: resolvedExamKey }, nextAttempt);
       msg.textContent = `Loaded ${data.questions.length} previously missed question(s) — this is attempt #${nextAttempt} of round ${roundNumber}.`
-        + (hadGap ? ` (Attempt #${thisAttemptNumber}'s own results weren't in this file, so it'll show as "not uploaded" in Progress.)` : '');
+        + (hadGap ? ` (Attempt #${thisAttemptNumber}'s own results weren't in this file, so it'll show as "not uploaded" in Progress.)` : '')
+        + (!data.examKey ? ` (This PDF predated exam-key tracking — recovered it from the title, "${data.title}".)` : '');
       msg.className = 'msg ok';
       return;
     }
