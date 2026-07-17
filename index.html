@@ -2166,10 +2166,21 @@ function renderProgressPanel(){
              how many were still missed after that attempt. */
           const stillMissedAfter = a.total_questions - a.correct_count;
           const cumulativePct = ((r.original_total - stillMissedAfter) / r.original_total * 100).toFixed(1);
+          /* Review/Download need a full per-question snapshot, which only
+             ever exists for an attempt actually PLAYED in the app (live, or
+             via Continue). An attempt recorded straight from an uploaded
+             PDF's summary never has one -- PDFs only ever carry "still
+             missed going forward", never a full right/wrong record of every
+             question in that specific attempt -- so this isn't a bug to fix,
+             but silently omitting both buttons with no explanation reads as
+             one. Say so explicitly instead of leaving a blank space. */
+          const noReviewNote = (a.status==='completed' && !a.hasAnswers)
+            ? `<span class="lib-meta" style="font-size:.78rem;">from an uploaded PDF — no detailed review available</span>` : '';
           html += `
             <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-family:system-ui,sans-serif;font-size:.85rem;">
               <span>Attempt ${a.attempt_number} (${a.attempt_scope==='full'?'full exam':'missed-only retake'}) — ${a.correct_count}/${a.total_questions}${a.status==='completed' ? ` (${cumulativePct}% cumulative)` : ' · in progress'}</span>
-              <span style="display:flex;gap:12px;">
+              <span style="display:flex;gap:12px;align-items:center;">
+                ${noReviewNote}
                 ${(a.status==='completed' && a.hasAnswers) ? `<button class="link-btn" data-review-attempt="${a.id}" data-exam-key="${escapeHtml(r.exam_key)}">Review</button>` : ''}
                 ${(a.status==='completed' && a.hasAnswers) ? `<button class="link-btn" data-download-attempt="${a.id}" data-round-id="${r.id}">Download PDF</button>` : ''}
                 <button class="link-btn" style="color:#b3401f;" data-delete-attempt="${a.id}" data-round-id="${r.id}" data-attempt-number="${a.attempt_number}">Delete</button>
