@@ -674,10 +674,18 @@ function generateAnswerSheetPdf(missedIdx, correctCount, total, pct, dateStr, at
       doc.setFontSize(8);
       doc.text('Upload this PDF back into the Exam Practice Tool to retake just the questions below.', 15, 24);
 
+      /* selected (the wrong answer actually picked, or null if left blank)
+         lets a later PDF import reconstruct a real per-question review for
+         THIS attempt -- not just its next-attempt question set -- since
+         missedIdx is already exactly this attempt's own missed subset.
+         Explicit null rather than omitting the key: JSON.stringify drops
+         undefined-valued keys entirely, which would make old- and
+         new-format PDFs indistinguishable on the way back in. */
       const missedQuestions = missedIdx.map(i=>({
         text: activeExam.questions[i].text,
         options: activeExam.questions[i].options,
         correct: activeExam.questions[i].correct,
+        selected: activeAnswers[i] !== undefined ? activeAnswers[i] : null,
         originalNumber: activeExam.questions[i].originalNumber || (i+1)
       }));
       const payload = JSON.stringify({ title: activeExam.title, attempt: attemptNum, round: roundNumber || null, total, correctCount, examKey: activeExam.examKey || null, questions: missedQuestions });
@@ -797,6 +805,19 @@ async function reconstructAttemptFromPdfData(data){
       recorded = true;
     } else {
       hadGap = true; // truly can't be derived -- the attempt before this one was never recorded either
+    }
+  }
+  /* Backfill Review data for this specific attempt whenever the PDF actually
+     carries it (every missed question has a `selected` field -- PDFs from
+     before this feature won't) and it isn't already there. Runs whether
+     sourceAttempt was just recorded above or already existed from an
+     earlier import, so re-uploading an old PDF through Progress after this
+     feature shipped is enough to gain Review for it retroactively. */
+  if(sourceAttempt && data.questions.length && data.questions.every(q=>q.selected !== undefined)){
+    const { count } = await supabaseClient.from('exam_attempt_answers')
+      .select('id', { count: 'exact', head: true }).eq('attempt_id', sourceAttempt.id);
+    if(!count){
+      await onlineStore.insertMissedOnlyAnswerRows(sourceAttempt.id, data.questions);
     }
   }
   return { round, thisAttemptNumber, sourceAttempt, recorded, hadGap, originalTotal, stillMissed: data.questions.length };
@@ -1707,6 +1728,25 @@ const onlineStore = {
     if(insErr) throw insErr;
     return attempt;
   },
+  /* Backfills row-level review data for an attempt that was already
+     recorded as a totals-only summary (recordCompletedAttemptSummary, from
+     an uploaded PDF) -- only ever the attempt's own MISSED subset, since
+     that's all a PDF ever carries (see generateAnswerSheetPdf's `selected`
+     field). Not a full per-question snapshot: question_index here is just
+     positional within this missed set, not the original exam's numbering
+     (original_number carries that separately) -- fine for Review, which
+     only ever needs to list what's here, but NOT sufficient to regenerate
+     the full answer-sheet grid (see downloadAttemptPdfFromProgress). */
+  async insertMissedOnlyAnswerRows(attemptId, questions){
+    const rows = questions.map((q,i)=>({
+      attempt_id: attemptId, user_id: currentUser.id, question_index: i,
+      question_text: q.text, options: q.options, correct_option: q.correct,
+      explanation: q.explanation || '', original_number: q.originalNumber || (i+1),
+      selected_option: (q.selected===undefined || q.selected===null) ? null : q.selected, flagged: false
+    }));
+    const { error } = await supabaseClient.from('exam_attempt_answers').insert(rows);
+    if(error) throw error;
+  },
   async discardAttempt(attemptId){
     const { error } = await supabaseClient.from('exam_attempts').delete().eq('id', attemptId);
     if(error) throw error;
@@ -2048,28 +2088,34 @@ async function renderProgressView(){
       .select('*').eq('user_id', currentUser.id).order('exam_title').order('round_number');
     if(roundsErr) throw roundsErr;
     let attempts = [];
-    let attemptIdsWithAnswers = new Set();
+    let answerCountByAttempt = {};
     if(rounds.length){
       const { data: attemptRows, error: attErr } = await supabaseClient.from('exam_attempts')
         .select('*').in('round_id', rounds.map(r=>r.id)).order('attempt_number');
       if(attErr) throw attErr;
       attempts = attemptRows;
       if(attempts.length){
-        /* Attempts reconstructed from an uploaded PDF (recordCompletedAttemptSummary)
-           have no per-question rows -- only a real, live-played attempt does. Used to
-           hide "Review" where there's genuinely nothing to review, rather than showing
-           a misleading "Perfect score" for an attempt that actually had missed questions. */
-        const { data: answerAttemptIds, error: ansErr } = await supabaseClient.from('exam_attempt_answers')
+        /* Attempts reconstructed from an uploaded PDF's totals-only summary
+           (recordCompletedAttemptSummary) have no per-question rows at all;
+           newer PDFs can backfill a MISSED-ONLY subset (see
+           insertMissedOnlyAnswerRows) -- enough for Review, but row count
+           short of total_questions means the full answer-sheet grid can't
+           be faithfully redrawn, so Download PDF needs the stricter
+           hasFullAnswers check while Review only needs hasAnswers. */
+        const { data: answerRows, error: ansErr } = await supabaseClient.from('exam_attempt_answers')
           .select('attempt_id').in('attempt_id', attempts.map(a=>a.id));
         if(ansErr) throw ansErr;
-        attemptIdsWithAnswers = new Set(answerAttemptIds.map(r=>r.attempt_id));
+        answerRows.forEach(r=>{ answerCountByAttempt[r.attempt_id] = (answerCountByAttempt[r.attempt_id]||0) + 1; });
       }
     }
     const examsMap = {};
     rounds.forEach(r=>{
       if(!examsMap[r.exam_key]) examsMap[r.exam_key] = { examKey: r.exam_key, examTitle: r.exam_title, rounds: [] };
       const roundAttempts = attempts.filter(a=>a.round_id===r.id)
-        .map(a=>({ ...a, hasAnswers: attemptIdsWithAnswers.has(a.id) }));
+        .map(a=>{
+          const answerCount = answerCountByAttempt[a.id] || 0;
+          return { ...a, hasAnswers: answerCount > 0, hasFullAnswers: answerCount === a.total_questions };
+        });
       examsMap[r.exam_key].rounds.push({ ...r, attempts: roundAttempts });
     });
     progressData = {
@@ -2172,14 +2218,17 @@ function renderProgressPanel(){
              how many were still missed after that attempt. */
           const stillMissedAfter = a.total_questions - a.correct_count;
           const cumulativePct = ((r.original_total - stillMissedAfter) / r.original_total * 100).toFixed(1);
-          /* Review/Download need a full per-question snapshot, which only
-             ever exists for an attempt actually PLAYED in the app (live, or
-             via Continue). An attempt recorded straight from an uploaded
-             PDF's summary never has one -- PDFs only ever carry "still
-             missed going forward", never a full right/wrong record of every
-             question in that specific attempt -- so this isn't a bug to fix,
-             but silently omitting both buttons with no explanation reads as
-             one. Say so explicitly instead of leaving a blank space. */
+          /* Review only needs SOME row data -- a PDF-reconstructed attempt
+             can have a missed-only subset backfilled (see
+             insertMissedOnlyAnswerRows), which is exactly what "Review
+             Missed Only" needs. Download PDF needs the FULL set, since the
+             answer-sheet grid has to place every original question, and a
+             missed-only subset can't be blown back up into that -- gated on
+             hasFullAnswers, not just hasAnswers. An attempt recorded from a
+             PDF that predates the `selected`-field embedding (see
+             generateAnswerSheetPdf) has neither and truly has nothing to
+             show, which is worth saying explicitly rather than leaving
+             blank space where buttons would otherwise be. */
           const noReviewNote = (a.status==='completed' && !a.hasAnswers)
             ? `<span class="lib-meta" style="font-size:.78rem;">from an uploaded PDF — no detailed review available</span>` : '';
           html += `
@@ -2188,7 +2237,7 @@ function renderProgressPanel(){
               <span style="display:flex;gap:12px;align-items:center;">
                 ${noReviewNote}
                 ${(a.status==='completed' && a.hasAnswers) ? `<button class="link-btn" data-review-attempt="${a.id}" data-exam-key="${escapeHtml(r.exam_key)}">Review</button>` : ''}
-                ${(a.status==='completed' && a.hasAnswers) ? `<button class="link-btn" data-download-attempt="${a.id}" data-round-id="${r.id}">Download PDF</button>` : ''}
+                ${(a.status==='completed' && a.hasFullAnswers) ? `<button class="link-btn" data-download-attempt="${a.id}" data-round-id="${r.id}">Download PDF</button>` : ''}
                 <button class="link-btn" style="color:#b3401f;" data-delete-attempt="${a.id}" data-round-id="${r.id}" data-attempt-number="${a.attempt_number}">Delete</button>
               </span>
             </div>
