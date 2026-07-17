@@ -2119,9 +2119,15 @@ function renderProgressPanel(){
          right after reconstructing a round's latest historical attempt, so
          PDF-only rounds become continuable too, not just ones played
          natively. Continue then either builds the NEXT attempt (completed
-         case) or just resumes the staged/interrupted one (in-progress case). */
+         case) or just resumes the staged/interrupted one (in-progress case).
+         Abandoned rounds are included too -- "Retake Full Exam" abandons
+         whatever round was active to start a fresh one, even if that round
+         still had missed questions left; that shouldn't permanently lock it
+         out of ever being finished off, just because a *different*, newer
+         round exists (mastered or not). continueRoundFromProgress() flips
+         status back to in_progress once you actually pick this back up. */
       const latestAttempt = r.attempts.length ? r.attempts.reduce((a,b)=> a.attempt_number > b.attempt_number ? a : b) : null;
-      const canContinue = r.status==='in_progress' && latestAttempt && latestAttempt.hasAnswers &&
+      const canContinue = (r.status==='in_progress' || r.status==='abandoned') && latestAttempt && latestAttempt.hasAnswers &&
         (latestAttempt.status==='completed' ? r.funnel_missed_count > 0 : true);
       html += `
         <div class="lib-row" style="flex-direction:column;align-items:stretch;">
@@ -2423,6 +2429,13 @@ function deleteAttemptFromProgress(attemptId, attemptNumber, round){
 async function continueRoundFromProgress(round){
   const msg = document.getElementById('progressImportMsg');
   try{
+    /* Picking this back up is exactly what "abandoned" should stop meaning
+       once you do it -- clear it before anything else so the round doesn't
+       sit labeled "(abandoned)" in Progress while actively being played. */
+    if(round.status === 'abandoned'){
+      await onlineStore.updateRound(round.id, round.funnel_missed_count, false, null);
+      round.status = 'in_progress';
+    }
     const maxNum = await onlineStore.maxAttemptNumber(round.id);
     if(!maxNum) throw new Error('No attempts to continue from.');
     const latest = await onlineStore.findAttemptByNumber(round.id, maxNum);
