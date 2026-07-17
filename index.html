@@ -533,8 +533,14 @@ function escapeHtml(s){
 const RETAKE_BEGIN = "###RETAKE-DATA-BEGIN###";
 const RETAKE_END = "###RETAKE-DATA-END###";
 
-function generateAnswerSheetPdf(missedIdx, correctCount, total, pct, dateStr, attemptNum, roundNumber){
-  const genMsg = document.getElementById('pdfGenMsg');
+/* examOverride/answersOverride/msgElId let a past, no-longer-loaded attempt
+   (e.g. redownloaded from the Progress tab) reuse this exact PDF layout
+   without first faking a full loadExam() -- default to the live in-memory
+   exam/answers/#pdfGenMsg used by the just-finished results screen. */
+function generateAnswerSheetPdf(missedIdx, correctCount, total, pct, dateStr, attemptNum, roundNumber, examOverride, answersOverride, msgElId){
+  const activeExam = examOverride || exam;
+  const activeAnswers = answersOverride || answers;
+  const genMsg = document.getElementById(msgElId || 'pdfGenMsg');
   try{
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ unit:'mm', format:'letter' });
@@ -545,7 +551,7 @@ function generateAnswerSheetPdf(missedIdx, correctCount, total, pct, dateStr, at
     function drawHeader(){
       doc.setFont('helvetica','bold');
       doc.setFontSize(13);
-      doc.text(`Answer Sheet \u2013 ${exam.title}`, 15, 16);
+      doc.text(`Answer Sheet \u2013 ${activeExam.title}`, 15, 16);
       doc.setFont('helvetica','normal');
       doc.setFontSize(10);
       const roundLabel = roundNumber ? `Round: ${roundNumber}      ` : '';
@@ -585,12 +591,12 @@ function generateAnswerSheetPdf(missedIdx, correctCount, total, pct, dateStr, at
           doc.rect(cellX[1], y, colW.ans, rowH);
           doc.rect(cellX[2], y, colW.mark, rowH);
 
-          const userAns = answers[idx];
+          const userAns = activeAnswers[idx];
           const isMissed = missedIdx.includes(idx);
           const userLetter = userAns!==undefined ? letters[userAns] : '';
 
           doc.setFont('helvetica','normal');
-          doc.text(String(exam.questions[idx].originalNumber || (idx+1)), cellX[0]+colW.num/2, y+rowH-1.8, {align:'center'});
+          doc.text(String(activeExam.questions[idx].originalNumber || (idx+1)), cellX[0]+colW.num/2, y+rowH-1.8, {align:'center'});
           doc.setFont('helvetica','bold');
           doc.text(userLetter, cellX[1]+colW.ans/2, y+rowH-1.8, {align:'center'});
           doc.setFont('helvetica','normal');
@@ -614,8 +620,8 @@ function generateAnswerSheetPdf(missedIdx, correctCount, total, pct, dateStr, at
       let ry = 28;
       const pageBottom = 275;
       missedIdx.forEach(i=>{
-        const q = exam.questions[i];
-        const userAns = answers[i];
+        const q = activeExam.questions[i];
+        const userAns = activeAnswers[i];
         const qLines = doc.splitTextToSize(`${q.originalNumber || (i+1)}. ${q.text}`, 180);
         const optLineSets = q.options.map((opt,oi)=>{
           let suffix = '';
@@ -668,12 +674,12 @@ function generateAnswerSheetPdf(missedIdx, correctCount, total, pct, dateStr, at
       doc.text('Upload this PDF back into the Exam Practice Tool to retake just the questions below.', 15, 24);
 
       const missedQuestions = missedIdx.map(i=>({
-        text: exam.questions[i].text,
-        options: exam.questions[i].options,
-        correct: exam.questions[i].correct,
-        originalNumber: exam.questions[i].originalNumber || (i+1)
+        text: activeExam.questions[i].text,
+        options: activeExam.questions[i].options,
+        correct: activeExam.questions[i].correct,
+        originalNumber: activeExam.questions[i].originalNumber || (i+1)
       }));
-      const payload = JSON.stringify({ title: exam.title, attempt: attemptNum, round: roundNumber || null, total, correctCount, examKey: exam.examKey || null, questions: missedQuestions });
+      const payload = JSON.stringify({ title: activeExam.title, attempt: attemptNum, round: roundNumber || null, total, correctCount, examKey: activeExam.examKey || null, questions: missedQuestions });
       const b64 = btoa(unescape(encodeURIComponent(payload)));
 
       doc.setFontSize(6);
@@ -691,14 +697,12 @@ function generateAnswerSheetPdf(missedIdx, correctCount, total, pct, dateStr, at
       doc.internal.write('0 Tr');
     }
 
-    const safeTitle = exam.title.replace(/[^a-z0-9]+/gi,'_').slice(0,60);
+    const safeTitle = activeExam.title.replace(/[^a-z0-9]+/gi,'_').slice(0,60);
     const roundPart = roundNumber ? `_Round${roundNumber}` : '';
     doc.save(`${safeTitle}${roundPart}_Attempt${attemptNum}_answer_sheet.pdf`);
-    genMsg.textContent = 'PDF downloaded.';
-    genMsg.className = 'msg ok';
+    if(genMsg){ genMsg.textContent = 'PDF downloaded.'; genMsg.className = 'msg ok'; }
   } catch(e){
-    genMsg.textContent = 'Could not generate PDF: ' + e.message;
-    genMsg.className = 'msg err';
+    if(genMsg){ genMsg.textContent = 'Could not generate PDF: ' + e.message; genMsg.className = 'msg err'; }
   }
 }
 
@@ -762,13 +766,36 @@ async function reconstructAttemptFromPdfData(data){
   let sourceAttempt = await onlineStore.findAttemptByNumber(round.id, thisAttemptNumber);
   let recorded = false, hadGap = false;
   if(!sourceAttempt){
-    if(data.total !== undefined && data.correctCount !== undefined){
+    let total = data.total;
+    let correctCount = data.correctCount;
+    /* Older PDFs (before total/correctCount were embedded) don't carry their
+       own attempt's stats -- but they're often still derivable rather than a
+       permanent gap: attempt 1 is always the full exam, so its total is the
+       library's question count and its correct count falls out of how many
+       were still missed afterward. A later attempt's total is exactly how
+       many were missed entering it, i.e. the PREVIOUS attempt's own
+       (total - correct) -- only knowable once that previous attempt has
+       itself been recorded, whether from an earlier real play or from this
+       same recovery process run in attempt order. */
+    if(total === undefined || correctCount === undefined){
+      if(thisAttemptNumber === 1){
+        total = originalTotal;
+        correctCount = originalTotal - data.questions.length;
+      } else {
+        const prev = await onlineStore.findAttemptByNumber(round.id, thisAttemptNumber - 1);
+        if(prev && prev.status === 'completed'){
+          total = prev.total_questions - prev.correct_count;
+          correctCount = total - data.questions.length;
+        }
+      }
+    }
+    if(total !== undefined && correctCount !== undefined){
       sourceAttempt = await onlineStore.recordCompletedAttemptSummary(
-        round.id, thisAttemptNumber, thisAttemptNumber===1 ? 'full' : 'missed_retake', data.total, data.correctCount
+        round.id, thisAttemptNumber, thisAttemptNumber===1 ? 'full' : 'missed_retake', total, correctCount
       );
       recorded = true;
     } else {
-      hadGap = true; // older PDF format -- can't know this attempt's own totals, leave it as a visible gap
+      hadGap = true; // truly can't be derived -- the attempt before this one was never recorded either
     }
   }
   return { round, thisAttemptNumber, sourceAttempt, recorded, hadGap, originalTotal, stillMissed: data.questions.length };
@@ -2071,6 +2098,11 @@ function renderProgressPanel(){
       const expanded = progressExpandedRoundId === r.id;
       const masteredSoFar = r.original_total - r.funnel_missed_count;
       const masteredPct = ((masteredSoFar / r.original_total) * 100).toFixed(1);
+      /* "Continue" only works from a real, live-played attempt (hasAnswers) --
+         one reconstructed from an uploaded PDF summary has no per-question
+         rows to build the next missed-only question set from. */
+      const latestAttempt = r.attempts.length ? r.attempts.reduce((a,b)=> a.attempt_number > b.attempt_number ? a : b) : null;
+      const canContinue = r.status==='in_progress' && latestAttempt && latestAttempt.status==='completed' && latestAttempt.hasAnswers && r.funnel_missed_count > 0;
       html += `
         <div class="lib-row" style="flex-direction:column;align-items:stretch;">
           <div style="display:flex;justify-content:space-between;align-items:center;width:100%;cursor:pointer;" data-round-toggle="${r.id}">
@@ -2078,7 +2110,10 @@ function renderProgressPanel(){
               <div class="lib-title">Round ${r.round_number}${masteryBadge}${r.status==='abandoned' ? ' <span class="lib-meta">(abandoned)</span>' : ''}</div>
               <div class="lib-meta">${masteredPct}% — ${masteredSoFar} of ${r.original_total} mastered so far · ${r.attempts.length} attempt(s)</div>
             </div>
-            <span class="link-btn">${expanded ? 'Hide' : 'Show'} attempts</span>
+            <div style="display:flex;align-items:center;gap:10px;">
+              ${canContinue ? `<button class="btn btn-ghost" data-continue-round="${r.id}" style="padding:4px 10px;font-size:.8rem;">Continue (Missed Only)</button>` : ''}
+              <span class="link-btn">${expanded ? 'Hide' : 'Show'} attempts</span>
+            </div>
           </div>
         </div>
       `;
@@ -2103,7 +2138,10 @@ function renderProgressPanel(){
           html += `
             <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-family:system-ui,sans-serif;font-size:.85rem;">
               <span>Attempt ${a.attempt_number} (${a.attempt_scope==='full'?'full exam':'missed-only retake'}) — ${a.correct_count}/${a.total_questions}${a.status==='completed' ? ` (${((a.correct_count/a.total_questions)*100).toFixed(1)}%)` : ' · in progress'}</span>
-              ${(a.status==='completed' && a.hasAnswers) ? `<button class="link-btn" data-review-attempt="${a.id}" data-exam-key="${escapeHtml(r.exam_key)}">Review</button>` : ''}
+              <span style="display:flex;gap:12px;">
+                ${(a.status==='completed' && a.hasAnswers) ? `<button class="link-btn" data-review-attempt="${a.id}" data-exam-key="${escapeHtml(r.exam_key)}">Review</button>` : ''}
+                ${(a.status==='completed' && a.hasAnswers) ? `<button class="link-btn" data-download-attempt="${a.id}" data-round-id="${r.id}">Download PDF</button>` : ''}
+              </span>
             </div>
           `;
         }
@@ -2148,11 +2186,28 @@ function renderProgressPanel(){
          per round drives that round's current funnel/mastery state. */
       const pdfFiles = files.filter(f=>f.name.toLowerCase().endsWith('.pdf'));
       if(pdfFiles.length){
-        const latestPerRound = new Map(); // roundId -> {attemptNumber, stillMissed, round, originalTotal}
-        let recordedCount = 0, gapCount = 0, skipCount = 0, failCount = 0;
+        /* Parse every file first, then process in ascending attempt order --
+           older PDFs need their PRECEDING attempt already recorded to derive
+           their own stats (see reconstructAttemptFromPdfData), which only
+           works if attempt 1's file is handled before attempt 2's, etc.,
+           regardless of what order they were actually selected/dropped in. */
+        const parsed = [];
+        let failCount = 0;
         for(const file of pdfFiles){
           try{
             const data = await extractRetakeDataFromPdf(file);
+            parsed.push({ file, data });
+          } catch(fileErr){
+            failCount++;
+            notes.push(`${file.name}: ${fileErr.message}`);
+          }
+        }
+        parsed.sort((a,b)=>(a.data.attempt||1) - (b.data.attempt||1));
+
+        const latestPerRound = new Map(); // roundId -> {attemptNumber, stillMissed, round, originalTotal}
+        let recordedCount = 0, gapCount = 0, skipCount = 0;
+        for(const { file, data } of parsed){
+          try{
             const result = await reconstructAttemptFromPdfData(data);
             if(result.skipped){ skipCount++; notes.push(`${file.name}: skipped — ${result.reason}.`); continue; }
             if(result.recorded) recordedCount++;
@@ -2210,6 +2265,95 @@ function renderProgressPanel(){
       await openAttemptReview(el.dataset.reviewAttempt, el.dataset.examKey);
     };
   });
+  progressPanel.querySelectorAll('[data-download-attempt]').forEach(el=>{
+    el.onclick = async (ev)=>{
+      ev.stopPropagation();
+      const round = findRoundById(el.dataset.roundId);
+      if(round) await downloadAttemptPdfFromProgress(el.dataset.downloadAttempt, round);
+    };
+  });
+  progressPanel.querySelectorAll('[data-continue-round]').forEach(el=>{
+    el.onclick = async (ev)=>{
+      ev.stopPropagation();
+      const round = findRoundById(el.dataset.continueRound);
+      if(round) await continueRoundFromProgress(round);
+    };
+  });
+}
+
+function findRoundById(roundId){
+  for(const ex of progressData.exams){
+    const r = ex.rounds.find(r=>r.id===roundId);
+    if(r) return r;
+  }
+  return null;
+}
+
+/* Builds the next missed-only attempt directly from the round's latest
+   completed attempt's stored question/answer rows -- the in-app equivalent
+   of the results-screen "Retake Missed Only" button, but reachable later
+   from Progress instead of only right after doSubmit() on that same page
+   load. Mirrors the retakeMissedBtn online branch in renderResults(). */
+async function continueRoundFromProgress(round){
+  const msg = document.getElementById('progressImportMsg');
+  try{
+    const maxNum = await onlineStore.maxAttemptNumber(round.id);
+    if(!maxNum) throw new Error('No completed attempts to continue from.');
+    const latest = await onlineStore.findAttemptByNumber(round.id, maxNum);
+    if(!latest || latest.status !== 'completed'){
+      throw new Error("This round's latest attempt isn't finished yet — resume it from the Test Library instead.");
+    }
+    const { data: rows, error } = await supabaseClient.from('exam_attempt_answers')
+      .select('*').eq('attempt_id', latest.id).order('question_index');
+    if(error) throw error;
+    if(!rows.length){
+      throw new Error("This round's latest attempt has no saved question data (it was reconstructed from an uploaded PDF) — upload a PDF to continue it instead.");
+    }
+    const liveExplanations = libraryExplanationLookup(round.exam_key);
+    const missedQs = rows.filter(r=>r.selected_option !== r.correct_option).map(r=>({
+      text: r.question_text, options: r.options, correct: r.correct_option,
+      explanation: (liveExplanations && liveExplanations.get(r.question_text)) || r.explanation || '',
+      originalNumber: r.original_number
+    }));
+    if(!missedQs.length) throw new Error('No missed questions on the latest attempt — nothing to continue.');
+    const nextAttemptNumber = maxNum + 1;
+    activeOnlineRound = round;
+    activeOnlineAttempt = await onlineStore.createAttemptWithQuestions(round.id, nextAttemptNumber, 'missed_retake', latest.id, missedQs);
+    loadExam({ title: "Retake — Missed Questions", subtitle: "from " + round.exam_title, questions: missedQs, examKey: round.exam_key }, nextAttemptNumber);
+  } catch(err){
+    if(msg){ msg.textContent = 'Could not continue: ' + err.message; msg.className = 'msg err'; }
+  }
+}
+
+/* Regenerates the exact PDF answer-sheet layout for a past, already-completed
+   attempt from its stored question/answer rows -- reuses generateAnswerSheetPdf
+   via its examOverride/answersOverride params instead of requiring the exam
+   to still be loaded (which it never is from the Progress tab). */
+async function downloadAttemptPdfFromProgress(attemptId, round){
+  const msg = document.getElementById('progressImportMsg');
+  try{
+    const { data: rows, error } = await supabaseClient.from('exam_attempt_answers')
+      .select('*').eq('attempt_id', attemptId).order('question_index');
+    if(error) throw error;
+    const { data: attempt, error: attErr } = await supabaseClient.from('exam_attempts')
+      .select('*').eq('id', attemptId).single();
+    if(attErr) throw attErr;
+    const liveExplanations = libraryExplanationLookup(round.exam_key);
+    const questions = rows.map(r=>({ text: r.question_text, options: r.options, correct: r.correct_option, explanation: (liveExplanations && liveExplanations.get(r.question_text)) || r.explanation || '', originalNumber: r.original_number }));
+    const answersMap = {};
+    rows.forEach((r,i)=>{ if(r.selected_option!==null && r.selected_option!==undefined) answersMap[i] = r.selected_option; });
+    const missedIdx = [];
+    questions.forEach((q,i)=>{ if(answersMap[i] !== q.correct) missedIdx.push(i); });
+    const correctCount = questions.length - missedIdx.length;
+    const total = questions.length;
+    const masteredSoFar = round.original_total - round.funnel_missed_count;
+    const pct = ((masteredSoFar / round.original_total) * 100).toFixed(1);
+    const dateStr = attempt.completed_at ? new Date(attempt.completed_at).toLocaleDateString() : new Date().toLocaleDateString();
+    generateAnswerSheetPdf(missedIdx, correctCount, total, pct, dateStr, attempt.attempt_number, round.round_number,
+      { title: round.exam_title, questions, examKey: round.exam_key }, answersMap, 'progressImportMsg');
+  } catch(err){
+    if(msg){ msg.textContent = 'Could not generate PDF: ' + err.message; msg.className = 'msg err'; }
+  }
 }
 
 async function openAttemptReview(attemptId, examKey){
