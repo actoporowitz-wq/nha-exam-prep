@@ -1827,7 +1827,7 @@ async function resumeOnlineAttempt(round, attempt, examData){
     if(r.selected_option!==null && r.selected_option!==undefined) answers[i] = r.selected_option;
     if(r.flagged) flags[i] = true;
   });
-  current = 0; submitted = false;
+  current = 0; submitted = false; currentAttempt = attempt.attempt_number;
   examTitle.textContent = exam.title;
   examSub.textContent = (exam.subtitle ? exam.subtitle + " · " : "") + exam.questions.length + " questions";
   dotsPanel.style.display = '';
@@ -2110,11 +2110,19 @@ function renderProgressPanel(){
       const expanded = progressExpandedRoundId === r.id;
       const masteredSoFar = r.original_total - r.funnel_missed_count;
       const masteredPct = ((masteredSoFar / r.original_total) * 100).toFixed(1);
-      /* "Continue" only works from a real, live-played attempt (hasAnswers) --
-         one reconstructed from an uploaded PDF summary has no per-question
-         rows to build the next missed-only question set from. */
+      /* "Continue" needs a real question-level snapshot to work from
+         (hasAnswers) -- a bare recordCompletedAttemptSummary() row from an
+         uploaded PDF has none. That's covered two ways: either the latest
+         attempt is itself completed with row data (a live-played attempt),
+         or it's an in-progress attempt already staged with its question
+         snapshot -- which the batch PDF importer now does automatically
+         right after reconstructing a round's latest historical attempt, so
+         PDF-only rounds become continuable too, not just ones played
+         natively. Continue then either builds the NEXT attempt (completed
+         case) or just resumes the staged/interrupted one (in-progress case). */
       const latestAttempt = r.attempts.length ? r.attempts.reduce((a,b)=> a.attempt_number > b.attempt_number ? a : b) : null;
-      const canContinue = r.status==='in_progress' && latestAttempt && latestAttempt.status==='completed' && latestAttempt.hasAnswers && r.funnel_missed_count > 0;
+      const canContinue = r.status==='in_progress' && latestAttempt && latestAttempt.hasAnswers &&
+        (latestAttempt.status==='completed' ? r.funnel_missed_count > 0 : true);
       html += `
         <div class="lib-row" style="flex-direction:column;align-items:stretch;">
           <div style="display:flex;justify-content:space-between;align-items:center;width:100%;cursor:pointer;" data-round-toggle="${r.id}">
@@ -2147,9 +2155,20 @@ function renderProgressPanel(){
             `;
             continue;
           }
+          /* The parenthetical %, when shown, is cumulative mastery as of
+             THIS attempt (toward the round's overall goal), not this
+             attempt's own raw subset score -- a missed-only retake's
+             correct_count/total_questions is only ever a fraction of the
+             questions still outstanding, so showing that alone reads as a
+             regression ("83%?") right where the round header nearby is
+             already reporting cumulative progress. Derivable per-attempt
+             with no extra state: total_questions - correct_count is exactly
+             how many were still missed after that attempt. */
+          const stillMissedAfter = a.total_questions - a.correct_count;
+          const cumulativePct = ((r.original_total - stillMissedAfter) / r.original_total * 100).toFixed(1);
           html += `
             <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-family:system-ui,sans-serif;font-size:.85rem;">
-              <span>Attempt ${a.attempt_number} (${a.attempt_scope==='full'?'full exam':'missed-only retake'}) — ${a.correct_count}/${a.total_questions}${a.status==='completed' ? ` (${((a.correct_count/a.total_questions)*100).toFixed(1)}%)` : ' · in progress'}</span>
+              <span>Attempt ${a.attempt_number} (${a.attempt_scope==='full'?'full exam':'missed-only retake'}) — ${a.correct_count}/${a.total_questions}${a.status==='completed' ? ` (${cumulativePct}% cumulative)` : ' · in progress'}</span>
               <span style="display:flex;gap:12px;">
                 ${(a.status==='completed' && a.hasAnswers) ? `<button class="link-btn" data-review-attempt="${a.id}" data-exam-key="${escapeHtml(r.exam_key)}">Review</button>` : ''}
                 ${(a.status==='completed' && a.hasAnswers) ? `<button class="link-btn" data-download-attempt="${a.id}" data-round-id="${r.id}">Download PDF</button>` : ''}
@@ -2217,7 +2236,7 @@ function renderProgressPanel(){
         }
         parsed.sort((a,b)=>(a.data.attempt||1) - (b.data.attempt||1));
 
-        const latestPerRound = new Map(); // roundId -> {attemptNumber, stillMissed, round, originalTotal}
+        const latestPerRound = new Map(); // roundId -> {attemptNumber, stillMissed, round, originalTotal, questions, sourceAttemptId}
         let recordedCount = 0, gapCount = 0, skipCount = 0;
         for(const { file, data } of parsed){
           try{
@@ -2229,7 +2248,8 @@ function renderProgressPanel(){
             if(!prior || result.thisAttemptNumber > prior.attemptNumber){
               latestPerRound.set(result.round.id, {
                 attemptNumber: result.thisAttemptNumber, stillMissed: result.stillMissed,
-                round: result.round, originalTotal: result.originalTotal
+                round: result.round, originalTotal: result.originalTotal,
+                questions: data.questions, sourceAttemptId: result.sourceAttempt ? result.sourceAttempt.id : null
               });
             }
           } catch(fileErr){
@@ -2237,7 +2257,8 @@ function renderProgressPanel(){
             notes.push(`${file.name}: ${fileErr.message}`);
           }
         }
-        for(const { round, attemptNumber, stillMissed, originalTotal } of latestPerRound.values()){
+        let stagedCount = 0;
+        for(const { round, attemptNumber, stillMissed, originalTotal, questions, sourceAttemptId } of latestPerRound.values()){
           /* Only the round's actual most-recent attempt (across ALL its
              history, not just this upload batch) should drive its current
              funnel/mastery state -- uploading an old PDF for a round that's
@@ -2246,8 +2267,26 @@ function renderProgressPanel(){
           if(attemptNumber < trueMax) continue;
           const mastered = (originalTotal - stillMissed) / originalTotal >= MASTERY_THRESHOLD;
           await onlineStore.updateRound(round.id, stillMissed, mastered, mastered ? new Date().toISOString() : null);
+
+          /* Stage the next missed-only attempt's full question snapshot right
+             now -- exactly what the single-file "Load / Upload a Test" PDF
+             flow already does before it jumps straight into playing -- so
+             this round becomes resumable from Progress's "Continue" button
+             instead of being stuck needing yet another PDF round-trip. Only
+             the row-level snapshot here (not recordCompletedAttemptSummary's
+             totals-only record) has the actual question text/options/correct
+             a next attempt needs, and only the PDF's own embedded data ever
+             carries that -- it's unrecoverable once this import finishes. */
+          if(!mastered && stillMissed > 0 && questions && questions.length){
+            const nextNum = attemptNumber + 1;
+            const existingNext = await onlineStore.findAttemptByNumber(round.id, nextNum);
+            if(!existingNext){
+              await onlineStore.createAttemptWithQuestions(round.id, nextNum, 'missed_retake', sourceAttemptId, questions);
+              stagedCount++;
+            }
+          }
         }
-        notes.push(`${pdfFiles.length} PDF file(s): ${recordedCount} attempt(s) recorded, ${gapCount} left as a gap (older PDF format), ${skipCount} skipped, ${failCount} failed.`);
+        notes.push(`${pdfFiles.length} PDF file(s): ${recordedCount} attempt(s) recorded, ${gapCount} left as a gap (older PDF format), ${skipCount} skipped, ${failCount} failed, ${stagedCount} round(s) now continuable in-app.`);
       }
 
       /* renderProgressView() rebuilds the whole panel (including a fresh,
@@ -2362,25 +2401,34 @@ function deleteAttemptFromProgress(attemptId, attemptNumber, round){
   );
 }
 
-/* Builds the next missed-only attempt directly from the round's latest
-   completed attempt's stored question/answer rows -- the in-app equivalent
-   of the results-screen "Retake Missed Only" button, but reachable later
-   from Progress instead of only right after doSubmit() on that same page
-   load. Mirrors the retakeMissedBtn online branch in renderResults(). */
+/* Two cases, both reachable from Progress instead of only right after
+   doSubmit() on the same page load a live attempt just finished on:
+   1. Latest attempt is COMPLETED with row data (played natively) -- build
+      the next missed-only attempt from it, same as the results-screen
+      "Retake Missed Only" button (mirrors its online branch).
+   2. Latest attempt is already IN-PROGRESS with row data -- it was staged
+      (not yet played) either by an interrupted live session or by the
+      batch PDF importer reconstructing a round's history -- just resume it. */
 async function continueRoundFromProgress(round){
   const msg = document.getElementById('progressImportMsg');
   try{
     const maxNum = await onlineStore.maxAttemptNumber(round.id);
-    if(!maxNum) throw new Error('No completed attempts to continue from.');
+    if(!maxNum) throw new Error('No attempts to continue from.');
     const latest = await onlineStore.findAttemptByNumber(round.id, maxNum);
-    if(!latest || latest.status !== 'completed'){
-      throw new Error("This round's latest attempt isn't finished yet — resume it from the Test Library instead.");
+    if(!latest) throw new Error('No attempts to continue from.');
+
+    if(latest.status === 'in_progress'){
+      await resumeOnlineAttempt(round, latest, {
+        title: round.exam_title, subtitle: "from " + round.exam_title, examKey: round.exam_key
+      });
+      return;
     }
+
     const { data: rows, error } = await supabaseClient.from('exam_attempt_answers')
       .select('*').eq('attempt_id', latest.id).order('question_index');
     if(error) throw error;
     if(!rows.length){
-      throw new Error("This round's latest attempt has no saved question data (it was reconstructed from an uploaded PDF) — upload a PDF to continue it instead.");
+      throw new Error("This round's latest attempt has no saved question data (it was reconstructed from an uploaded PDF) — re-upload the PDF(s) through Progress's importer to make it continuable.");
     }
     const liveExplanations = libraryExplanationLookup(round.exam_key);
     const missedQs = rows.filter(r=>r.selected_option !== r.correct_option).map(r=>({
