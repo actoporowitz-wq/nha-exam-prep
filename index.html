@@ -366,15 +366,16 @@ function renderDots(){
 }
 
 /* ================= submit / results (no grading until now) ================= */
-function showConfirmDialog(message, onConfirm){
+function showConfirmDialog(message, onConfirm, confirmLabel, danger){
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(31,36,34,.4);display:flex;align-items:center;justify-content:center;z-index:9999;font-family:system-ui,sans-serif;padding:20px;';
+  const okColor = danger ? '#b3401f' : '#2f6f5e';
   overlay.innerHTML = `
     <div style="background:#fff;border-radius:12px;padding:22px 24px;max-width:360px;box-shadow:0 8px 30px rgba(0,0,0,.25);">
       <div style="font-size:.95rem;line-height:1.5;margin-bottom:18px;color:#1f2422;">${escapeHtml(message)}</div>
       <div style="display:flex;gap:10px;justify-content:flex-end;">
         <button id="confirmCancelBtn" style="font-family:system-ui,sans-serif;border:1px solid #e3e0d8;background:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:.88rem;">Cancel</button>
-        <button id="confirmOkBtn" style="font-family:system-ui,sans-serif;border:none;background:#2f6f5e;color:#fff;border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;font-size:.88rem;">End Exam</button>
+        <button id="confirmOkBtn" style="font-family:system-ui,sans-serif;border:none;background:${okColor};color:#fff;border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;font-size:.88rem;">${escapeHtml(confirmLabel || 'End Exam')}</button>
       </div>
     </div>
   `;
@@ -1729,10 +1730,21 @@ const onlineStore = {
       .eq('id', attemptId);
     if(error) throw error;
   },
+  /* Explicitly sets status both ways (not just forward to 'mastered') --
+     funnel state used to only ever narrow, but deleteAttemptFromProgress()
+     can now un-master a round by removing the attempt that had cleared the
+     threshold, and a stale 'mastered' badge with a non-mastered count would
+     be actively misleading. */
   async updateRound(roundId, funnelMissedCount, mastered, masteredAt){
-    const patch = { funnel_missed_count: funnelMissedCount, updated_at: new Date().toISOString() };
-    if(mastered){ patch.status = 'mastered'; patch.mastered_at = masteredAt; }
+    const patch = {
+      funnel_missed_count: funnelMissedCount, updated_at: new Date().toISOString(),
+      status: mastered ? 'mastered' : 'in_progress', mastered_at: mastered ? masteredAt : null
+    };
     const { error } = await supabaseClient.from('exam_rounds').update(patch).eq('id', roundId);
+    if(error) throw error;
+  },
+  async deleteRound(roundId){
+    const { error } = await supabaseClient.from('exam_rounds').delete().eq('id', roundId);
     if(error) throw error;
   },
   /* Round lookup/creation by an EXACT round number (as opposed to
@@ -2141,6 +2153,7 @@ function renderProgressPanel(){
               <span style="display:flex;gap:12px;">
                 ${(a.status==='completed' && a.hasAnswers) ? `<button class="link-btn" data-review-attempt="${a.id}" data-exam-key="${escapeHtml(r.exam_key)}">Review</button>` : ''}
                 ${(a.status==='completed' && a.hasAnswers) ? `<button class="link-btn" data-download-attempt="${a.id}" data-round-id="${r.id}">Download PDF</button>` : ''}
+                <button class="link-btn" style="color:#b3401f;" data-delete-attempt="${a.id}" data-round-id="${r.id}" data-attempt-number="${a.attempt_number}">Delete</button>
               </span>
             </div>
           `;
@@ -2279,6 +2292,13 @@ function renderProgressPanel(){
       if(round) await continueRoundFromProgress(round);
     };
   });
+  progressPanel.querySelectorAll('[data-delete-attempt]').forEach(el=>{
+    el.onclick = (ev)=>{
+      ev.stopPropagation();
+      const round = findRoundById(el.dataset.roundId);
+      if(round) deleteAttemptFromProgress(el.dataset.deleteAttempt, parseInt(el.dataset.attemptNumber, 10), round);
+    };
+  });
 }
 
 function findRoundById(roundId){
@@ -2287,6 +2307,59 @@ function findRoundById(roundId){
     if(r) return r;
   }
   return null;
+}
+
+/* Deletes a single attempt (its exam_attempt_answers rows cascade via the
+   FK). If it was the round's current highest attempt number, the round's
+   funnel state was DRIVING off it -- walk backward to the next-highest
+   COMPLETED attempt (skipping a dangling in_progress one, which was never
+   part of the committed funnel) and recompute funnel_missed_count/mastery
+   from that. If no attempts remain at all, the round itself is now just
+   clutter and is deleted along with it, rather than left behind empty. */
+function deleteAttemptFromProgress(attemptId, attemptNumber, round){
+  showConfirmDialog(
+    `Delete Attempt ${attemptNumber} on Round ${round.round_number} of "${round.exam_title}"? This can't be undone.`,
+    async ()=>{
+      const msg = document.getElementById('progressImportMsg');
+      try{
+        /* round.attempts is the snapshot renderProgressView() already
+           fetched -- reuse it instead of a redundant query, to check
+           whether the attempt being deleted was the round's current max. */
+        const maxNumBefore = round.attempts.length ? Math.max(...round.attempts.map(a=>a.attempt_number)) : 0;
+        const wasLatest = attemptNumber === maxNumBefore;
+        await onlineStore.discardAttempt(attemptId);
+        if(wasLatest){
+          const maxNum = await onlineStore.maxAttemptNumber(round.id);
+          if(!maxNum){
+            await onlineStore.deleteRound(round.id);
+          } else {
+            let n = maxNum, driver = null;
+            while(n >= 1 && !driver){
+              const a = await onlineStore.findAttemptByNumber(round.id, n);
+              if(a && a.status === 'completed') driver = a;
+              n--;
+            }
+            if(driver){
+              const stillMissed = driver.total_questions - driver.correct_count;
+              const mastered = (round.original_total - stillMissed) / round.original_total >= MASTERY_THRESHOLD;
+              await onlineStore.updateRound(round.id, stillMissed, mastered, mastered ? new Date().toISOString() : null);
+            } else {
+              /* every remaining attempt is still in_progress -- nothing
+                 completed backs the funnel count anymore, so it reflects
+                 no progress rather than stale numbers from what got deleted. */
+              await onlineStore.updateRound(round.id, round.original_total, false, null);
+            }
+          }
+        }
+        await renderProgressView();
+        const freshMsg = document.getElementById('progressImportMsg');
+        if(freshMsg){ freshMsg.textContent = `Attempt ${attemptNumber} deleted.`; freshMsg.className = 'msg ok'; }
+      } catch(err){
+        if(msg){ msg.textContent = 'Could not delete: ' + err.message; msg.className = 'msg err'; }
+      }
+    },
+    'Delete', true
+  );
 }
 
 /* Builds the next missed-only attempt directly from the round's latest
