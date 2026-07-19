@@ -1725,13 +1725,19 @@ async function handleSignOut(reason){
   profile = null;
   libraryLoaded = false;
   EXAM_LIBRARY = [];
-  authScreen = 'signin'; authError='';
-  authMessage = reason === 'inactivity' ? "You were signed out after an hour of inactivity." : '';
   flashProgressMsg = null;
   flashOnlineAttempts = null;
   flashSelectedAttemptIds = new Set();
   flashPickOpen = false;
+  /* applyAccessGate() resets authScreen/authError/authMessage to a blank
+     signin state as part of handling the signed-out case -- so any
+     reason-specific message has to be set AFTER it runs, not before, or
+     it gets immediately overwritten. */
   await applyAccessGate();
+  if(reason === 'inactivity'){
+    authMessage = "You were signed out after an hour of inactivity.";
+    renderAuthView();
+  }
 }
 
 /* ================= ACCESS GATE =================
