@@ -192,7 +192,7 @@ let submitted = false;
 let currentAttempt = 1;
 let flashcards = [];
 let flashIndex = 0;
-let flashFlipped = false;
+let flashSelectedOption = null; // null = unanswered; otherwise the clicked option index, revealing the correct answer
 let reviewFilter = 'missed'; // 'missed' | 'all' — which questions renderReviewPanel shows
 let progressReviewFilter = 'missed'; // 'missed' | 'all' — same idea, for renderProgressAttemptDetail
 let flashProgressMsg = null; // { text, ok } | null
@@ -1012,7 +1012,7 @@ document.getElementById('flashInput').onchange = async (e)=>{
     }
     flashcards = Array.from(tally.values()).sort((a,b)=>b.count - a.count);
     flashIndex = 0;
-    flashFlipped = false;
+    flashSelectedOption = null;
     showView('flash');
     msg.textContent = `Built ${flashcards.length} flashcard(s) from ${filesUsed} of ${files.length} file(s).`;
     msg.className = 'msg ok';
@@ -1097,7 +1097,7 @@ async function buildFlashcardsFromAttemptIds(attemptIds, scopeMsg){
   if(tally.size === 0) throw new Error('No missed questions found — nothing to build flashcards from.');
   flashcards = Array.from(tally.values()).sort((a,b)=>b.count - a.count);
   flashIndex = 0;
-  flashFlipped = false;
+  flashSelectedOption = null;
   flashProgressMsg = { text: `Built ${flashcards.length} flashcard(s) from ${attemptIds.length} completed attempt(s) ${scopeMsg}.`, ok:true };
 }
 
@@ -1107,6 +1107,34 @@ async function generateFlashcardsFromOnlineProgress(){
   renderFlashcard();
   try{
     await buildFlashcardsFromAttemptIds(allIds, 'across all your exams');
+  } catch(err){
+    flashProgressMsg = { text: err.message, ok:false };
+  }
+  renderFlashcard();
+}
+
+/* "Final" = the highest attempt_number seen per (exam, round) -- the most
+   recent retake of that round's funnel, i.e. what you're still missing
+   right now rather than every historical miss (which "All Attempts" covers
+   instead, deliberately re-counting a question you've since gotten right
+   on a later retake). examTitle+roundNumber uniquely identifies a round
+   per the DB's (user_id, exam_key, round_number) constraint. */
+function finalAttemptIdsFromOnline(){
+  const byRound = new Map();
+  (flashOnlineAttempts||[]).forEach(a=>{
+    const key = a.examTitle + '|' + a.roundNumber;
+    const cur = byRound.get(key);
+    if(!cur || a.attemptNumber > cur.attemptNumber) byRound.set(key, a);
+  });
+  return Array.from(byRound.values()).map(a=>a.attemptId);
+}
+
+async function generateFlashcardsFromFinalAttempts(){
+  const finalIds = finalAttemptIdsFromOnline();
+  flashProgressMsg = { text: 'Generating flashcards from your progress…', ok:true };
+  renderFlashcard();
+  try{
+    await buildFlashcardsFromAttemptIds(finalIds, 'from your most recent attempt in each round');
   } catch(err){
     flashProgressMsg = { text: err.message, ok:false };
   }
@@ -1164,12 +1192,13 @@ function renderOnlineFlashGeneratorHtml(){
       `;
     }).join('');
     inner = `
-      <button class="btn btn-primary" id="flashGenerateAllBtn">Generate Flashcards from All Progress</button>
-      <div style="margin-top:14px;">
-        <button class="link-btn" id="flashTogglePickBtn" type="button">${flashPickOpen ? 'Hide' : 'Or choose specific attempts'}</button>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn btn-primary" id="flashGenerateFinalBtn">Final Attempts Only</button>
+        <button class="btn btn-primary" id="flashGenerateAllBtn">All Attempts</button>
+        <button class="btn btn-ghost" id="flashTogglePickBtn" type="button">${flashPickOpen ? 'Hide Customize' : 'Customize'}</button>
       </div>
       ${flashPickOpen ? `
-        <div style="margin-top:8px;">
+        <div style="margin-top:14px;">
           <div style="display:flex;gap:14px;margin-bottom:8px;">
             <button class="link-btn" id="flashSelectAllBtn" type="button">Select all</button>
             <button class="link-btn" id="flashSelectNoneBtn" type="button">Clear</button>
@@ -1186,18 +1215,20 @@ function renderOnlineFlashGeneratorHtml(){
   return `
     <div class="panel subsection">
       <h2>Generate flashcards from your progress</h2>
-      <div class="format-help">Pulls every question you've ever missed — on any attempt, at any stage of any round's funnel, across every test — into one set (most-missed first). No PDFs needed, and nothing to choose first; combining specific attempts from any of your tests below is optional. Checking a test's name selects every attempt under it at once.</div>
+      <div class="format-help">Three ways to build a set, no PDFs needed: <strong>Final Attempts Only</strong> uses just your most recent attempt in each round — what you're still missing right now. <strong>All Attempts</strong> pulls every question you've ever missed, on any attempt, across every round (most-missed first) — the same question can count more than once if you missed it on an earlier retake. <strong>Customize</strong> lets you pick specific attempts yourself.</div>
       ${inner}
     </div>
   `;
 }
 
 function bindFlashGeneratorHandlers(){
+  const genFinalBtn = document.getElementById('flashGenerateFinalBtn');
   const genAllBtn = document.getElementById('flashGenerateAllBtn');
   const toggleBtn = document.getElementById('flashTogglePickBtn');
   const selAllBtn = document.getElementById('flashSelectAllBtn');
   const selNoneBtn = document.getElementById('flashSelectNoneBtn');
   const genSelectedBtn = document.getElementById('flashGenerateSelectedBtn');
+  if(genFinalBtn) genFinalBtn.onclick = ()=> generateFlashcardsFromFinalAttempts();
   if(genAllBtn) genAllBtn.onclick = ()=> generateFlashcardsFromOnlineProgress();
   if(toggleBtn) toggleBtn.onclick = ()=>{ flashPickOpen = !flashPickOpen; renderFlashcard(); };
   if(selAllBtn) selAllBtn.onclick = ()=>{ flashSelectedAttemptIds = new Set((flashOnlineAttempts||[]).map(a=>a.attemptId)); renderFlashcard(); };
@@ -1228,7 +1259,7 @@ function shuffleFlashcards(){
     [flashcards[i], flashcards[j]] = [flashcards[j], flashcards[i]];
   }
   flashIndex = 0;
-  flashFlipped = false;
+  flashSelectedOption = null;
   renderFlashcard();
 }
 
@@ -1252,16 +1283,21 @@ function renderFlashcard(){
     </div>
     <div class="qtext">${escapeHtml(card.text)}</div>
   `;
+  const answered = flashSelectedOption !== null;
   card.options.forEach((opt,oi)=>{
-    const showCorrect = flashFlipped && oi===card.correct;
-    html += `<div class="opt${showCorrect?' correct':''}">
-      <span class="letter">${letters[oi]}</span><span>${escapeHtml(opt)}${showCorrect?' ✓':''}</span>
+    let cls = '';
+    let tag = '';
+    if(answered){
+      if(oi===card.correct){ cls = 'correct'; tag = ' ✓'; }
+      else if(oi===flashSelectedOption){ cls = 'incorrect'; tag = ' — your answer'; }
+    }
+    html += `<div class="opt ${cls}" ${answered?'':`data-flash-opt="${oi}"`}>
+      <span class="letter">${letters[oi]}</span><span>${escapeHtml(opt)}${tag}</span>
     </div>`;
   });
   html += `
     <div class="nav-row">
       <button class="btn btn-ghost" id="flashPrevBtn" ${flashIndex===0?'disabled':''}>← Previous</button>
-      <button class="btn btn-primary" id="flashToggleBtn">${flashFlipped?'Hide Answer':'Show Answer'}</button>
       <button class="btn btn-ghost" id="flashNextBtn" ${flashIndex===flashcards.length-1?'disabled':''}>Next →</button>
     </div>
   `;
@@ -1269,9 +1305,13 @@ function renderFlashcard(){
     html += `<div style="margin-top:10px;text-align:center;"><button class="link-btn" id="flashShuffleBtn" type="button">🔀 Shuffle order</button></div>`;
   }
   flashPanel.innerHTML = topHtml + html;
-  document.getElementById('flashPrevBtn').onclick = ()=>{ if(flashIndex>0){ flashIndex--; flashFlipped=false; renderFlashcard(); } };
-  document.getElementById('flashNextBtn').onclick = ()=>{ if(flashIndex<flashcards.length-1){ flashIndex++; flashFlipped=false; renderFlashcard(); } };
-  document.getElementById('flashToggleBtn').onclick = ()=>{ flashFlipped=!flashFlipped; renderFlashcard(); };
+  document.getElementById('flashPrevBtn').onclick = ()=>{ if(flashIndex>0){ flashIndex--; flashSelectedOption=null; renderFlashcard(); } };
+  document.getElementById('flashNextBtn').onclick = ()=>{ if(flashIndex<flashcards.length-1){ flashIndex++; flashSelectedOption=null; renderFlashcard(); } };
+  if(!answered){
+    flashPanel.querySelectorAll('[data-flash-opt]').forEach(el=>{
+      el.onclick = ()=>{ flashSelectedOption = parseInt(el.dataset.flashOpt,10); renderFlashcard(); };
+    });
+  }
   const shuffleBtn = document.getElementById('flashShuffleBtn');
   if(shuffleBtn) shuffleBtn.onclick = shuffleFlashcards;
   if(onlineActive) bindFlashGeneratorHandlers();
