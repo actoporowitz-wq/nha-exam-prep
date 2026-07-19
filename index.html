@@ -1557,7 +1557,7 @@ function renderAuthView(){
       <div style="display:flex;flex-direction:column;gap:10px;font-family:system-ui,sans-serif;max-width:340px;">
         <input type="email" id="authEmail" placeholder="Email" autocomplete="email">
         <input type="password" id="authPassword" placeholder="Password (min 6 characters)" autocomplete="new-password">
-        <div class="cf-turnstile" data-sitekey="${TURNSTILE_SITE_KEY}" id="turnstileWidget"></div>
+        <div class="cf-turnstile" id="turnstileWidget"></div>
         <button class="btn btn-primary" id="authSubmitBtn">Sign Up</button>
       </div>
       <div style="margin-top:14px;font-family:system-ui,sans-serif;font-size:.85rem;">
@@ -1896,6 +1896,13 @@ async function applyAccessGate(){
      worse, stomp a deep-linked URL back to '/') on top of whatever screen
      they're already looking at. */
   const wasGranted = appShell.style.display !== 'none';
+  /* A signed-in, granted account should default to online tracking -- appMode
+     otherwise starts 'offline' on every fresh page load (never persisted),
+     which silently left new attempts untracked (nothing written to
+     exam_rounds) even though the user was fully authenticated. Only set this
+     on the transition into granted, not on a redundant re-fire, so it never
+     overrides a user's own mid-session switch back to Offline. */
+  if(!wasGranted) appMode = 'online';
   startInactivityWatch();
   tabAdmin.style.display = profile.role === 'admin' ? '' : 'none';
   appShell.style.display = '';
