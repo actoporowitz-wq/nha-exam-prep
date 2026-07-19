@@ -1845,6 +1845,13 @@ async function applyAccessGate(){
   if(!currentUser){
     stopInactivityWatch();
     appShell.style.display = 'none';
+    /* examTitle/examSub sit outside #appShell entirely (page furniture,
+       not part of the gated content) -- loadExam() sets them straight to
+       whatever exam was in progress, so without resetting them here a
+       sign-out mid-exam would leave the last exam's title/progress
+       showing right above the sign-in form. */
+    examTitle.textContent = 'Exam Practice Tool';
+    examSub.textContent = '';
     if(authScreen !== 'reset-password'){ authScreen = 'signin'; authError=''; authMessage=''; }
     showView('auth');
     return;
@@ -1854,6 +1861,8 @@ async function applyAccessGate(){
   if(!granted){
     stopInactivityWatch();
     appShell.style.display = 'none';
+    examTitle.textContent = 'Exam Practice Tool';
+    examSub.textContent = '';
     showView('auth'); // renderAuthView() renders the pending-approval branch for this case
     return;
   }
