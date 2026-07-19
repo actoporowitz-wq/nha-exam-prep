@@ -200,7 +200,6 @@ let flashOnlineAttempts = null; // null = not yet loaded; [] | [{attemptId,examT
 let flashAttemptsLoading = false;
 let flashSelectedAttemptIds = new Set();
 let flashPickOpen = false;
-let initialRouteHandled = false; // honor a deep-linked URL only on the first successful access-gate pass
 
 /* ================= elements ================= */
 const quizPanel = document.getElementById('quizPanel');
@@ -1890,6 +1889,13 @@ async function applyAccessGate(){
     showView('auth'); // renderAuthView() renders the pending-approval branch for this case
     return;
   }
+  /* onAuthStateChange can fire more than once during a single page load
+     (e.g. an initial session restore followed by a token refresh) --
+     capture whether we were already showing the gated app BEFORE this
+     pass, so a redundant re-fire doesn't bounce the user back to quiz (or,
+     worse, stomp a deep-linked URL back to '/') on top of whatever screen
+     they're already looking at. */
+  const wasGranted = appShell.style.display !== 'none';
   startInactivityWatch();
   tabAdmin.style.display = profile.role === 'admin' ? '' : 'none';
   appShell.style.display = '';
@@ -1901,13 +1907,10 @@ async function applyAccessGate(){
     await fetchExamLibrary();
   }
   renderEmptyState();
-  if(!initialRouteHandled){
-    initialRouteHandled = true;
+  if(!wasGranted){
     let initialView = VIEW_FOR_PATH[location.pathname] || null;
     if(initialView === 'admin' && profile.role !== 'admin') initialView = null;
     showView(initialView || 'quiz', initialView ? { fromPopState: true } : undefined);
-  } else {
-    showView('quiz');
   }
 }
 
