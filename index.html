@@ -1657,18 +1657,22 @@ function renderStatusBar(){
 }
 
 /* Hardened confirmation for an irreversible action — requires typing DELETE,
-   not just a click, since a normal confirm dialog is too easy to click through. */
-function askDeleteAccountConfirmation(){
+   not just a click, since a normal confirm dialog is too easy to click through.
+   message/buttonLabel let this be reused for the admin's "delete another
+   account" path, not just self-deletion. */
+function askDeleteAccountConfirmation(message, buttonLabel){
+  message = message || "This permanently deletes your account and all saved progress — there's no undo. Type <strong>DELETE</strong> to confirm.";
+  buttonLabel = buttonLabel || 'Delete My Account';
   return new Promise(resolve=>{
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(31,36,34,.4);display:flex;align-items:center;justify-content:center;z-index:9999;font-family:system-ui,sans-serif;padding:20px;';
     overlay.innerHTML = `
       <div style="background:#fff;border-radius:12px;padding:22px 24px;max-width:380px;box-shadow:0 8px 30px rgba(0,0,0,.25);">
-        <div style="font-size:.95rem;line-height:1.5;margin-bottom:14px;color:#1f2422;">This permanently deletes your account and all saved progress — there's no undo. Type <strong>DELETE</strong> to confirm.</div>
+        <div style="font-size:.95rem;line-height:1.5;margin-bottom:14px;color:#1f2422;">${message}</div>
         <input type="text" id="deleteConfirmInput" style="width:100%;padding:9px 12px;border-radius:8px;border:1px solid #e3e0d8;font-family:system-ui,sans-serif;margin-bottom:14px;box-sizing:border-box;">
         <div style="display:flex;gap:10px;justify-content:flex-end;">
           <button id="deleteCancelBtn" style="font-family:system-ui,sans-serif;border:1px solid #e3e0d8;background:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:.88rem;">Cancel</button>
-          <button id="deleteConfirmBtn" style="font-family:system-ui,sans-serif;border:none;background:#b3462c;color:#fff;border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;font-size:.88rem;" disabled>Delete My Account</button>
+          <button id="deleteConfirmBtn" style="font-family:system-ui,sans-serif;border:none;background:#b3462c;color:#fff;border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;font-size:.88rem;" disabled>${buttonLabel}</button>
         </div>
       </div>
     `;
@@ -2823,14 +2827,17 @@ function renderAdminPanel(){
         </div>
         <div style="display:flex;align-items:center;gap:10px;">
           <button class="link-btn" data-view-user="${p.user_id}">View Progress</button>
-          ${isSelf ? '' : `<button class="btn ${p.approved ? 'btn-ghost' : 'btn-primary'}" data-toggle-approve="${p.user_id}" data-new-approved="${!p.approved}">${p.approved ? 'Revoke' : 'Approve'}</button>`}
+          ${isSelf ? '' : `
+            <button class="btn ${p.approved ? 'btn-ghost' : 'btn-primary'}" data-toggle-approve="${p.user_id}" data-new-approved="${!p.approved}">${p.approved ? 'Suspend' : 'Approve'}</button>
+            <button class="link-btn" style="color:var(--bad);" data-delete-user="${p.user_id}" data-delete-email="${escapeHtml(p.email)}">Permanently Delete</button>
+          `}
         </div>
       </div>
     `;
   }).join('');
   adminPanel.innerHTML = `
     <h2>Admin</h2>
-    <div class="format-help">${adminData.profiles.length} account(s) total.</div>
+    <div class="format-help">${adminData.profiles.length} account(s) total. "Suspend" keeps all their progress and can be undone with "Approve" — "Permanently Delete" removes the account and all its data for good.</div>
     ${rows}
     <div class="subsection">
       <h3>Trace a leaked copy of exam content</h3>
@@ -2852,6 +2859,24 @@ function renderAdminPanel(){
       } catch(err){
         alert('Could not update: ' + err.message);
         btn.disabled = false;
+      }
+    };
+  });
+  adminPanel.querySelectorAll('button[data-delete-user]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const targetId = btn.dataset.deleteUser;
+      const targetEmail = btn.dataset.deleteEmail;
+      const confirmed = await askDeleteAccountConfirmation(
+        `This permanently deletes <strong>${targetEmail}</strong>'s account and all its saved progress — there's no undo. Type <strong>DELETE</strong> to confirm.`,
+        'Permanently Delete'
+      );
+      if(!confirmed) return;
+      try{
+        const { error } = await supabaseClient.rpc('admin_delete_user', { target_user_id: targetId });
+        if(error) throw error;
+        await renderAdminView();
+      } catch(err){
+        alert('Could not delete: ' + err.message);
       }
     };
   });
