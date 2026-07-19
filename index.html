@@ -721,6 +721,49 @@ function generateAnswerSheetPdf(missedIdx, correctCount, total, pct, dateStr, at
   }
 }
 
+/* PDFs generated before 2026-07-16 don't carry a `selected` field in the
+   hidden payload, so reconstructAttemptFromPdfData() can't backfill Review
+   for them -- but the same attempt's visible "Incorrect Answer Review" page
+   has always printed exactly this information in plain text ("(your answer
+   — incorrect)" / "(correct answer)", one block per missed question, same
+   order as the hidden `questions` array since both are built from the same
+   missedIdx.forEach() in generateAnswerSheetPdf()). Parse it back out rather
+   than leaving Review permanently unavailable for anything from before that
+   date. Only a question block's FIRST line starts with "N. " (wrapped
+   continuation lines of a long question don't), and only real option lines
+   start with "N) " -- both patterns survive text wrapping intact, so this
+   doesn't need line-perfect layout to work. */
+function backfillSelectedFromVisibleReview(fullText, questions){
+  if(questions.every(q=>q.selected !== undefined)) return; // already new-format
+  const reviewIdx = fullText.indexOf('Incorrect Answer Review');
+  if(reviewIdx === -1) return;
+  const retakeIdx = fullText.indexOf(RETAKE_BEGIN);
+  const section = fullText.substring(reviewIdx, retakeIdx === -1 ? fullText.length : retakeIdx);
+  const lines = section.split('\n').map(l=>l.trim()).filter(Boolean);
+  const blocks = [];
+  let current = null;
+  lines.forEach(line=>{
+    if(/^\d+\.\s/.test(line)){
+      current = [];
+      blocks.push(current);
+    } else if(current){
+      current.push(line);
+    }
+  });
+  if(blocks.length !== questions.length) return; // can't safely line up -- leave ungraded
+  blocks.forEach((blockLines, qi)=>{
+    let selected = null;
+    let optIdx = 0;
+    blockLines.forEach(line=>{
+      if(/^\d+\)\s/.test(line)){
+        if(line.includes('(your answer — incorrect)')) selected = optIdx;
+        optIdx++;
+      }
+    });
+    questions[qi].selected = selected;
+  });
+}
+
 /* ================= shared: extract embedded retake data from a PDF file ================= */
 async function extractRetakeDataFromPdf(file){
   if(!window.pdfjsLib){ throw new Error('PDF reader library did not load. Check your network connection.'); }
@@ -743,6 +786,7 @@ async function extractRetakeDataFromPdf(file){
   const json = decodeURIComponent(escape(atob(block)));
   const data = JSON.parse(json);
   if(!data.questions || !data.questions.length) throw new Error(`No questions found in "${file.name}".`);
+  backfillSelectedFromVisibleReview(fullText, data.questions);
   return data; // { title, attempt, questions }
 }
 
