@@ -26,7 +26,7 @@
   .toplinks button{background:var(--chip);border:1px solid var(--line);color:var(--ink);padding:6px 12px;border-radius:20px;cursor:pointer;}
   .toplinks button.active{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);}
 
-  .mode-row{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px;font-family:system-ui,sans-serif;}
+  .mode-row{display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px;font-family:system-ui,sans-serif;}
   .status-bar{font-size:.82rem;color:var(--muted);display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
   .status-bar .email{color:var(--ink);font-weight:600;}
   .link-btn{background:none;border:none;color:var(--accent);cursor:pointer;font-family:system-ui,sans-serif;font-size:.82rem;padding:0;text-decoration:underline;}
@@ -105,17 +105,12 @@
 
   <div id="appShell" style="display:none">
     <div class="mode-row">
-      <div class="toplinks" style="margin:0;">
-        <button id="modeOfflineBtn" class="active">Offline</button>
-        <button id="modeOnlineBtn">Online</button>
-      </div>
       <div class="status-bar" id="statusBar"></div>
     </div>
 
     <div class="toplinks">
       <button id="tabQuiz" class="active">Take Exam</button>
       <button id="tabLibrary">Test Library</button>
-      <button id="tabLoad">Load / Upload a Test</button>
       <button id="tabFlash">Flashcards</button>
       <button id="tabProgress" style="display:none">Progress</button>
       <button id="tabAdmin" style="display:none">Admin</button>
@@ -136,32 +131,6 @@
         <h2>Test Library</h2>
         <div class="format-help">All 25 exams, parsed from the instructor's files and ready to go.</div>
         <div id="libraryList"></div>
-      </div>
-    </div>
-
-    <div id="loadView" style="display:none">
-      <div class="panel subsection">
-        <h2>Retake from a PDF answer sheet (from this tool)</h2>
-        <div class="format-help">Upload a PDF answer sheet you previously downloaded from this tool to continue practicing with just the questions you missed. The attempt number picks up from the sheet you upload.</div>
-        <div class="file-row"><input type="file" id="pdfInput" accept=".pdf"></div>
-        <div class="msg" id="pdfMsg"></div>
-      </div>
-
-      <div class="panel subsection">
-        <h2>Generate flashcards from answer sheets</h2>
-        <div class="format-help">Upload one or more PDF answer sheets you've downloaded from this tool. Every question you missed on any of them becomes a flashcard, with the most frequently missed questions shown first.</div>
-        <div class="file-row"><input type="file" id="flashInput" accept=".pdf" multiple></div>
-        <div class="msg" id="flashMsg"></div>
-      </div>
-
-      <div class="panel subsection">
-        <h2>Save / Load Progress</h2>
-        <div class="format-help">Download a progress file to back up your rounds and attempt history from this session, or load one back in to pick up where you left off (or move progress between devices). Separate from the PDF answer sheets above.</div>
-        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-family:system-ui,sans-serif;">
-          <button class="btn btn-primary" id="saveProgressBtn">Save Progress to File</button>
-          <div class="file-row" style="margin:0;">Load a file: <input type="file" id="loadProgressInput" accept=".json"></div>
-        </div>
-        <div class="msg" id="progressFileMsg"></div>
       </div>
     </div>
 
@@ -216,7 +185,6 @@ const statusBar = document.getElementById('statusBar');
 
 const quizView = document.getElementById('quizView');
 const resultsView = document.getElementById('resultsView');
-const loadView = document.getElementById('loadView');
 const flashView = document.getElementById('flashView');
 const libraryView = document.getElementById('libraryView');
 const authView = document.getElementById('authView');
@@ -225,14 +193,12 @@ const adminView = document.getElementById('adminView');
 const adminPanel = document.getElementById('adminPanel');
 const appShell = document.getElementById('appShell');
 const tabQuiz = document.getElementById('tabQuiz');
-const tabLoad = document.getElementById('tabLoad');
 const tabFlash = document.getElementById('tabFlash');
 const tabLibrary = document.getElementById('tabLibrary');
 const tabProgress = document.getElementById('tabProgress');
 const tabAdmin = document.getElementById('tabAdmin');
 
 tabQuiz.onclick = () => showView('quiz');
-tabLoad.onclick = () => showView('load');
 tabFlash.onclick = () => showView('flash');
 tabLibrary.onclick = () => showView('library');
 tabAdmin.onclick = () => showView('admin');
@@ -241,21 +207,19 @@ tabAdmin.onclick = () => showView('admin');
    session-driven (applyAccessGate forces it regardless of URL) and the
    in-progress-quiz/results states are reachable only through '/' and
    would spam history if routed per-question. */
-const PATH_FOR_VIEW = { quiz: '/', library: '/library', load: '/load', flash: '/flashcards', progress: '/progress', admin: '/admin' };
-const VIEW_FOR_PATH = { '/': 'quiz', '/library': 'library', '/load': 'load', '/flashcards': 'flash', '/progress': 'progress', '/admin': 'admin' };
+const PATH_FOR_VIEW = { quiz: '/', library: '/library', flash: '/flashcards', progress: '/progress', admin: '/admin' };
+const VIEW_FOR_PATH = { '/': 'quiz', '/library': 'library', '/flashcards': 'flash', '/progress': 'progress', '/admin': 'admin' };
 
 function showView(v, opts){
   opts = opts || {};
   quizView.style.display = v==='quiz' && !submitted ? 'block':'none';
   resultsView.style.display = v==='quiz' && submitted ? 'block':'none';
-  loadView.style.display = v==='load' ? 'block':'none';
   flashView.style.display = v==='flash' ? 'block':'none';
   libraryView.style.display = v==='library' ? 'block':'none';
   authView.style.display = v==='auth' ? 'block':'none';
   progressView.style.display = v==='progress' ? 'block':'none';
   adminView.style.display = v==='admin' ? 'block':'none';
   tabQuiz.classList.toggle('active', v==='quiz');
-  tabLoad.classList.toggle('active', v==='load');
   tabFlash.classList.toggle('active', v==='flash');
   tabLibrary.classList.toggle('active', v==='library');
   tabProgress.classList.toggle('active', v==='progress');
@@ -265,8 +229,8 @@ function showView(v, opts){
     renderFlashcard();
     /* Always refetch on entry (mirrors renderProgressView's unconditional
        refetch below) so a just-finished exam shows up immediately without
-       needing a manual page reload or a mode toggle to invalidate a cache. */
-    if(appMode==='online' && currentUser && !flashAttemptsLoading) loadFlashOnlineAttempts();
+       needing a manual page reload to invalidate a cache. */
+    if(currentUser && !flashAttemptsLoading) loadFlashOnlineAttempts();
   }
   if(v==='library') renderLibrary();
   if(v==='auth') renderAuthView();
@@ -472,9 +436,7 @@ function renderResults(){
     <div class="result-actions">
       <button class="btn btn-ghost" id="retakeBtn">Retake Full Exam</button>
       ${missed.length>0 ? `<button class="btn btn-ghost" id="retakeMissedBtn">Retake Missed Only (${missed.length})</button>` : ``}
-      <button class="btn btn-primary" id="downloadPdfBtn">Download PDF Answer Sheet</button>
     </div>
-    <div class="msg" id="pdfGenMsg" style="text-align:center;"></div>
   `;
   document.getElementById('retakeBtn').onclick = async ()=>{
     /* "Retake Full Exam" abandons any in-progress round for this exam and starts the next one */
@@ -514,8 +476,6 @@ function renderResults(){
       loadExam({ title: "Retake — Missed Questions", subtitle: "from " + exam.title, questions: missedQs, examKey: exam.examKey }, nextAttemptNumber);
     };
   }
-  document.getElementById('downloadPdfBtn').onclick = ()=>generateAnswerSheetPdf(missed, correctCount, total, pct, today, currentAttempt, roundNumber);
-
   renderReviewPanel(missed, total);
 }
 
@@ -574,453 +534,6 @@ function escapeHtml(s){
   return (s||'').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 
-/* ================= PDF answer sheet generation ================= */
-const RETAKE_BEGIN = "###RETAKE-DATA-BEGIN###";
-const RETAKE_END = "###RETAKE-DATA-END###";
-
-/* examOverride/answersOverride/msgElId let a past, no-longer-loaded attempt
-   (e.g. redownloaded from the Progress tab) reuse this exact PDF layout
-   without first faking a full loadExam() -- default to the live in-memory
-   exam/answers/#pdfGenMsg used by the just-finished results screen. */
-function generateAnswerSheetPdf(missedIdx, correctCount, total, pct, dateStr, attemptNum, roundNumber, examOverride, answersOverride, msgElId){
-  const activeExam = examOverride || exam;
-  const activeAnswers = answersOverride || answers;
-  const genMsg = document.getElementById(msgElId || 'pdfGenMsg');
-  try{
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ unit:'mm', format:'letter' });
-    const letters = ['1','2','3','4','5','6'];
-    const pageW = doc.internal.pageSize.getWidth();
-    const pageH = doc.internal.pageSize.getHeight();
-
-    function drawHeader(){
-      doc.setFont('helvetica','bold');
-      doc.setFontSize(13);
-      doc.text(`Answer Sheet \u2013 ${activeExam.title}`, 15, 16);
-      doc.setFont('helvetica','normal');
-      doc.setFontSize(10);
-      const roundLabel = roundNumber ? `Round: ${roundNumber}      ` : '';
-      doc.text(`Date: ${dateStr}      Score: ${pct}% (${correctCount} of ${total})      ${roundLabel}Attempt #: ${attemptNum}`, 15, 23);
-    }
-    drawHeader();
-
-    /* bordered grid table matching the original document: 4 side-by-side blocks, each row is
-       [item#][answer][mark], one row per item within a block of ~35; wrong answers get an
-       X in the mark cell, right answers are left blank, mirroring the original's blank-fill style */
-    const blockRows = 35;
-    const colW = { num: 9, ans: 8, mark: 8 };
-    const blockW = colW.num + colW.ans + colW.mark;
-    const rowH = 6;
-    const startY = 32;
-    const startX = 15;
-    const cols = 4;
-    const perPage = blockRows * cols;
-
-    doc.setFontSize(8.5);
-    for(let p=0; p*perPage < total; p++){
-      if(p > 0){ doc.addPage(); drawHeader(); }
-      const pageOffset = p*perPage;
-      for(let b=0; b<cols; b++){
-        const blockStart = pageOffset + b*blockRows;
-        if(blockStart >= total) break;
-        const x0 = startX + b*(blockW + 4);
-        for(let r=0; r<blockRows; r++){
-          const idx = blockStart + r;
-          if(idx >= total || idx >= pageOffset + perPage) break;
-          const y = startY + r*rowH;
-          const cellX = [x0, x0+colW.num, x0+colW.num+colW.ans];
-
-          doc.setDrawColor(0,0,0);
-          doc.setLineWidth(0.15);
-          doc.rect(cellX[0], y, colW.num, rowH);
-          doc.rect(cellX[1], y, colW.ans, rowH);
-          doc.rect(cellX[2], y, colW.mark, rowH);
-
-          const userAns = activeAnswers[idx];
-          const isMissed = missedIdx.includes(idx);
-          const userLetter = userAns!==undefined ? letters[userAns] : '';
-
-          doc.setFont('helvetica','normal');
-          doc.text(String(activeExam.questions[idx].originalNumber || (idx+1)), cellX[0]+colW.num/2, y+rowH-1.8, {align:'center'});
-          doc.setFont('helvetica','bold');
-          doc.text(userLetter, cellX[1]+colW.ans/2, y+rowH-1.8, {align:'center'});
-          doc.setFont('helvetica','normal');
-          if(isMissed){
-            doc.text('X', cellX[2]+colW.mark/2, y+rowH-1.8, {align:'center'});
-          }
-        }
-      }
-    }
-    doc.setFontSize(8);
-    doc.text('An X marks an incorrect answer; the box is left blank if correct.', startX, startY + blockRows*rowH + 6);
-
-    if(missedIdx.length > 0){
-      /* visible review page: full question + all options + correct answer + user's pick */
-      doc.addPage();
-      doc.setFont('helvetica','bold');
-      doc.setFontSize(13);
-      doc.text('Incorrect Answer Review', 15, 18);
-      doc.setFont('helvetica','normal');
-      doc.setFontSize(9);
-      let ry = 28;
-      const pageBottom = 275;
-      missedIdx.forEach(i=>{
-        const q = activeExam.questions[i];
-        const userAns = activeAnswers[i];
-        const qLines = doc.splitTextToSize(`${q.originalNumber || (i+1)}. ${q.text}`, 180);
-        const optLineSets = q.options.map((opt,oi)=>{
-          let suffix = '';
-          if(oi===q.correct) suffix = '   (correct answer)';
-          else if(oi===userAns) suffix = '   (your answer — incorrect)';
-          return doc.splitTextToSize(`${letters[oi]}) ${opt}${suffix}`, 172);
-        });
-        const explLines = q.explanation ? doc.splitTextToSize(`Explanation: ${q.explanation}`, 172) : [];
-        const blockLines = qLines.length + optLineSets.reduce((s,l)=>s+l.length,0) + explLines.length;
-        const blockHeight = blockLines*4.3 + 4;
-        if(ry + blockHeight > pageBottom){ doc.addPage(); ry = 18; }
-
-        doc.setFont('helvetica','bold');
-        doc.text(qLines, 15, ry);
-        ry += qLines.length*4.3 + 1;
-        doc.setFont('helvetica','normal');
-        optLineSets.forEach((lines,oi)=>{
-          const bold = (oi===q.correct);
-          doc.setFont('helvetica', bold ? 'bold' : 'normal');
-          doc.text(lines, 19, ry);
-          ry += lines.length*4.3;
-        });
-        if(userAns===undefined){
-          doc.setFont('helvetica','italic');
-          doc.text('(not answered)', 19, ry);
-          ry += 4.3;
-        }
-        if(explLines.length){
-          doc.setFont('helvetica','italic');
-          doc.text(explLines, 19, ry);
-          ry += explLines.length*4.3;
-        }
-        ry += 3.5;
-      });
-
-      /* hidden data page: machine-readable payload used for PDF-based retakes and flashcards.
-         Text render mode 3 ("Tr" operator, written directly since this jsPDF build doesn't
-         honor a `renderingMode` option on doc.text()) keeps the text objects in the PDF
-         content stream — so pdf.js getTextContent() in extractRetakeDataFromPdf() still
-         recovers them unchanged — but paints nothing, so a human opening/printing the PDF
-         sees a blank page instead of a "do not edit this page" technical page. Render mode
-         is per-page content-stream state, so it must be re-issued after every addPage(). */
-      doc.addPage();
-      doc.internal.write('3 Tr');
-      doc.setFontSize(11);
-      doc.setFont('helvetica','bold');
-      doc.text('Retake Data — do not edit this page', 15, 18);
-      doc.setFont('helvetica','normal');
-      doc.setFontSize(8);
-      doc.text('Upload this PDF back into the Exam Practice Tool to retake just the questions below.', 15, 24);
-
-      /* selected (the wrong answer actually picked, or null if left blank)
-         lets a later PDF import reconstruct a real per-question review for
-         THIS attempt -- not just its next-attempt question set -- since
-         missedIdx is already exactly this attempt's own missed subset.
-         Explicit null rather than omitting the key: JSON.stringify drops
-         undefined-valued keys entirely, which would make old- and
-         new-format PDFs indistinguishable on the way back in. */
-      const missedQuestions = missedIdx.map(i=>({
-        text: activeExam.questions[i].text,
-        options: activeExam.questions[i].options,
-        correct: activeExam.questions[i].correct,
-        selected: activeAnswers[i] !== undefined ? activeAnswers[i] : null,
-        originalNumber: activeExam.questions[i].originalNumber || (i+1)
-      }));
-      const payload = JSON.stringify({ title: activeExam.title, attempt: attemptNum, round: roundNumber || null, total, correctCount, examKey: activeExam.examKey || null, questions: missedQuestions });
-      const b64 = btoa(unescape(encodeURIComponent(payload)));
-
-      doc.setFontSize(6);
-      doc.setFont('courier','normal');
-      let y = 32;
-      doc.text(RETAKE_BEGIN, 15, y);
-      y += 4;
-      const chunkSize = 90;
-      for(let i=0;i<b64.length;i+=chunkSize){
-        doc.text(b64.substring(i,i+chunkSize), 15, y);
-        y += 3.2;
-        if(y > 280){ doc.addPage(); doc.internal.write('3 Tr'); y = 15; }
-      }
-      doc.text(RETAKE_END, 15, y);
-      doc.internal.write('0 Tr');
-    }
-
-    const safeTitle = activeExam.title.replace(/[^a-z0-9]+/gi,'_').slice(0,60);
-    const roundPart = roundNumber ? `_Round${roundNumber}` : '';
-    doc.save(`${safeTitle}${roundPart}_Attempt${attemptNum}_answer_sheet.pdf`);
-    if(genMsg){ genMsg.textContent = 'PDF downloaded.'; genMsg.className = 'msg ok'; }
-  } catch(e){
-    if(genMsg){ genMsg.textContent = 'Could not generate PDF: ' + e.message; genMsg.className = 'msg err'; }
-  }
-}
-
-/* PDFs generated before 2026-07-16 don't carry a `selected` field in the
-   hidden payload, so reconstructAttemptFromPdfData() can't backfill Review
-   for them -- but the same attempt's visible "Incorrect Answer Review" page
-   has always printed exactly this information in plain text ("(your answer
-   — incorrect)" / "(correct answer)", one block per missed question, same
-   order as the hidden `questions` array since both are built from the same
-   missedIdx.forEach() in generateAnswerSheetPdf()). Parse it back out rather
-   than leaving Review permanently unavailable for anything from before that
-   date. Only a question block's FIRST line starts with "N. " (wrapped
-   continuation lines of a long question don't), and only real option lines
-   start with "N) " -- both patterns survive text wrapping intact, so this
-   doesn't need line-perfect layout to work. Match on "your answer" +
-   "incorrect" rather than the literal em dash between them -- different PDF
-   text extractors (pdf.js vs. poppler, confirmed while testing this fix)
-   normalize that character differently, so anchoring on it would make the
-   match fragile across engines for no reason. */
-function backfillSelectedFromVisibleReview(fullText, questions){
-  if(questions.every(q=>q.selected !== undefined)) return; // already new-format
-  const reviewIdx = fullText.indexOf('Incorrect Answer Review');
-  if(reviewIdx === -1) return;
-  const retakeIdx = fullText.indexOf(RETAKE_BEGIN);
-  const section = fullText.substring(reviewIdx, retakeIdx === -1 ? fullText.length : retakeIdx);
-  const lines = section.split('\n').map(l=>l.trim()).filter(Boolean);
-  const blocks = [];
-  let current = null;
-  lines.forEach(line=>{
-    if(/^\d+\.\s/.test(line)){
-      current = [];
-      blocks.push(current);
-    } else if(current){
-      current.push(line);
-    }
-  });
-  if(blocks.length !== questions.length) return; // can't safely line up -- leave ungraded
-  blocks.forEach((blockLines, qi)=>{
-    let selected = null;
-    let optIdx = 0;
-    blockLines.forEach(line=>{
-      if(/^\d+\)\s/.test(line)){
-        if(/your answer.*incorrect/.test(line)) selected = optIdx;
-        optIdx++;
-      }
-    });
-    questions[qi].selected = selected;
-  });
-}
-
-/* ================= shared: extract embedded retake data from a PDF file ================= */
-async function extractRetakeDataFromPdf(file){
-  if(!window.pdfjsLib){ throw new Error('PDF reader library did not load. Check your network connection.'); }
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  const buf = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({data: buf}).promise;
-  let fullText = '';
-  for(let p=1;p<=pdf.numPages;p++){
-    const page = await pdf.getPage(p);
-    const content = await page.getTextContent();
-    fullText += content.items.map(it=>it.str).join('\n') + '\n';
-  }
-  const startIdx = fullText.indexOf(RETAKE_BEGIN);
-  const endIdx = fullText.indexOf(RETAKE_END);
-  if(startIdx === -1 || endIdx === -1){
-    throw new Error(`No retake data found in "${file.name}". Make sure it's a PDF answer sheet downloaded from this tool with at least one missed question.`);
-  }
-  let block = fullText.substring(startIdx + RETAKE_BEGIN.length, endIdx);
-  block = block.replace(/\s+/g, ''); // strip all whitespace/newlines from base64
-  const json = decodeURIComponent(escape(atob(block)));
-  const data = JSON.parse(json);
-  if(!data.questions || !data.questions.length) throw new Error(`No questions found in "${file.name}".`);
-  backfillSelectedFromVisibleReview(fullText, data.questions);
-  return data; // { title, attempt, questions }
-}
-
-/* ================= retake from uploaded PDF ================= */
-/* PDFs generated before examKey was added to the payload (or a retake
-   chain descended from one of those) carry no exam key at all -- but they
-   still carry the exam's title, which is enough to recover the key by
-   matching against the library instead of treating the file as permanently
-   untrackable. "Retake — Exam N" titles get the prefix stripped first. */
-function resolveExamKeyFallback(data){
-  if(data.examKey) return data.examKey;
-  const title = (data.title || '').replace(/^Retake\s*[—–-]\s*/, '').trim();
-  const libEntry = EXAM_LIBRARY.find(le=>le.title===title);
-  return libEntry ? 'lib:' + slugify(libEntry.title) : null;
-}
-
-/* Shared by the single-file "retake now" upload (pdfInput) and the
-   multi-file Progress-tab backfill import: finds/creates the exact round a
-   PDF names and records the historical attempt it documents (real totals
-   only, never fabricated -- see notes at the pdfInput handler below).
-   Does NOT create the next live attempt or navigate anywhere; callers that
-   want to start playing do that themselves with the returned round. */
-async function reconstructAttemptFromPdfData(data){
-  const examKey = resolveExamKeyFallback(data);
-  if(!examKey) return { skipped: true, reason: "no exam key, and title didn't match a library exam (custom/uploaded test, not trackable in Progress)" };
-  const roundNumber = data.round || 1;
-  const libEntry = examKey.startsWith('lib:') ? EXAM_LIBRARY.find(le=>'lib:'+slugify(le.title)===examKey) : null;
-  const originalTotal = libEntry ? libEntry.questions.length : data.questions.length;
-
-  let round = await onlineStore.findRoundByNumber(examKey, roundNumber);
-  if(!round){
-    round = await onlineStore.createRoundWithNumber(examKey, data.title || 'Missed Questions', originalTotal, roundNumber);
-  }
-
-  const thisAttemptNumber = data.attempt || 1;
-  let sourceAttempt = await onlineStore.findAttemptByNumber(round.id, thisAttemptNumber);
-  let recorded = false, hadGap = false;
-  if(!sourceAttempt){
-    let total = data.total;
-    let correctCount = data.correctCount;
-    /* Older PDFs (before total/correctCount were embedded) don't carry their
-       own attempt's stats -- but they're often still derivable rather than a
-       permanent gap: attempt 1 is always the full exam, so its total is the
-       library's question count and its correct count falls out of how many
-       were still missed afterward. A later attempt's total is exactly how
-       many were missed entering it, i.e. the PREVIOUS attempt's own
-       (total - correct) -- only knowable once that previous attempt has
-       itself been recorded, whether from an earlier real play or from this
-       same recovery process run in attempt order. */
-    if(total === undefined || correctCount === undefined){
-      if(thisAttemptNumber === 1){
-        total = originalTotal;
-        correctCount = originalTotal - data.questions.length;
-      } else {
-        const prev = await onlineStore.findAttemptByNumber(round.id, thisAttemptNumber - 1);
-        if(prev && prev.status === 'completed'){
-          total = prev.total_questions - prev.correct_count;
-          correctCount = total - data.questions.length;
-        }
-      }
-    }
-    if(total !== undefined && correctCount !== undefined){
-      sourceAttempt = await onlineStore.recordCompletedAttemptSummary(
-        round.id, thisAttemptNumber, thisAttemptNumber===1 ? 'full' : 'missed_retake', total, correctCount
-      );
-      recorded = true;
-    } else {
-      hadGap = true; // truly can't be derived -- the attempt before this one was never recorded either
-    }
-  }
-  /* Backfill Review data for this specific attempt whenever the PDF actually
-     carries it (every missed question has a `selected` field -- PDFs from
-     before this feature won't) and it isn't already there. Runs whether
-     sourceAttempt was just recorded above or already existed from an
-     earlier import, so re-uploading an old PDF through Progress after this
-     feature shipped is enough to gain Review for it retroactively. */
-  if(sourceAttempt && data.questions.length && data.questions.every(q=>q.selected !== undefined)){
-    const { count } = await supabaseClient.from('exam_attempt_answers')
-      .select('id', { count: 'exact', head: true }).eq('attempt_id', sourceAttempt.id);
-    if(!count){
-      await onlineStore.insertMissedOnlyAnswerRows(sourceAttempt.id, data.questions);
-    }
-  }
-  return { round, thisAttemptNumber, sourceAttempt, recorded, hadGap, originalTotal, stillMissed: data.questions.length };
-}
-
-document.getElementById('pdfInput').onchange = async (e)=>{
-  const file = e.target.files[0];
-  const msg = document.getElementById('pdfMsg');
-  if(!file) return;
-  msg.textContent = 'Reading PDF…'; msg.className = 'msg';
-  try{
-    const data = await extractRetakeDataFromPdf(file);
-    const nextAttempt = (data.attempt || 1) + 1;
-
-    /* Online mode: reconstruct this exam's round/attempt history in the
-       account's own tables (not the offline in-memory funnelEngine) so a
-       chain of uploads behaves identically to playing live -- every attempt
-       correctly numbered and attributed to the right round, which is what
-       the cumulative 98%-mastery-per-round tracking depends on. PDFs
-       generated before this feature (or missing an intermediate upload)
-       won't have `total`/`correctCount` embedded for the attempt they
-       document -- that attempt is left unrecorded rather than guessed at,
-       and shows as a gap in Progress instead of a fabricated score. */
-    const resolvedExamKey = resolveExamKeyFallback(data);
-    if(appMode === 'online' && currentUser && resolvedExamKey){
-      const result = await reconstructAttemptFromPdfData(data);
-      const { round, thisAttemptNumber, sourceAttempt, hadGap, originalTotal } = result;
-      const roundNumber = round.round_number;
-
-      const existingNext = await onlineStore.findAttemptByNumber(round.id, nextAttempt);
-      if(existingNext){
-        msg.textContent = `Attempt #${nextAttempt} of round ${roundNumber} already exists for this exam — this PDF may already be uploaded, or you've already played this retake. Nothing new was created.`;
-        msg.className = 'msg err';
-        return;
-      }
-
-      activeOnlineRound = round;
-      activeOnlineAttempt = await onlineStore.createAttemptWithQuestions(
-        round.id, nextAttempt, 'missed_retake', sourceAttempt ? sourceAttempt.id : null, data.questions
-      );
-      const mastered = (originalTotal - data.questions.length) / originalTotal >= MASTERY_THRESHOLD;
-      await onlineStore.updateRound(round.id, data.questions.length, mastered, mastered ? new Date().toISOString() : null);
-      round.funnel_missed_count = data.questions.length;
-      if(mastered){ round.status = 'mastered'; }
-
-      loadExam({ title: 'Retake — ' + (data.title || 'Missed Questions'), subtitle: data.questions.length + ' previously missed', questions: data.questions, examKey: resolvedExamKey }, nextAttempt);
-      msg.textContent = `Loaded ${data.questions.length} previously missed question(s) — this is attempt #${nextAttempt} of round ${roundNumber}.`
-        + (hadGap ? ` (Attempt #${thisAttemptNumber}'s own results weren't in this file, so it'll show as "not uploaded" in Progress.)` : '')
-        + (!data.examKey ? ` (This PDF predated exam-key tracking — recovered it from the title, "${data.title}".)` : '');
-      msg.className = 'msg ok';
-      return;
-    }
-
-    const examKey = data.examKey || ('custom:' + newCustomExamId());
-    let sourceAttemptNumber = null;
-    if(data.examKey){
-      ensureActiveRound(examKey, data.title || 'Missed Questions', data.questions.length);
-      sourceAttemptNumber = activeOfflineRound.attempts.length || null;
-      activeOfflineAttempt = funnelEngine.startAttempt(activeOfflineRound, data.questions, 'missed_retake', sourceAttemptNumber);
-    } else {
-      activeOfflineRound = null; activeOfflineAttempt = null;
-    }
-    loadExam({ title: 'Retake — ' + (data.title || 'Missed Questions'), subtitle: data.questions.length + ' previously missed', questions: data.questions, examKey: data.examKey || null }, nextAttempt);
-    msg.textContent = `Loaded ${data.questions.length} previously missed question(s) — this is attempt #${nextAttempt}.`;
-    msg.className = 'msg ok';
-  } catch(err){
-    msg.textContent = err.message;
-    msg.className = 'msg err';
-  }
-};
-
-/* ================= flashcards from one or more uploaded PDFs ================= */
-document.getElementById('flashInput').onchange = async (e)=>{
-  const files = Array.from(e.target.files || []);
-  const msg = document.getElementById('flashMsg');
-  if(!files.length) return;
-  msg.textContent = 'Reading PDF(s)…'; msg.className = 'msg';
-  try{
-    const tally = new Map(); // key: question text -> {text, options, correct, count}
-    let filesUsed = 0;
-    for(const file of files){
-      try{
-        const data = await extractRetakeDataFromPdf(file);
-        filesUsed++;
-        data.questions.forEach(q=>{
-          const key = q.text.trim().toLowerCase();
-          if(tally.has(key)){
-            tally.get(key).count++;
-          } else {
-            tally.set(key, { text: q.text, options: q.options, correct: q.correct, count: 1 });
-          }
-        });
-      } catch(innerErr){
-        // skip files that don't contain retake data, but keep going
-        console.warn(innerErr.message);
-      }
-    }
-    if(tally.size === 0){
-      throw new Error('No retake data found in any of the uploaded PDFs.');
-    }
-    flashcards = Array.from(tally.values()).sort((a,b)=>b.count - a.count);
-    flashIndex = 0;
-    flashSelectedOption = null;
-    showView('flash');
-    msg.textContent = `Built ${flashcards.length} flashcard(s) from ${filesUsed} of ${files.length} file(s).`;
-    msg.className = 'msg ok';
-  } catch(err){
-    msg.textContent = err.message;
-    msg.className = 'msg err';
-  }
-};
 
 /* ================= online flashcards: generate from stored progress =================
    Pulls every missed question (selected_option !== correct_option) from any
@@ -1442,87 +955,6 @@ async function completeTrackedAttempt(){
   funnelEngine.recordAnswers(activeOfflineAttempt, exam.questions, answers, flags);
   funnelEngine.completeAttempt(activeOfflineRound, activeOfflineAttempt);
 }
-
-/* ================= SHARED: cross-mode JSON schema (export/import) =================
-   Identical shape whether it comes from an online account export or an
-   offline save file — see the build plan for the full schema description. */
-function exportProgressJson(){
-  const grouped = {};
-  offlineRounds.forEach(r=>{
-    if(!grouped[r.examKey]) grouped[r.examKey] = { examKey: r.examKey, examTitle: r.examTitle, rounds: [] };
-    grouped[r.examKey].rounds.push({
-      roundNumber: r.roundNumber, status: r.status, originalTotal: r.originalTotal,
-      funnelMissedCount: r.funnelMissedCount, masteredAt: r.masteredAt,
-      createdAt: r.createdAt, updatedAt: r.updatedAt,
-      attempts: r.attempts.map(a=>({
-        attemptNumber: a.attemptNumber, scope: a.scope, sourceAttemptNumber: a.sourceAttemptNumber,
-        totalQuestions: a.totalQuestions, correctCount: a.correctCount, status: a.status,
-        startedAt: a.startedAt, completedAt: a.completedAt,
-        answers: a.answers.map(ans=>({
-          questionIndex: ans.questionIndex, text: ans.text, options: ans.options, correct: ans.correct,
-          explanation: ans.explanation, originalNumber: ans.originalNumber, selected: ans.selected, flagged: ans.flagged
-        }))
-      }))
-    });
-  });
-  return { schemaVersion: CROSS_MODE_SCHEMA_VERSION, exportedAt: new Date().toISOString(), exams: Object.values(grouped) };
-}
-
-function importProgressJson(json){
-  if(!json || json.schemaVersion !== CROSS_MODE_SCHEMA_VERSION || !Array.isArray(json.exams)){
-    throw new Error('This file is not a recognized progress export.');
-  }
-  offlineRounds = [];
-  json.exams.forEach(ex=>{
-    (ex.rounds||[]).forEach(r=>{
-      offlineRounds.push({
-        examKey: ex.examKey, examTitle: ex.examTitle, roundNumber: r.roundNumber, status: r.status,
-        originalTotal: r.originalTotal, funnelMissedCount: r.funnelMissedCount, masteredAt: r.masteredAt,
-        createdAt: r.createdAt, updatedAt: r.updatedAt,
-        attempts: (r.attempts||[]).map(a=>({...a, answers: (a.answers||[]).map(ans=>({...ans}))}))
-      });
-    });
-  });
-  activeOfflineRound = null;
-  activeOfflineAttempt = null;
-  return json.exams.length;
-}
-
-document.getElementById('saveProgressBtn').onclick = ()=>{
-  const msg = document.getElementById('progressFileMsg');
-  if(!offlineRounds.length){
-    msg.textContent = 'No progress recorded yet — complete at least one exam attempt first.';
-    msg.className = 'msg err';
-    return;
-  }
-  const json = exportProgressJson();
-  const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = 'exam_progress.json'; a.click();
-  URL.revokeObjectURL(url);
-  msg.textContent = 'Progress file downloaded.';
-  msg.className = 'msg ok';
-};
-
-document.getElementById('loadProgressInput').onchange = async (e)=>{
-  const file = e.target.files[0];
-  const msg = document.getElementById('progressFileMsg');
-  if(!file) return;
-  try{
-    const text = await file.text();
-    const json = JSON.parse(text);
-    const examCount = importProgressJson(json);
-    msg.textContent = `Loaded progress for ${examCount} exam(s).`;
-    msg.className = 'msg ok';
-  } catch(err){
-    msg.textContent = 'Could not load progress file: ' + err.message;
-    msg.className = 'msg err';
-  } finally {
-    e.target.value = '';
-  }
-};
-
 /* ================= ONLINE MODE: Supabase client & config =================
    Only the public anon key is ever embedded here — it's meant to be public
    and is safe only because every table has RLS scoping reads/writes to
@@ -1537,7 +969,7 @@ const TURNSTILE_SITE_KEY = '0x4AAAAAAD2sW9Vf3k0VKwOZ';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /* ================= ONLINE MODE: auth state & views ================= */
-let appMode = 'offline'; // 'offline' | 'online'
+let appMode = 'online'; // always 'online' now -- offline mode lives only in the separate offline app
 let currentUser = null;
 let profile = null; // this account's row from `profiles` -- { approved, role, ... } or null
 let libraryLoaded = false;
@@ -1770,13 +1202,11 @@ async function handleDeleteAccount(){
   EXAM_LIBRARY = [];
   activeOnlineRound = null;
   activeOnlineAttempt = null;
-  appMode = 'offline';
+  appMode = 'online';
   flashProgressMsg = null;
   flashOnlineAttempts = null;
   flashSelectedAttemptIds = new Set();
   flashPickOpen = false;
-  document.getElementById('modeOfflineBtn').classList.add('active');
-  document.getElementById('modeOnlineBtn').classList.remove('active');
   await applyAccessGate();
   alert('Your account and all saved progress have been deleted.');
 }
@@ -1936,18 +1366,18 @@ async function applyAccessGate(){
      worse, stomp a deep-linked URL back to '/') on top of whatever screen
      they're already looking at. */
   const wasGranted = appShell.style.display !== 'none';
-  /* A signed-in, granted account should default to online tracking -- appMode
-     otherwise starts 'offline' on every fresh page load (never persisted),
-     which silently left new attempts untracked (nothing written to
-     exam_rounds) even though the user was fully authenticated. Only set this
-     on the transition into granted, not on a redundant re-fire, so it never
-     overrides a user's own mid-session switch back to Offline. */
-  if(!wasGranted) appMode = 'online';
+  if(!wasGranted){
+    /* A fresh sign-in must overwrite any stale timestamp left over from a
+       previous inactivity timeout -- startInactivityWatch() only seeds the
+       key when it's completely absent, so without this a stale-but-present
+       value from before the timeout would trip the very next minute-interval
+       check and sign the person right back out again, seconds after they
+       signed back in. */
+    try{ localStorage.setItem(INACTIVITY_STORAGE_KEY, String(Date.now())); }catch(e){ /* storage unavailable -- fine, will just re-seed on next check */ }
+  }
   startInactivityWatch();
   tabAdmin.style.display = profile.role === 'admin' ? '' : 'none';
   appShell.style.display = '';
-  document.getElementById('modeOfflineBtn').classList.toggle('active', appMode==='offline');
-  document.getElementById('modeOnlineBtn').classList.toggle('active', appMode==='online');
   renderStatusBar();
   if(!libraryLoaded){
     examSub.textContent = 'Loading exam library…';
@@ -1973,21 +1403,6 @@ supabaseClient.auth.onAuthStateChange((event, session) => {
   applyAccessGate();
 });
 
-document.getElementById('modeOfflineBtn').onclick = ()=>{
-  appMode = 'offline';
-  document.getElementById('modeOfflineBtn').classList.add('active');
-  document.getElementById('modeOnlineBtn').classList.remove('active');
-  renderStatusBar();
-  showView('quiz');
-};
-document.getElementById('modeOnlineBtn').onclick = ()=>{
-  appMode = 'online';
-  flashOnlineAttempts = null; // re-fetch so any rounds finished since last visit show up
-  document.getElementById('modeOnlineBtn').classList.add('active');
-  document.getElementById('modeOfflineBtn').classList.remove('active');
-  renderStatusBar();
-  showView('quiz');
-};
 tabProgress.onclick = ()=> showView('progress');
 
 /* ================= ONLINE MODE: DB read/write =================
@@ -2051,25 +1466,6 @@ const onlineStore = {
     const { error: insErr } = await supabaseClient.from('exam_attempt_answers').insert(rows);
     if(insErr) throw insErr;
     return attempt;
-  },
-  /* Backfills row-level review data for an attempt that was already
-     recorded as a totals-only summary (recordCompletedAttemptSummary, from
-     an uploaded PDF) -- only ever the attempt's own MISSED subset, since
-     that's all a PDF ever carries (see generateAnswerSheetPdf's `selected`
-     field). Not a full per-question snapshot: question_index here is just
-     positional within this missed set, not the original exam's numbering
-     (original_number carries that separately) -- fine for Review, which
-     only ever needs to list what's here, but NOT sufficient to regenerate
-     the full answer-sheet grid (see downloadAttemptPdfFromProgress). */
-  async insertMissedOnlyAnswerRows(attemptId, questions){
-    const rows = questions.map((q,i)=>({
-      attempt_id: attemptId, user_id: currentUser.id, question_index: i,
-      question_text: q.text, options: q.options, correct_option: q.correct,
-      explanation: q.explanation || '', original_number: q.originalNumber || (i+1),
-      selected_option: (q.selected===undefined || q.selected===null) ? null : q.selected, flagged: false
-    }));
-    const { error } = await supabaseClient.from('exam_attempt_answers').insert(rows);
-    if(error) throw error;
   },
   async discardAttempt(attemptId){
     const { error } = await supabaseClient.from('exam_attempts').delete().eq('id', attemptId);
@@ -2141,20 +1537,6 @@ const onlineStore = {
       .select('attempt_number').eq('round_id', roundId).order('attempt_number', { ascending: false }).limit(1).maybeSingle();
     if(error) throw error;
     return data ? data.attempt_number : 0;
-  },
-  /* Records a historical attempt's outcome from an uploaded PDF's embedded
-     totals, with no per-question answer rows (the PDF only ever encodes the
-     still-missed questions, not the full question/answer set a live attempt
-     would have) -- "Review" for a reconstructed attempt just won't have
-     question-level detail, only the round/attempt summary numbers. */
-  async recordCompletedAttemptSummary(roundId, attemptNumber, scope, totalQuestions, correctCount){
-    const { data, error } = await supabaseClient.from('exam_attempts').insert({
-      round_id: roundId, user_id: currentUser.id, attempt_number: attemptNumber,
-      attempt_scope: scope, total_questions: totalQuestions, correct_count: correctCount,
-      status: 'completed', completed_at: new Date().toISOString()
-    }).select().single();
-    if(error) throw error;
-    return data;
   }
 };
 
@@ -2256,145 +1638,6 @@ window.addEventListener('beforeunload', (e)=>{
   }
 });
 
-/* ================= ONLINE MODE: cross-mode export/import ================= */
-async function fetchFullOnlineExport(){
-  const { data: rounds, error: rErr } = await supabaseClient.from('exam_rounds').select('*').eq('user_id', currentUser.id);
-  if(rErr) throw rErr;
-  if(!rounds.length) return { schemaVersion: CROSS_MODE_SCHEMA_VERSION, exportedAt: new Date().toISOString(), exams: [] };
-  const { data: attempts, error: aErr } = await supabaseClient.from('exam_attempts').select('*').in('round_id', rounds.map(r=>r.id));
-  if(aErr) throw aErr;
-  let answers = [];
-  if(attempts.length){
-    answers = await fetchAllByIn('exam_attempt_answers', 'attempt_id', attempts.map(a=>a.id), '*');
-  }
-  const grouped = {};
-  rounds.forEach(r=>{
-    if(!grouped[r.exam_key]) grouped[r.exam_key] = { examKey: r.exam_key, examTitle: r.exam_title, rounds: [] };
-    const roundAttempts = attempts.filter(a=>a.round_id===r.id).map(a=>({
-      attemptNumber: a.attempt_number, scope: a.attempt_scope, sourceAttemptNumber: null,
-      totalQuestions: a.total_questions, correctCount: a.correct_count, status: a.status,
-      startedAt: a.started_at, completedAt: a.completed_at,
-      answers: answers.filter(ans=>ans.attempt_id===a.id).sort((x,y)=>x.question_index-y.question_index).map(ans=>({
-        questionIndex: ans.question_index, text: ans.question_text, options: ans.options, correct: ans.correct_option,
-        explanation: ans.explanation, originalNumber: ans.original_number, selected: ans.selected_option, flagged: ans.flagged
-      }))
-    }));
-    grouped[r.exam_key].rounds.push({
-      roundNumber: r.round_number, status: r.status, originalTotal: r.original_total,
-      funnelMissedCount: r.funnel_missed_count, masteredAt: r.mastered_at,
-      createdAt: r.created_at, updatedAt: r.updated_at, attempts: roundAttempts
-    });
-  });
-  return { schemaVersion: CROSS_MODE_SCHEMA_VERSION, exportedAt: new Date().toISOString(), exams: Object.values(grouped) };
-}
-
-/* Inserts rounds/attempts/answers as-is, preserving round/attempt numbers from
-   the import file rather than renumbering. The source_attempt_id FK chain
-   isn't preserved across import (the export schema only tracks source by
-   attempt *number*, not DB id) — round/attempt numbering still fully
-   reconstructs the funnel history, just without that one internal link. */
-async function importExamRounds(examKey, examTitle, rounds){
-  for(const r of rounds){
-    const { data: roundRow, error: rErr } = await supabaseClient.from('exam_rounds').insert({
-      user_id: currentUser.id, exam_key: examKey, exam_title: examTitle, round_number: r.roundNumber,
-      original_total: r.originalTotal, funnel_missed_count: r.funnelMissedCount, status: r.status,
-      mastered_at: r.masteredAt, created_at: r.createdAt, updated_at: r.updatedAt
-    }).select().single();
-    if(rErr) throw rErr;
-    for(const a of r.attempts){
-      const { data: attRow, error: aErr } = await supabaseClient.from('exam_attempts').insert({
-        round_id: roundRow.id, user_id: currentUser.id, attempt_number: a.attemptNumber, attempt_scope: a.scope,
-        source_attempt_id: null, total_questions: a.totalQuestions, correct_count: a.correctCount, status: a.status,
-        started_at: a.startedAt, completed_at: a.completedAt
-      }).select().single();
-      if(aErr) throw aErr;
-      if(a.answers && a.answers.length){
-        const answerRows = a.answers.map(ans=>({
-          attempt_id: attRow.id, user_id: currentUser.id, question_index: ans.questionIndex,
-          question_text: ans.text, options: ans.options, correct_option: ans.correct,
-          explanation: ans.explanation || '', original_number: ans.originalNumber || (ans.questionIndex+1),
-          selected_option: ans.selected, flagged: !!ans.flagged
-        }));
-        const { error: ansErr } = await supabaseClient.from('exam_attempt_answers').insert(answerRows);
-        if(ansErr) throw ansErr;
-      }
-    }
-  }
-}
-
-/* 3-way variant of askContinueOrFresh's overlay pattern — keep/replace/merge,
-   never a silent auto-merge. */
-function askKeepReplaceMerge(examTitleText){
-  return new Promise(resolve=>{
-    const overlay = document.createElement('div');
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(31,36,34,.4);display:flex;align-items:center;justify-content:center;z-index:9999;font-family:system-ui,sans-serif;padding:20px;';
-    overlay.innerHTML = `
-      <div style="background:#fff;border-radius:12px;padding:22px 24px;max-width:400px;box-shadow:0 8px 30px rgba(0,0,0,.25);">
-        <div style="font-size:.95rem;line-height:1.5;margin-bottom:10px;color:#1f2422;">"${escapeHtml(examTitleText)}" has overlapping round history between this file and your account. How should we combine them?</div>
-        <div style="font-size:.8rem;color:#6b7370;margin-bottom:14px;">Merge keeps whichever side has more progress on each round; ties go to the most recently updated.</div>
-        <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
-          <button id="keepBtn" style="font-family:system-ui,sans-serif;border:1px solid #e3e0d8;background:none;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem;">Keep Mine</button>
-          <button id="replaceBtn" style="font-family:system-ui,sans-serif;border:1px solid #e3e0d8;background:none;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.85rem;">Replace</button>
-          <button id="mergeBtn" style="font-family:system-ui,sans-serif;border:none;background:#2f6f5e;color:#fff;border-radius:8px;padding:8px 12px;cursor:pointer;font-weight:600;font-size:.85rem;">Merge</button>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-    overlay.querySelector('#keepBtn').onclick = ()=>{ overlay.remove(); resolve('keep'); };
-    overlay.querySelector('#replaceBtn').onclick = ()=>{ overlay.remove(); resolve('replace'); };
-    overlay.querySelector('#mergeBtn').onclick = ()=>{ overlay.remove(); resolve('merge'); };
-  });
-}
-
-async function handleOnlineImport(json){
-  if(!json || json.schemaVersion !== CROSS_MODE_SCHEMA_VERSION || !Array.isArray(json.exams)){
-    throw new Error('This file is not a recognized progress export.');
-  }
-  const { data: existingRounds, error } = await supabaseClient.from('exam_rounds').select('*').eq('user_id', currentUser.id);
-  if(error) throw error;
-
-  for(const ex of json.exams){
-    const existingForExam = existingRounds.filter(r=>r.exam_key === ex.examKey);
-    if(existingForExam.length === 0){
-      await importExamRounds(ex.examKey, ex.examTitle, ex.rounds);
-      continue;
-    }
-    const overlapping = ex.rounds.some(r => existingForExam.some(er=>er.round_number===r.roundNumber));
-    if(!overlapping){
-      const existingNumbers = new Set(existingForExam.map(er=>er.round_number));
-      const newRounds = ex.rounds.filter(r=>!existingNumbers.has(r.roundNumber));
-      await importExamRounds(ex.examKey, ex.examTitle, newRounds);
-      continue;
-    }
-    const choice = await askKeepReplaceMerge(ex.examTitle);
-    if(choice === 'keep') continue;
-    if(choice === 'replace'){
-      await supabaseClient.from('exam_rounds').delete().eq('user_id', currentUser.id).eq('exam_key', ex.examKey);
-      await importExamRounds(ex.examKey, ex.examTitle, ex.rounds);
-      continue;
-    }
-    /* merge: per round number, whichever side has more attempts (further along
-       the funnel) wins; ties go to the most recently updated side */
-    for(const incomingRound of ex.rounds){
-      const existingRound = existingForExam.find(er=>er.round_number===incomingRound.roundNumber);
-      if(!existingRound){
-        await importExamRounds(ex.examKey, ex.examTitle, [incomingRound]);
-        continue;
-      }
-      const { count: existingAttemptCount } = await supabaseClient.from('exam_attempts')
-        .select('id', { count:'exact', head:true }).eq('round_id', existingRound.id);
-      const incomingAttemptCount = incomingRound.attempts.length;
-      let incomingWins = incomingAttemptCount > (existingAttemptCount||0);
-      if(incomingAttemptCount === (existingAttemptCount||0)){
-        incomingWins = new Date(incomingRound.updatedAt) > new Date(existingRound.updated_at);
-      }
-      if(incomingWins){
-        await supabaseClient.from('exam_rounds').delete().eq('id', existingRound.id);
-        await importExamRounds(ex.examKey, ex.examTitle, [incomingRound]);
-      }
-    }
-  }
-}
 
 /* ================= ONLINE MODE: progress tracking view ================= */
 let progressData = null;
@@ -2417,13 +1660,6 @@ async function renderProgressView(){
       if(attErr) throw attErr;
       attempts = attemptRows;
       if(attempts.length){
-        /* Attempts reconstructed from an uploaded PDF's totals-only summary
-           (recordCompletedAttemptSummary) have no per-question rows at all;
-           newer PDFs can backfill a MISSED-ONLY subset (see
-           insertMissedOnlyAnswerRows) -- enough for Review, but row count
-           short of total_questions means the full answer-sheet grid can't
-           be faithfully redrawn, so Download PDF needs the stricter
-           hasFullAnswers check while Review only needs hasAnswers. */
         const answerRows = await fetchAllByIn('exam_attempt_answers', 'attempt_id', attempts.map(a=>a.id), 'attempt_id');
         answerRows.forEach(r=>{ answerCountByAttempt[r.attempt_id] = (answerCountByAttempt[r.attempt_id]||0) + 1; });
       }
@@ -2434,7 +1670,7 @@ async function renderProgressView(){
       const roundAttempts = attempts.filter(a=>a.round_id===r.id)
         .map(a=>{
           const answerCount = answerCountByAttempt[a.id] || 0;
-          return { ...a, hasAnswers: answerCount > 0, hasFullAnswers: answerCount === a.total_questions };
+          return { ...a, hasAnswers: answerCount > 0 };
         });
       examsMap[r.exam_key].rounds.push({ ...r, attempts: roundAttempts });
     });
@@ -2459,11 +1695,7 @@ function renderProgressPanel(){
       <span>${d.exams.length} exam(s) started</span>
       <span>${d.masteredRounds} of ${d.totalRounds} round(s) mastered</span>
     </div>
-    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-family:system-ui,sans-serif;margin-bottom:14px;">
-      <button class="btn btn-ghost" id="exportProgressBtn">Export Progress</button>
-      <div class="file-row" style="margin:0;">Import a file: <input type="file" id="importProgressInput" accept=".json,.pdf" multiple></div>
-    </div>
-    <div class="msg" id="progressImportMsg"></div>
+    <div class="msg" id="progressMsg"></div>
   `;
   if(!d.exams.length){
     html += `<div class="format-help">No online attempts yet — start an exam from the Test Library while in Online mode.</div>`;
@@ -2477,14 +1709,12 @@ function renderProgressPanel(){
       const masteredSoFar = r.original_total - r.funnel_missed_count;
       const masteredPct = ((masteredSoFar / r.original_total) * 100).toFixed(1);
       /* "Continue" needs a real question-level snapshot to work from
-         (hasAnswers) -- a bare recordCompletedAttemptSummary() row from an
-         uploaded PDF has none. That's covered two ways: either the latest
-         attempt is itself completed with row data (a live-played attempt),
-         or it's an in-progress attempt already staged with its question
-         snapshot -- which the batch PDF importer now does automatically
-         right after reconstructing a round's latest historical attempt, so
-         PDF-only rounds become continuable too, not just ones played
-         natively. Continue then either builds the NEXT attempt (completed
+         (hasAnswers) -- a totals-only historical row (from the retired PDF
+         importer; existing accounts may still have these) has none. That's
+         covered two ways: either the latest attempt is itself completed
+         with row data (a live-played attempt), or it's an in-progress
+         attempt already staged with its question snapshot. Continue then
+         either builds the NEXT attempt (completed
          case) or just resumes the staged/interrupted one (in-progress case).
          Abandoned rounds are included too -- "Retake Full Exam" abandons
          whatever round was active to start a fresh one, even if that round
@@ -2538,17 +1768,10 @@ function renderProgressPanel(){
              how many were still missed after that attempt. */
           const stillMissedAfter = a.total_questions - a.correct_count;
           const cumulativePct = ((r.original_total - stillMissedAfter) / r.original_total * 100).toFixed(1);
-          /* Review only needs SOME row data -- a PDF-reconstructed attempt
-             can have a missed-only subset backfilled (see
-             insertMissedOnlyAnswerRows), which is exactly what "Review
-             Missed Only" needs. Download PDF needs the FULL set, since the
-             answer-sheet grid has to place every original question, and a
-             missed-only subset can't be blown back up into that -- gated on
-             hasFullAnswers, not just hasAnswers. An attempt recorded from a
-             PDF that predates the `selected`-field embedding (see
-             generateAnswerSheetPdf) has neither and truly has nothing to
-             show, which is worth saying explicitly rather than leaving
-             blank space where buttons would otherwise be. */
+          /* Review only needs SOME row data. An attempt from the retired PDF
+             importer that predates per-question backfill has none at all --
+             worth saying explicitly rather than leaving blank space where a
+             Review link would otherwise be. */
           const noReviewNote = (a.status==='completed' && !a.hasAnswers)
             ? `<span class="lib-meta" style="font-size:.78rem;">from an uploaded PDF — no detailed review available</span>` : '';
           html += `
@@ -2557,7 +1780,6 @@ function renderProgressPanel(){
               <span style="display:flex;gap:12px;align-items:center;">
                 ${noReviewNote}
                 ${(a.status==='completed' && a.hasAnswers) ? `<button class="link-btn" data-review-attempt="${a.id}" data-exam-key="${escapeHtml(r.exam_key)}">Review</button>` : ''}
-                ${(a.status==='completed' && a.hasFullAnswers) ? `<button class="link-btn" data-download-attempt="${a.id}" data-round-id="${r.id}">Download PDF</button>` : ''}
                 <button class="link-btn" style="color:#b3401f;" data-delete-attempt="${a.id}" data-round-id="${r.id}" data-attempt-number="${a.attempt_number}">Delete</button>
               </span>
             </div>
@@ -2569,127 +1791,6 @@ function renderProgressPanel(){
     html += `</div>`;
   });
   progressPanel.innerHTML = html;
-  document.getElementById('exportProgressBtn').onclick = async ()=>{
-    const msg = document.getElementById('progressImportMsg');
-    try{
-      const json = await fetchFullOnlineExport();
-      const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = 'exam_progress_online_export.json'; a.click();
-      URL.revokeObjectURL(url);
-    } catch(err){
-      msg.textContent = 'Export failed: ' + err.message;
-      msg.className = 'msg err';
-    }
-  };
-  document.getElementById('importProgressInput').onchange = async (e)=>{
-    const files = Array.from(e.target.files || []);
-    const msg = document.getElementById('progressImportMsg');
-    if(!files.length) return;
-    msg.textContent = 'Importing…'; msg.className = 'msg';
-    const notes = [];
-    try{
-      for(const file of files.filter(f=>f.name.toLowerCase().endsWith('.json'))){
-        const json = JSON.parse(await file.text());
-        await handleOnlineImport(json);
-        notes.push(`${file.name}: imported (${json.exams.length} exam(s) in file).`);
-      }
-
-      /* PDF answer sheets only ever document ONE historical attempt each (the
-         questions still missed after it) -- import backfills round/attempt
-         records for each file uploaded, without starting a new live attempt
-         (unlike the Load-view PDF upload, which is "continue playing now").
-         Files can arrive in any order; only the highest attempt number seen
-         per round drives that round's current funnel/mastery state. */
-      const pdfFiles = files.filter(f=>f.name.toLowerCase().endsWith('.pdf'));
-      if(pdfFiles.length){
-        /* Parse every file first, then process in ascending attempt order --
-           older PDFs need their PRECEDING attempt already recorded to derive
-           their own stats (see reconstructAttemptFromPdfData), which only
-           works if attempt 1's file is handled before attempt 2's, etc.,
-           regardless of what order they were actually selected/dropped in. */
-        const parsed = [];
-        let failCount = 0;
-        for(const file of pdfFiles){
-          try{
-            const data = await extractRetakeDataFromPdf(file);
-            parsed.push({ file, data });
-          } catch(fileErr){
-            failCount++;
-            notes.push(`${file.name}: ${fileErr.message}`);
-          }
-        }
-        parsed.sort((a,b)=>(a.data.attempt||1) - (b.data.attempt||1));
-
-        const latestPerRound = new Map(); // roundId -> {attemptNumber, stillMissed, round, originalTotal, questions, sourceAttemptId}
-        let recordedCount = 0, gapCount = 0, skipCount = 0;
-        for(const { file, data } of parsed){
-          try{
-            const result = await reconstructAttemptFromPdfData(data);
-            if(result.skipped){ skipCount++; notes.push(`${file.name}: skipped — ${result.reason}.`); continue; }
-            if(result.recorded) recordedCount++;
-            if(result.hadGap) gapCount++;
-            const prior = latestPerRound.get(result.round.id);
-            if(!prior || result.thisAttemptNumber > prior.attemptNumber){
-              latestPerRound.set(result.round.id, {
-                attemptNumber: result.thisAttemptNumber, stillMissed: result.stillMissed,
-                round: result.round, originalTotal: result.originalTotal,
-                questions: data.questions, sourceAttemptId: result.sourceAttempt ? result.sourceAttempt.id : null
-              });
-            }
-          } catch(fileErr){
-            failCount++;
-            notes.push(`${file.name}: ${fileErr.message}`);
-          }
-        }
-        let stagedCount = 0;
-        for(const { round, attemptNumber, stillMissed, originalTotal, questions, sourceAttemptId } of latestPerRound.values()){
-          /* Only the round's actual most-recent attempt (across ALL its
-             history, not just this upload batch) should drive its current
-             funnel/mastery state -- uploading an old PDF for a round that's
-             since progressed further via live play must not regress it. */
-          const trueMax = await onlineStore.maxAttemptNumber(round.id);
-          if(attemptNumber < trueMax) continue;
-          const mastered = (originalTotal - stillMissed) / originalTotal >= MASTERY_THRESHOLD;
-          await onlineStore.updateRound(round.id, stillMissed, mastered, mastered ? new Date().toISOString() : null);
-
-          /* Stage the next missed-only attempt's full question snapshot right
-             now -- exactly what the single-file "Load / Upload a Test" PDF
-             flow already does before it jumps straight into playing -- so
-             this round becomes resumable from Progress's "Continue" button
-             instead of being stuck needing yet another PDF round-trip. Only
-             the row-level snapshot here (not recordCompletedAttemptSummary's
-             totals-only record) has the actual question text/options/correct
-             a next attempt needs, and only the PDF's own embedded data ever
-             carries that -- it's unrecoverable once this import finishes. */
-          if(!mastered && stillMissed > 0 && questions && questions.length){
-            const nextNum = attemptNumber + 1;
-            const existingNext = await onlineStore.findAttemptByNumber(round.id, nextNum);
-            if(!existingNext){
-              await onlineStore.createAttemptWithQuestions(round.id, nextNum, 'missed_retake', sourceAttemptId, questions);
-              stagedCount++;
-            }
-          }
-        }
-        notes.push(`${pdfFiles.length} PDF file(s): ${recordedCount} attempt(s) recorded, ${gapCount} left as a gap (older PDF format), ${skipCount} skipped, ${failCount} failed, ${stagedCount} round(s) now continuable in-app.`);
-      }
-
-      /* renderProgressView() rebuilds the whole panel (including a fresh,
-         empty #progressImportMsg), so the summary has to be set on the NEW
-         element afterward -- setting it on `msg` here would be wiped
-         immediately. */
-      await renderProgressView();
-      const freshMsg = document.getElementById('progressImportMsg');
-      freshMsg.innerHTML = notes.map(escapeHtml).join('<br>') || 'Nothing to import.';
-      freshMsg.className = 'msg ok';
-    } catch(err){
-      msg.textContent = 'Import failed: ' + err.message;
-      msg.className = 'msg err';
-    } finally {
-      e.target.value = '';
-    }
-  };
   progressPanel.querySelectorAll('[data-round-toggle]').forEach(el=>{
     el.onclick = ()=>{
       const id = el.dataset.roundToggle;
@@ -2701,13 +1802,6 @@ function renderProgressPanel(){
     el.onclick = async (ev)=>{
       ev.stopPropagation();
       await openAttemptReview(el.dataset.reviewAttempt, el.dataset.examKey);
-    };
-  });
-  progressPanel.querySelectorAll('[data-download-attempt]').forEach(el=>{
-    el.onclick = async (ev)=>{
-      ev.stopPropagation();
-      const round = findRoundById(el.dataset.roundId);
-      if(round) await downloadAttemptPdfFromProgress(el.dataset.downloadAttempt, round);
     };
   });
   progressPanel.querySelectorAll('[data-continue-round]').forEach(el=>{
@@ -2745,7 +1839,7 @@ function deleteAttemptFromProgress(attemptId, attemptNumber, round){
   showConfirmDialog(
     `Delete Attempt ${attemptNumber} on Round ${round.round_number} of "${round.exam_title}"? This can't be undone.`,
     async ()=>{
-      const msg = document.getElementById('progressImportMsg');
+      const msg = document.getElementById('progressMsg');
       try{
         /* round.attempts is the snapshot renderProgressView() already
            fetched -- reuse it instead of a redundant query, to check
@@ -2777,7 +1871,7 @@ function deleteAttemptFromProgress(attemptId, attemptNumber, round){
           }
         }
         await renderProgressView();
-        const freshMsg = document.getElementById('progressImportMsg');
+        const freshMsg = document.getElementById('progressMsg');
         if(freshMsg){ freshMsg.textContent = `Attempt ${attemptNumber} deleted.`; freshMsg.className = 'msg ok'; }
       } catch(err){
         if(msg){ msg.textContent = 'Could not delete: ' + err.message; msg.className = 'msg err'; }
@@ -2796,7 +1890,7 @@ function deleteAttemptFromProgress(attemptId, attemptNumber, round){
       (not yet played) either by an interrupted live session or by the
       batch PDF importer reconstructing a round's history -- just resume it. */
 async function continueRoundFromProgress(round){
-  const msg = document.getElementById('progressImportMsg');
+  const msg = document.getElementById('progressMsg');
   try{
     /* Picking this back up is exactly what "abandoned" should stop meaning
        once you do it -- clear it before anything else so the round doesn't
@@ -2839,37 +1933,6 @@ async function continueRoundFromProgress(round){
   }
 }
 
-/* Regenerates the exact PDF answer-sheet layout for a past, already-completed
-   attempt from its stored question/answer rows -- reuses generateAnswerSheetPdf
-   via its examOverride/answersOverride params instead of requiring the exam
-   to still be loaded (which it never is from the Progress tab). */
-async function downloadAttemptPdfFromProgress(attemptId, round){
-  const msg = document.getElementById('progressImportMsg');
-  try{
-    const { data: rows, error } = await supabaseClient.from('exam_attempt_answers')
-      .select('*').eq('attempt_id', attemptId).order('question_index');
-    if(error) throw error;
-    const { data: attempt, error: attErr } = await supabaseClient.from('exam_attempts')
-      .select('*').eq('id', attemptId).single();
-    if(attErr) throw attErr;
-    const liveExplanations = libraryExplanationLookup(round.exam_key);
-    const questions = rows.map(r=>({ text: r.question_text, options: r.options, correct: r.correct_option, explanation: (liveExplanations && liveExplanations.get(r.question_text)) || r.explanation || '', originalNumber: r.original_number }));
-    const answersMap = {};
-    rows.forEach((r,i)=>{ if(r.selected_option!==null && r.selected_option!==undefined) answersMap[i] = r.selected_option; });
-    const missedIdx = [];
-    questions.forEach((q,i)=>{ if(answersMap[i] !== q.correct) missedIdx.push(i); });
-    const correctCount = questions.length - missedIdx.length;
-    const total = questions.length;
-    const masteredSoFar = round.original_total - round.funnel_missed_count;
-    const pct = ((masteredSoFar / round.original_total) * 100).toFixed(1);
-    const dateStr = attempt.completed_at ? new Date(attempt.completed_at).toLocaleDateString() : new Date().toLocaleDateString();
-    generateAnswerSheetPdf(missedIdx, correctCount, total, pct, dateStr, attempt.attempt_number, round.round_number,
-      { title: round.exam_title, questions, examKey: round.exam_key }, answersMap, 'progressImportMsg');
-  } catch(err){
-    if(msg){ msg.textContent = 'Could not generate PDF: ' + err.message; msg.className = 'msg err'; }
-  }
-}
-
 async function openAttemptReview(attemptId, examKey){
   progressPanel.innerHTML = `<h2>Progress</h2><div class="format-help">Loading…</div>`;
   const { data: rows, error } = await supabaseClient.from('exam_attempt_answers')
@@ -2888,8 +1951,9 @@ function renderProgressAttemptDetail(){
   const { questions, answersMap } = progressAttemptView;
   const allIndices = questions.map((_,i)=>i);
   const missedIndices = allIndices.filter(i=>answersMap[i] !== questions[i].correct);
-  /* A missed-only-backfilled attempt (see insertMissedOnlyAnswerRows) has
-     EVERY stored row wrong by construction -- missedIndices then equals
+  /* A missed-only-backfilled attempt (from the retired PDF importer; some
+     existing accounts still have these) has EVERY stored row wrong by
+     construction -- missedIndices then equals
      allIndices, and "Review All" would be a no-op duplicate of "Review
      Missed Only". Only show the toggle when there's an actual difference
      to toggle between. */
