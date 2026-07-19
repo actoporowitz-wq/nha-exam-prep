@@ -1718,13 +1718,15 @@ async function handleDeleteAccount(){
   alert('Your account and all saved progress have been deleted.');
 }
 
-async function handleSignOut(){
+async function handleSignOut(reason){
+  stopInactivityWatch();
   await supabaseClient.auth.signOut();
   currentUser = null;
   profile = null;
   libraryLoaded = false;
   EXAM_LIBRARY = [];
-  authScreen = 'signin'; authError=''; authMessage='';
+  authScreen = 'signin'; authError='';
+  authMessage = reason === 'inactivity' ? "You were signed out after an hour of inactivity." : '';
   flashProgressMsg = null;
   flashOnlineAttempts = null;
   flashSelectedAttemptIds = new Set();
@@ -1769,6 +1771,52 @@ async function logSignInEvent(){
   }catch(e){ /* best-effort */ }
 }
 
+/* ================= inactivity timeout =================
+   Supabase's own client keeps refreshing the access token in the
+   background for as long as a tab stays open, regardless of whether the
+   person is actually touching anything -- so "log out after an hour of
+   no activity" has to be enforced here, watching for real mouse/keyboard/
+   touch events, not derived from token/session state. The last-activity
+   timestamp is kept in localStorage (shared across every tab of this
+   origin) rather than a plain JS variable, so using the app in one tab
+   correctly keeps an idle second tab from timing out on its own --
+   without that, each tab would run an independent clock and an idle tab
+   could sign the person out everywhere while they were actively using a
+   different tab. */
+const INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
+const INACTIVITY_STORAGE_KEY = 'nha_last_activity';
+let inactivityCheckInterval = null;
+let lastActivityWriteAt = 0;
+
+function registerActivity(){
+  if(!currentUser) return;
+  const now = Date.now();
+  if(now - lastActivityWriteAt < 5000) return; // throttle localStorage writes
+  lastActivityWriteAt = now;
+  try{ localStorage.setItem(INACTIVITY_STORAGE_KEY, String(now)); }catch(e){ /* storage unavailable -- fine, just skip */ }
+}
+['mousedown','mousemove','keydown','scroll','touchstart','click'].forEach(evt=>{
+  document.addEventListener(evt, registerActivity, { passive: true });
+});
+
+function startInactivityWatch(){
+  if(inactivityCheckInterval) return; // already running
+  try{
+    if(!localStorage.getItem(INACTIVITY_STORAGE_KEY)) localStorage.setItem(INACTIVITY_STORAGE_KEY, String(Date.now()));
+  }catch(e){ /* fine, will just check again next tick */ }
+  inactivityCheckInterval = setInterval(async ()=>{
+    if(!currentUser) return;
+    let last = 0;
+    try{ last = parseInt(localStorage.getItem(INACTIVITY_STORAGE_KEY) || '0', 10); }catch(e){ /* treat as expired below if unreadable */ }
+    if(Date.now() - last > INACTIVITY_TIMEOUT_MS){
+      await handleSignOut('inactivity');
+    }
+  }, 60 * 1000); // check once a minute -- doesn't need to be exact to the second
+}
+function stopInactivityWatch(){
+  if(inactivityCheckInterval){ clearInterval(inactivityCheckInterval); inactivityCheckInterval = null; }
+}
+
 /* The exam library is fetched exactly once per page load, right after
    the gate passes, from the get_exam_library() RPC -- server-enforced
    approval check, per-caller watermark, access logged server-side. */
@@ -1789,6 +1837,7 @@ async function fetchExamLibrary(){
 
 async function applyAccessGate(){
   if(!currentUser){
+    stopInactivityWatch();
     appShell.style.display = 'none';
     if(authScreen !== 'reset-password'){ authScreen = 'signin'; authError=''; authMessage=''; }
     showView('auth');
@@ -1797,10 +1846,12 @@ async function applyAccessGate(){
   await refreshProfile();
   const granted = !!profile && (profile.approved === true || profile.role === 'admin');
   if(!granted){
+    stopInactivityWatch();
     appShell.style.display = 'none';
     showView('auth'); // renderAuthView() renders the pending-approval branch for this case
     return;
   }
+  startInactivityWatch();
   tabAdmin.style.display = profile.role === 'admin' ? '' : 'none';
   appShell.style.display = '';
   document.getElementById('modeOfflineBtn').classList.toggle('active', appMode==='offline');
