@@ -200,6 +200,7 @@ let flashOnlineAttempts = null; // null = not yet loaded; [] | [{attemptId,examT
 let flashAttemptsLoading = false;
 let flashSelectedAttemptIds = new Set();
 let flashPickOpen = false;
+let initialRouteHandled = false; // honor a deep-linked URL only on the first successful access-gate pass
 
 /* ================= elements ================= */
 const quizPanel = document.getElementById('quizPanel');
@@ -237,7 +238,15 @@ tabFlash.onclick = () => showView('flash');
 tabLibrary.onclick = () => showView('library');
 tabAdmin.onclick = () => showView('admin');
 
-function showView(v){
+/* Only the top-level "tab" screens get a real URL -- 'auth' is
+   session-driven (applyAccessGate forces it regardless of URL) and the
+   in-progress-quiz/results states are reachable only through '/' and
+   would spam history if routed per-question. */
+const PATH_FOR_VIEW = { quiz: '/', library: '/library', load: '/load', flash: '/flashcards', progress: '/progress', admin: '/admin' };
+const VIEW_FOR_PATH = { '/': 'quiz', '/library': 'library', '/load': 'load', '/flashcards': 'flash', '/progress': 'progress', '/admin': 'admin' };
+
+function showView(v, opts){
+  opts = opts || {};
   quizView.style.display = v==='quiz' && !submitted ? 'block':'none';
   resultsView.style.display = v==='quiz' && submitted ? 'block':'none';
   loadView.style.display = v==='load' ? 'block':'none';
@@ -264,7 +273,22 @@ function showView(v){
   if(v==='auth') renderAuthView();
   if(v==='progress') renderProgressView();
   if(v==='admin') renderAdminView();
+
+  const path = PATH_FOR_VIEW[v];
+  if(path && !opts.fromPopState && location.pathname !== path){
+    history.pushState({view: v}, '', path);
+  }
 }
+
+/* Back/forward: map the URL back to a view and re-show it without pushing
+   a new entry. Ignored while signed out/ungated (appShell hidden) -- there's
+   nothing routable to show yet, and applyAccessGate owns that screen. */
+window.addEventListener('popstate', ()=>{
+  if(appShell.style.display === 'none') return;
+  let v = VIEW_FOR_PATH[location.pathname] || 'quiz';
+  if(v === 'admin' && !(profile && profile.role === 'admin')) v = 'quiz';
+  showView(v, { fromPopState: true });
+});
 
 function renderLibrary(){
   libraryList.innerHTML = EXAM_LIBRARY.map((e,idx)=>{
@@ -1877,7 +1901,14 @@ async function applyAccessGate(){
     await fetchExamLibrary();
   }
   renderEmptyState();
-  showView('quiz');
+  if(!initialRouteHandled){
+    initialRouteHandled = true;
+    let initialView = VIEW_FOR_PATH[location.pathname] || null;
+    if(initialView === 'admin' && profile.role !== 'admin') initialView = null;
+    showView(initialView || 'quiz', initialView ? { fromPopState: true } : undefined);
+  } else {
+    showView('quiz');
+  }
 }
 
 supabaseClient.auth.onAuthStateChange((event, session) => {
@@ -2841,9 +2872,12 @@ function renderProgressAttemptDetail(){
 /* ================= ADMIN TAB (role==='admin' only) ================= */
 let adminData = null; // { profiles: [...], flagsByUser: {...} }
 let adminDrilldownUserId = null;
+let adminReviewAttempt = null; // { id, label } | null -- set when drilling into one attempt's question-by-question review
+let adminReviewFilter = 'missed'; // 'missed' | 'all' -- mirrors reviewFilter, for renderAdminAttemptReview
 
 async function renderAdminView(){
   adminDrilldownUserId = null;
+  adminReviewAttempt = null;
   adminPanel.innerHTML = `<h2>Admin</h2><div class="format-help">Loading…</div>`;
   try{
     const { data: profiles, error: pErr } = await supabaseClient.from('profiles').select('*').order('created_at');
@@ -2864,7 +2898,11 @@ async function renderAdminView(){
       const computerDevices = new Set(signIns.filter(e=>e.device_type==='computer').map(e=>e.device_fingerprint));
       const deviceFlag = phoneDevices.size > 1 || computerDevices.size > 2;
       const fetchesLast24h = userEvents.filter(e=>e.event_type==='library_fetch' && e.created_at >= oneDayAgo).length;
-      const rateFlag = fetchesLast24h > 5;
+      /* Admins legitimately reload/test far more than a normal studying
+         account -- exclude them from the rate flag so routine admin use
+         doesn't read as scraping. Device-sharing detection still applies;
+         that signal isn't about volume. */
+      const rateFlag = p.role !== 'admin' && fetchesLast24h > 5;
       flagsByUser[p.user_id] = { deviceFlag, rateFlag, phoneCount: phoneDevices.size, computerCount: computerDevices.size, fetchesLast24h };
     });
     adminData = { profiles, flagsByUser };
@@ -2876,6 +2914,7 @@ async function renderAdminView(){
 }
 
 function renderAdminPanel(){
+  if(adminReviewAttempt){ renderAdminAttemptReview(adminReviewAttempt); return; }
   if(adminDrilldownUserId){ renderAdminUserProgress(adminDrilldownUserId); return; }
   const rows = adminData.profiles.map(p=>{
     const flags = adminData.flagsByUser[p.user_id] || {};
@@ -2911,6 +2950,24 @@ function renderAdminPanel(){
       <textarea id="watermarkInput" placeholder="Paste text here…" style="min-height:100px;"></textarea>
       <button class="btn btn-ghost" id="decodeWatermarkBtn" style="margin-top:8px;">Detect</button>
       <div class="msg" id="watermarkResult"></div>
+    </div>
+    <div class="subsection">
+      <h3>Grant Admin Access</h3>
+      <div class="format-help">Give an existing account full admin rights — they'll be able to approve/suspend/delete any account and see everyone's progress.</div>
+      <div style="display:flex;flex-direction:column;gap:10px;font-family:system-ui,sans-serif;max-width:340px;">
+        <input type="email" id="grantAdminEmail" placeholder="account email" autocomplete="off">
+        <button class="btn btn-ghost" id="grantAdminBtn">Grant Admin Access</button>
+      </div>
+      <div class="msg" id="grantAdminResult"></div>
+    </div>
+    <div class="subsection">
+      <h3>Revoke Admin Access</h3>
+      <div class="format-help">Take admin rights away from an account — they'll go back to being a normal (still-approved) account.</div>
+      <div style="display:flex;flex-direction:column;gap:10px;font-family:system-ui,sans-serif;max-width:340px;">
+        <input type="email" id="revokeAdminEmail" placeholder="account email" autocomplete="off">
+        <button class="btn btn-ghost" id="revokeAdminBtn">Revoke Admin Access</button>
+      </div>
+      <div class="msg" id="revokeAdminResult"></div>
     </div>
   `;
   adminPanel.querySelectorAll('button[data-toggle-approve]').forEach(btn=>{
@@ -2951,6 +3008,56 @@ function renderAdminPanel(){
   });
   document.getElementById('decodeWatermarkBtn').onclick = ()=>{
     document.getElementById('watermarkResult').textContent = decodeWatermark(document.getElementById('watermarkInput').value, adminData.profiles);
+  };
+  document.getElementById('grantAdminBtn').onclick = async ()=>{
+    const resultEl = document.getElementById('grantAdminResult');
+    resultEl.className = 'msg';
+    resultEl.textContent = '';
+    const email = document.getElementById('grantAdminEmail').value.trim().toLowerCase();
+    if(!email){ resultEl.className = 'msg err'; resultEl.textContent = 'Enter an email address.'; return; }
+    const target = adminData.profiles.find(p=>p.email.toLowerCase() === email);
+    if(!target){ resultEl.className = 'msg err'; resultEl.textContent = 'No account found with that email — they need to sign up first.'; return; }
+    if(target.role === 'admin'){ resultEl.className = 'msg ok'; resultEl.textContent = `${target.email} is already an admin.`; return; }
+    showConfirmDialog(
+      `Grant admin access to ${target.email}? They'll be able to approve/suspend/delete any account and see everyone's progress.`,
+      async ()=>{
+        try{
+          const { error } = await supabaseClient.rpc('admin_set_role', { target_user_id: target.user_id, new_role: 'admin' });
+          if(error) throw error;
+          await renderAdminView();
+        } catch(err){
+          resultEl.className = 'msg err';
+          resultEl.textContent = 'Could not grant admin access: ' + err.message;
+        }
+      },
+      'Grant Admin Access'
+    );
+  };
+  document.getElementById('revokeAdminBtn').onclick = async ()=>{
+    const resultEl = document.getElementById('revokeAdminResult');
+    resultEl.className = 'msg';
+    resultEl.textContent = '';
+    const email = document.getElementById('revokeAdminEmail').value.trim().toLowerCase();
+    if(!email){ resultEl.className = 'msg err'; resultEl.textContent = 'Enter an email address.'; return; }
+    const target = adminData.profiles.find(p=>p.email.toLowerCase() === email);
+    if(!target){ resultEl.className = 'msg err'; resultEl.textContent = 'No account found with that email.'; return; }
+    if(target.role !== 'admin'){ resultEl.className = 'msg ok'; resultEl.textContent = `${target.email} is not an admin.`; return; }
+    if(target.user_id === currentUser.id){ resultEl.className = 'msg err'; resultEl.textContent = "You can't revoke your own admin access — have another admin do it."; return; }
+    showConfirmDialog(
+      `Revoke admin access from ${target.email}? They'll go back to a normal account.`,
+      async ()=>{
+        try{
+          const { error } = await supabaseClient.rpc('admin_set_role', { target_user_id: target.user_id, new_role: 'user' });
+          if(error) throw error;
+          await renderAdminView();
+        } catch(err){
+          resultEl.className = 'msg err';
+          resultEl.textContent = 'Could not revoke admin access: ' + err.message;
+        }
+      },
+      'Revoke Admin Access',
+      true
+    );
   };
 }
 
@@ -3026,13 +3133,21 @@ async function renderAdminUserProgress(targetUserId){
         `;
         r.attempts.forEach(a=>{
           const pct = a.total_questions ? ((a.correct_count/a.total_questions)*100).toFixed(1) : '0.0';
-          html += `<div class="review-line" style="padding-left:14px;">Attempt ${a.attempt_number} — ${a.correct_count}/${a.total_questions} (${pct}%)${a.status==='in_progress' ? ' · in progress' : ''}</div>`;
+          const attemptLabel = `${ex.examTitle} — Round ${r.round_number}, Attempt ${a.attempt_number}`;
+          html += `<button class="link-btn" style="display:block;padding-left:14px;margin-top:2px;" data-review-attempt="${a.id}" data-review-label="${escapeHtml(attemptLabel)}">Attempt ${a.attempt_number} — ${a.correct_count}/${a.total_questions} (${pct}%)${a.status==='in_progress' ? ' · in progress' : ''}</button>`;
         });
       });
       html += `</div>`;
     });
     adminPanel.innerHTML = html;
     document.getElementById('backToAdminBtn').onclick = ()=>{ adminDrilldownUserId = null; renderAdminPanel(); };
+    adminPanel.querySelectorAll('button[data-review-attempt]').forEach(btn=>{
+      btn.onclick = ()=>{
+        adminReviewFilter = 'missed';
+        adminReviewAttempt = { id: btn.dataset.reviewAttempt, label: btn.dataset.reviewLabel };
+        renderAdminPanel();
+      };
+    });
   } catch(err){
     adminPanel.innerHTML = `
       <h2>Admin</h2>
@@ -3040,6 +3155,52 @@ async function renderAdminUserProgress(targetUserId){
       <button class="link-btn" id="backToAdminBtn">← Back to Admin</button>
     `;
     document.getElementById('backToAdminBtn').onclick = ()=>{ adminDrilldownUserId = null; renderAdminPanel(); };
+  }
+}
+
+/* Question-by-question breakdown of one attempt, for the admin drilldown.
+   Reuses renderReviewList (the same renderer the account's own results
+   screen uses) by reshaping exam_attempt_answers' snapshotted rows into
+   the {text,options,correct,explanation}/answersMap shape it already
+   accepts as overrides -- admin read access to this table comes from the
+   "admin read all answers" RLS policy in 0003_access_control.sql, no new
+   grant needed. */
+async function renderAdminAttemptReview(reviewCtx){
+  adminPanel.innerHTML = `<h2>Admin — ${escapeHtml(reviewCtx.label)}</h2><div class="format-help">Loading…</div>`;
+  try{
+    const { data: rows, error } = await supabaseClient.from('exam_attempt_answers')
+      .select('*').eq('attempt_id', reviewCtx.id).order('question_index');
+    if(error) throw error;
+    const questions = rows.map(r=>({
+      originalNumber: r.question_index + 1,
+      text: r.question_text,
+      options: r.options,
+      correct: r.correct_option,
+      explanation: r.explanation
+    }));
+    const answersMap = {};
+    rows.forEach((r,i)=>{ if(r.selected_option !== null && r.selected_option !== undefined) answersMap[i] = r.selected_option; });
+    const missed = questions.map((_,i)=>i).filter(i=>answersMap[i] !== questions[i].correct);
+    const indices = adminReviewFilter==='all' ? questions.map((_,i)=>i) : missed;
+    adminPanel.innerHTML = `
+      <h2>Admin — ${escapeHtml(reviewCtx.label)}</h2>
+      <button class="link-btn" id="backToUserProgressBtn">← Back</button>
+      <div class="toplinks" style="margin-top:14px;">
+        <button id="adminReviewMissedBtn" class="${adminReviewFilter==='missed'?'active':''}">Review Missed Only</button>
+        <button id="adminReviewAllBtn" class="${adminReviewFilter==='all'?'active':''}">Review All</button>
+      </div>
+      ${renderReviewList(indices, questions, answersMap)}
+    `;
+    document.getElementById('backToUserProgressBtn').onclick = ()=>{ adminReviewAttempt = null; renderAdminPanel(); };
+    document.getElementById('adminReviewMissedBtn').onclick = ()=>{ adminReviewFilter = 'missed'; renderAdminPanel(); };
+    document.getElementById('adminReviewAllBtn').onclick = ()=>{ adminReviewFilter = 'all'; renderAdminPanel(); };
+  } catch(err){
+    adminPanel.innerHTML = `
+      <h2>Admin</h2>
+      <div class="msg err">Could not load attempt: ${escapeHtml(err.message)}</div>
+      <button class="link-btn" id="backToUserProgressBtn">← Back</button>
+    `;
+    document.getElementById('backToUserProgressBtn').onclick = ()=>{ adminReviewAttempt = null; renderAdminPanel(); };
   }
 }
 
