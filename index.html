@@ -732,7 +732,11 @@ function generateAnswerSheetPdf(missedIdx, correctCount, total, pct, dateStr, at
    date. Only a question block's FIRST line starts with "N. " (wrapped
    continuation lines of a long question don't), and only real option lines
    start with "N) " -- both patterns survive text wrapping intact, so this
-   doesn't need line-perfect layout to work. */
+   doesn't need line-perfect layout to work. Match on "your answer" +
+   "incorrect" rather than the literal em dash between them -- different PDF
+   text extractors (pdf.js vs. poppler, confirmed while testing this fix)
+   normalize that character differently, so anchoring on it would make the
+   match fragile across engines for no reason. */
 function backfillSelectedFromVisibleReview(fullText, questions){
   if(questions.every(q=>q.selected !== undefined)) return; // already new-format
   const reviewIdx = fullText.indexOf('Incorrect Answer Review');
@@ -756,7 +760,7 @@ function backfillSelectedFromVisibleReview(fullText, questions){
     let optIdx = 0;
     blockLines.forEach(line=>{
       if(/^\d+\)\s/.test(line)){
-        if(line.includes('(your answer — incorrect)')) selected = optIdx;
+        if(/your answer.*incorrect/.test(line)) selected = optIdx;
         optIdx++;
       }
     });
