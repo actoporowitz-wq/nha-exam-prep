@@ -1027,13 +1027,27 @@ async function loadFlashOnlineAttempts(){
   }
 }
 
+/* Supabase/PostgREST caps an unordered .select() at 1000 rows -- any bulk
+   attempt_id lookup can silently truncate once a user's total answer-row
+   count crosses that (hit in testing at 1252 rows for one real account, so
+   this isn't a hypothetical edge case). Page through with .range() instead
+   of trusting a single request to return everything. */
+async function fetchAllByIn(table, column, values, select){
+  let rows = [];
+  for(let from=0; ; from+=1000){
+    const { data: page, error } = await supabaseClient.from(table).select(select).in(column, values).range(from, from+999);
+    if(error) throw error;
+    rows = rows.concat(page);
+    if(page.length < 1000) break;
+  }
+  return rows;
+}
+
 /* Shared by both generation paths below — the only difference between
    "all progress" and "selected attempts" is which attempt_id list is passed in. */
 async function buildFlashcardsFromAttemptIds(attemptIds, scopeMsg){
   if(!attemptIds.length) throw new Error('No completed attempts found — nothing to build flashcards from yet.');
-  const { data: rows, error: ansErr } = await supabaseClient.from('exam_attempt_answers')
-    .select('*').in('attempt_id', attemptIds);
-  if(ansErr) throw ansErr;
+  const rows = await fetchAllByIn('exam_attempt_answers', 'attempt_id', attemptIds, '*');
   const tally = new Map();
   rows.forEach(r=>{
     if(r.selected_option===null || r.selected_option===undefined) return;
@@ -1995,9 +2009,7 @@ async function fetchFullOnlineExport(){
   if(aErr) throw aErr;
   let answers = [];
   if(attempts.length){
-    const { data: answerRows, error: ansErr } = await supabaseClient.from('exam_attempt_answers').select('*').in('attempt_id', attempts.map(a=>a.id));
-    if(ansErr) throw ansErr;
-    answers = answerRows;
+    answers = await fetchAllByIn('exam_attempt_answers', 'attempt_id', attempts.map(a=>a.id), '*');
   }
   const grouped = {};
   rounds.forEach(r=>{
@@ -2156,9 +2168,7 @@ async function renderProgressView(){
            short of total_questions means the full answer-sheet grid can't
            be faithfully redrawn, so Download PDF needs the stricter
            hasFullAnswers check while Review only needs hasAnswers. */
-        const { data: answerRows, error: ansErr } = await supabaseClient.from('exam_attempt_answers')
-          .select('attempt_id').in('attempt_id', attempts.map(a=>a.id));
-        if(ansErr) throw ansErr;
+        const answerRows = await fetchAllByIn('exam_attempt_answers', 'attempt_id', attempts.map(a=>a.id), 'attempt_id');
         answerRows.forEach(r=>{ answerCountByAttempt[r.attempt_id] = (answerCountByAttempt[r.attempt_id]||0) + 1; });
       }
     }
