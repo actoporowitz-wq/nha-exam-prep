@@ -1643,6 +1643,18 @@ window.addEventListener('beforeunload', (e)=>{
 let progressData = null;
 let progressExpandedRoundId = null;
 let progressAttemptView = null; // { questions, answersMap } while drilled into one attempt's review
+let progressSortMode = 'name'; // 'name' | 'last' | 'first'
+
+function sortProgressExams(exams, mode){
+  const sorted = exams.slice();
+  if(mode === 'last') sorted.sort((a,b)=> b.lastAttemptAt - a.lastAttemptAt);
+  else if(mode === 'first') sorted.sort((a,b)=> a.firstAttemptAt - b.firstAttemptAt);
+  /* 'name': numeric-aware so "Exam 2" sorts before "Exam 11" -- a plain
+     string sort would otherwise order every exam past 9 lexicographically
+     ("Exam 1", "Exam 11", "Exam 12", ..., "Exam 2", "Exam 9"). */
+  else sorted.sort((a,b)=> a.examTitle.localeCompare(b.examTitle, undefined, { numeric: true, sensitivity: 'base' }));
+  return sorted;
+}
 
 async function renderProgressView(){
   progressAttemptView = null;
@@ -1674,10 +1686,23 @@ async function renderProgressView(){
         });
       examsMap[r.exam_key].rounds.push({ ...r, attempts: roundAttempts });
     });
+    /* Precompute each exam's earliest/most-recent attempt start time (across
+       every round) once here, rather than on every sort-mode switch --
+       feeds the Progress tab's "First Attempt"/"Last Attempt" sort options. */
+    const examsList = Object.values(examsMap);
+    examsList.forEach(ex=>{
+      const starts = [];
+      ex.rounds.forEach(r=>r.attempts.forEach(a=>{
+        const t = a.started_at ? new Date(a.started_at).getTime() : NaN;
+        if(!isNaN(t)) starts.push(t);
+      }));
+      ex.firstAttemptAt = starts.length ? Math.min(...starts) : 0;
+      ex.lastAttemptAt = starts.length ? Math.max(...starts) : 0;
+    });
     progressData = {
       totalRounds: rounds.length,
       masteredRounds: rounds.filter(r=>r.status==='mastered').length,
-      exams: Object.values(examsMap)
+      exams: examsList
     };
   } catch(err){
     progressPanel.innerHTML = `<h2>Progress</h2><div class="msg err">Could not load progress: ${escapeHtml(err.message)}</div>`;
@@ -1697,10 +1722,21 @@ function renderProgressPanel(){
     </div>
     <div class="msg" id="progressMsg"></div>
   `;
-  if(!d.exams.length){
+  if(d.exams.length){
+    html += `
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;font-family:system-ui,sans-serif;font-size:.85rem;color:var(--muted);">
+        <span>Sort by:</span>
+        <div class="toplinks" style="margin:0;">
+          <button id="progressSortNameBtn" class="${progressSortMode==='name'?'active':''}">Test Name</button>
+          <button id="progressSortLastBtn" class="${progressSortMode==='last'?'active':''}">Last Attempt</button>
+          <button id="progressSortFirstBtn" class="${progressSortMode==='first'?'active':''}">First Attempt</button>
+        </div>
+      </div>
+    `;
+  } else {
     html += `<div class="format-help">No online attempts yet — start an exam from the Test Library while in Online mode.</div>`;
   }
-  d.exams.forEach(ex=>{
+  sortProgressExams(d.exams, progressSortMode).forEach(ex=>{
     html += `<div class="subsection"><h3>${escapeHtml(ex.examTitle)}</h3>`;
     ex.rounds.forEach(r=>{
       /* Mastery badge fires only on the round's cumulative funnel score, never a single attempt's raw score */
@@ -1791,6 +1827,12 @@ function renderProgressPanel(){
     html += `</div>`;
   });
   progressPanel.innerHTML = html;
+  const sortNameBtn = document.getElementById('progressSortNameBtn');
+  const sortLastBtn = document.getElementById('progressSortLastBtn');
+  const sortFirstBtn = document.getElementById('progressSortFirstBtn');
+  if(sortNameBtn) sortNameBtn.onclick = ()=>{ progressSortMode = 'name'; renderProgressPanel(); };
+  if(sortLastBtn) sortLastBtn.onclick = ()=>{ progressSortMode = 'last'; renderProgressPanel(); };
+  if(sortFirstBtn) sortFirstBtn.onclick = ()=>{ progressSortMode = 'first'; renderProgressPanel(); };
   progressPanel.querySelectorAll('[data-round-toggle]').forEach(el=>{
     el.onclick = ()=>{
       const id = el.dataset.roundToggle;
@@ -2332,11 +2374,13 @@ function renderEmptyState(){
   `;
   document.getElementById('goToLibraryBtn').onclick = ()=> showView('library');
 }
-/* Boot: onAuthStateChange fires again on its own once Supabase restores
-   any existing session, but that can take a moment -- call the gate
-   explicitly right away too so a signed-out visitor sees the sign-in
-   screen immediately instead of a flash of default content. */
-applyAccessGate();
+/* Boot: deliberately do NOT call applyAccessGate() here. currentUser is
+   still unknown at this point (onAuthStateChange hasn't fired yet), so
+   calling it now would guess "signed out" and flash the sign-in form at
+   every already-logged-in visitor before the real check corrects it a
+   moment later -- worse than the brief neutral "Loading…" state (the
+   static HTML's own default, both authView and appShell start hidden)
+   that's already showing while we wait for the real answer. */
 </script>
 </body>
 </html>
