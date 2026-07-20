@@ -129,7 +129,7 @@
     <div id="libraryView" style="display:none">
       <div class="panel subsection">
         <h2>Test Library</h2>
-        <div class="format-help">All 25 exams, parsed from the instructor's files and ready to go.</div>
+        <div class="format-help">All 25 practice exams are ready to go.</div>
         <div id="libraryList"></div>
       </div>
     </div>
@@ -675,7 +675,7 @@ function renderOnlineFlashGeneratorHtml(){
   if(flashAttemptsLoading){
     inner = `<div class="format-help">Loading your progress…</div>`;
   } else if(!flashOnlineAttempts || !flashOnlineAttempts.length){
-    inner = `<div class="format-help">No online attempts yet — start an exam in Online mode first, then come back here.</div>`;
+    inner = `<div class="format-help">No completed attempts yet — take an exam from the Test Library first, then come back here.</div>`;
   } else {
     const byExam = new Map();
     flashOnlineAttempts.forEach(a=>{
@@ -777,14 +777,10 @@ function shuffleFlashcards(){
 }
 
 function renderFlashcard(){
-  const onlineActive = appMode==='online' && currentUser;
-  const topHtml = onlineActive ? renderOnlineFlashGeneratorHtml() : '';
+  const topHtml = currentUser ? renderOnlineFlashGeneratorHtml() : '';
   if(!flashcards.length){
-    const fallback = onlineActive
-      ? 'Generate a set from your progress above, or go to "Load / Upload a Test" and'
-      : 'Go to "Load / Upload a Test" and';
-    flashPanel.innerHTML = topHtml + `<h2>Flashcards</h2><div class="format-help">No flashcards yet. ${fallback} upload one or more PDF answer sheets to build flashcards from your missed questions.</div>`;
-    if(onlineActive) bindFlashGeneratorHandlers();
+    flashPanel.innerHTML = topHtml + `<h2>Flashcards</h2><div class="format-help">No flashcards yet. Generate a set from your progress above.</div>`;
+    if(currentUser) bindFlashGeneratorHandlers();
     return;
   }
   const letters = ['1','2','3','4','5','6'];
@@ -827,7 +823,7 @@ function renderFlashcard(){
   }
   const shuffleBtn = document.getElementById('flashShuffleBtn');
   if(shuffleBtn) shuffleBtn.onclick = shuffleFlashcards;
-  if(onlineActive) bindFlashGeneratorHandlers();
+  if(currentUser) bindFlashGeneratorHandlers();
 }
 
 /* ================= SHARED: round/attempt funnel engine =================
@@ -1734,7 +1730,7 @@ function renderProgressPanel(){
       </div>
     `;
   } else {
-    html += `<div class="format-help">No online attempts yet — start an exam from the Test Library while in Online mode.</div>`;
+    html += `<div class="format-help">No attempts yet — start an exam from the Test Library.</div>`;
   }
   sortProgressExams(d.exams, progressSortMode).forEach(ex=>{
     html += `<div class="subsection"><h3>${escapeHtml(ex.examTitle)}</h3>`;
