@@ -1989,36 +1989,25 @@ function renderProgressAttemptDetail(){
   const { questions, answersMap } = progressAttemptView;
   const allIndices = questions.map((_,i)=>i);
   const missedIndices = allIndices.filter(i=>answersMap[i] !== questions[i].correct);
-  /* A missed-only-backfilled attempt (from the retired PDF importer; some
-     existing accounts still have these) has EVERY stored row wrong by
-     construction -- missedIndices then equals
-     allIndices, and "Review All" would be a no-op duplicate of "Review
-     Missed Only". Only show the toggle when there's an actual difference
-     to toggle between. */
-  const hasCorrectRows = missedIndices.length < allIndices.length;
-  const indices = (progressReviewFilter==='all' && hasCorrectRows) ? allIndices : missedIndices;
-  const heading = (progressReviewFilter==='all' && hasCorrectRows)
+  const indices = progressReviewFilter==='all' ? allIndices : missedIndices;
+  const heading = progressReviewFilter==='all'
     ? `All Questions (${allIndices.length})` : `Questions You Missed (${missedIndices.length})`;
   progressPanel.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:10px;">
       <h2 style="margin:0;">${heading}</h2>
       <div style="display:flex;align-items:center;gap:10px;">
-        ${hasCorrectRows ? `
-          <div class="toplinks" style="margin:0;">
-            <button id="progressReviewMissedBtn" class="${progressReviewFilter==='missed'?'active':''}">Review Missed Only</button>
-            <button id="progressReviewAllBtn" class="${progressReviewFilter==='all'?'active':''}">Review All</button>
-          </div>
-        ` : ''}
+        <div class="toplinks" style="margin:0;">
+          <button id="progressReviewMissedBtn" class="${progressReviewFilter==='missed'?'active':''}">Review Missed Only</button>
+          <button id="progressReviewAllBtn" class="${progressReviewFilter==='all'?'active':''}">Review All</button>
+        </div>
         <button class="btn btn-ghost" id="backToProgressBtn">← Back to Progress</button>
       </div>
     </div>
     ${renderReviewList(indices, questions, answersMap)}
   `;
   document.getElementById('backToProgressBtn').onclick = ()=>{ progressAttemptView = null; renderProgressPanel(); };
-  const missedBtn = document.getElementById('progressReviewMissedBtn');
-  const allBtn = document.getElementById('progressReviewAllBtn');
-  if(missedBtn) missedBtn.onclick = ()=>{ progressReviewFilter='missed'; renderProgressAttemptDetail(); };
-  if(allBtn) allBtn.onclick = ()=>{ progressReviewFilter='all'; renderProgressAttemptDetail(); };
+  document.getElementById('progressReviewMissedBtn').onclick = ()=>{ progressReviewFilter='missed'; renderProgressAttemptDetail(); };
+  document.getElementById('progressReviewAllBtn').onclick = ()=>{ progressReviewFilter='all'; renderProgressAttemptDetail(); };
 }
 
 /* ================= ADMIN TAB (role==='admin' only) ================= */
