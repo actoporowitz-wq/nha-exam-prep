@@ -1366,6 +1366,7 @@ async function applyAccessGate(){
      worse, stomp a deep-linked URL back to '/') on top of whatever screen
      they're already looking at. */
   const wasGranted = appShell.style.display !== 'none';
+  let initialView = null;
   if(!wasGranted){
     /* A fresh sign-in must overwrite any stale timestamp left over from a
        previous inactivity timeout -- startInactivityWatch() only seeds the
@@ -1374,9 +1375,23 @@ async function applyAccessGate(){
        check and sign the person right back out again, seconds after they
        signed back in. */
     try{ localStorage.setItem(INACTIVITY_STORAGE_KEY, String(Date.now())); }catch(e){ /* storage unavailable -- fine, will just re-seed on next check */ }
+    initialView = VIEW_FOR_PATH[location.pathname] || null;
+    if(initialView === 'admin' && profile.role !== 'admin') initialView = null;
   }
   startInactivityWatch();
   tabAdmin.style.display = profile.role === 'admin' ? '' : 'none';
+  if(initialView && initialView !== 'quiz'){
+    /* Hide the default quiz view immediately, before the exam-library fetch
+       below -- quizView has no inline display:none in the markup, so
+       without this a refresh/deep-link into another tab would flash the
+       quiz view on screen for the length of that fetch before showView()
+       swaps to the actually-routed one. */
+    quizView.style.display = 'none';
+    if(initialView==='flash') flashView.style.display = 'block';
+    else if(initialView==='library') libraryView.style.display = 'block';
+    else if(initialView==='progress') progressView.style.display = 'block';
+    else if(initialView==='admin') adminView.style.display = 'block';
+  }
   appShell.style.display = '';
   renderStatusBar();
   if(!libraryLoaded){
@@ -1385,8 +1400,6 @@ async function applyAccessGate(){
   }
   renderEmptyState();
   if(!wasGranted){
-    let initialView = VIEW_FOR_PATH[location.pathname] || null;
-    if(initialView === 'admin' && profile.role !== 'admin') initialView = null;
     showView(initialView || 'quiz', initialView ? { fromPopState: true } : undefined);
   }
 }
