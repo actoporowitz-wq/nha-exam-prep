@@ -1252,7 +1252,12 @@ function computeDeviceType(){
   return 'other';
 }
 function computeDeviceFingerprint(){
-  const raw = navigator.userAgent + '|' + screen.width + 'x' + screen.height + '|' +
+  // Sort screen dimensions rather than using width/height directly --
+  // rotating a phone between portrait and landscape swaps those values on
+  // many mobile browsers, which would otherwise turn one real device into
+  // two different fingerprints between sign-ins.
+  const dims = [screen.width, screen.height].sort((a,b)=>a-b);
+  const raw = navigator.userAgent + '|' + dims[0] + 'x' + dims[1] + '|' +
     (Intl.DateTimeFormat().resolvedOptions().timeZone || '');
   let hash = 0;
   for(let i=0;i<raw.length;i++){ hash = ((hash<<5)-hash + raw.charCodeAt(i))|0; }
