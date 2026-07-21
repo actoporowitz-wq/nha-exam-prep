@@ -1364,12 +1364,20 @@ async function applyAccessGate(authEvent){
        below -- quizView has no inline display:none in the markup, so
        without this a refresh/deep-link into another tab would flash the
        quiz view on screen for the length of that fetch before showView()
-       swaps to the actually-routed one. */
+       swaps to the actually-routed one. Same problem, separately, for the
+       tab bar itself: tabQuiz starts with class="active" hardcoded in the
+       markup, and nothing corrects that until showView() runs at the very
+       end of this function (after the fetch below) -- without updating it
+       here too, the nav bar keeps visibly highlighting "Take Exam" for the
+       length of that fetch even though the correct panel is already
+       showing underneath, which reads as the page flashing back to Take
+       Exam even when the content itself never did. */
     quizView.style.display = 'none';
-    if(initialView==='flash') flashView.style.display = 'block';
-    else if(initialView==='library') libraryView.style.display = 'block';
-    else if(initialView==='progress') progressView.style.display = 'block';
-    else if(initialView==='admin') adminView.style.display = 'block';
+    tabQuiz.classList.remove('active');
+    if(initialView==='flash'){ flashView.style.display = 'block'; tabFlash.classList.add('active'); }
+    else if(initialView==='library'){ libraryView.style.display = 'block'; tabLibrary.classList.add('active'); }
+    else if(initialView==='progress'){ progressView.style.display = 'block'; tabProgress.classList.add('active'); }
+    else if(initialView==='admin'){ adminView.style.display = 'block'; tabAdmin.classList.add('active'); }
   }
   appShell.style.display = '';
   renderStatusBar();
