@@ -1247,19 +1247,37 @@ function registerActivity(){
   document.addEventListener(evt, registerActivity, { passive: true });
 });
 
+/* True if the stored last-activity timestamp is more than an hour old.
+   No stored timestamp at all is NOT staleness -- treated as "just started",
+   not "expired". */
+function isInactivityStale(){
+  let last = 0;
+  try{ last = parseInt(localStorage.getItem(INACTIVITY_STORAGE_KEY) || '0', 10); }catch(e){ return false; }
+  return last > 0 && Date.now() - last > INACTIVITY_TIMEOUT_MS;
+}
+
+/* Checks immediately, for when access is already granted and something
+   just made "how long has it been" worth re-asking right now (tab regains
+   visibility, or the once-a-minute interval below) -- rather than only
+   finding out next time the periodic interval happens to fire. A backgrounded
+   tab's timers can be throttled or fully frozen by the browser, so without
+   the visibilitychange listener specifically, a person who tabs away for
+   over an hour and comes back would keep seeing the signed-in screen until
+   *something* re-triggers a check. */
+async function checkInactivityNow(){
+  if(!currentUser || appShell.style.display === 'none') return;
+  if(isInactivityStale()) await handleSignOut('inactivity');
+}
+document.addEventListener('visibilitychange', ()=>{
+  if(!document.hidden) checkInactivityNow();
+});
+
 function startInactivityWatch(){
   if(inactivityCheckInterval) return; // already running
   try{
     if(!localStorage.getItem(INACTIVITY_STORAGE_KEY)) localStorage.setItem(INACTIVITY_STORAGE_KEY, String(Date.now()));
   }catch(e){ /* fine, will just check again next tick */ }
-  inactivityCheckInterval = setInterval(async ()=>{
-    if(!currentUser) return;
-    let last = 0;
-    try{ last = parseInt(localStorage.getItem(INACTIVITY_STORAGE_KEY) || '0', 10); }catch(e){ /* treat as expired below if unreadable */ }
-    if(Date.now() - last > INACTIVITY_TIMEOUT_MS){
-      await handleSignOut('inactivity');
-    }
-  }, 60 * 1000); // check once a minute -- doesn't need to be exact to the second
+  inactivityCheckInterval = setInterval(checkInactivityNow, 60 * 1000); // check once a minute while the tab stays foregrounded and open -- doesn't need to be exact to the second
 }
 function stopInactivityWatch(){
   if(inactivityCheckInterval){ clearInterval(inactivityCheckInterval); inactivityCheckInterval = null; }
@@ -1283,7 +1301,7 @@ async function fetchExamLibrary(){
   }
 }
 
-async function applyAccessGate(){
+async function applyAccessGate(authEvent){
   if(!currentUser){
     stopInactivityWatch();
     appShell.style.display = 'none';
@@ -1317,13 +1335,25 @@ async function applyAccessGate(){
   const wasGranted = appShell.style.display !== 'none';
   let initialView = null;
   if(!wasGranted){
-    /* A fresh sign-in must overwrite any stale timestamp left over from a
-       previous inactivity timeout -- startInactivityWatch() only seeds the
-       key when it's completely absent, so without this a stale-but-present
-       value from before the timeout would trip the very next minute-interval
-       check and sign the person right back out again, seconds after they
-       signed back in. */
-    try{ localStorage.setItem(INACTIVITY_STORAGE_KEY, String(Date.now())); }catch(e){ /* storage unavailable -- fine, will just re-seed on next check */ }
+    /* A genuine fresh sign-in (the SIGNED_IN event -- someone just typed
+       their password) overwrites any stale timestamp left over from a
+       previous inactivity timeout, so it doesn't immediately trip the very
+       next check and sign them right back out seconds after signing in.
+       Any other event reaching here (INITIAL_SESSION on page load,
+       TOKEN_REFRESHED, a plain refresh) means an already-active session is
+       just being restored, not a fresh sign-in -- that path used to
+       unconditionally reset the same clock regardless of how long the
+       person had actually been away, which meant refreshing could extend
+       an idle session forever and also caused the signed-in screen to
+       flash before the periodic check eventually caught up and signed
+       them out. Checking staleness for real here, before appShell is ever
+       shown, closes both. */
+    if(authEvent === 'SIGNED_IN'){
+      try{ localStorage.setItem(INACTIVITY_STORAGE_KEY, String(Date.now())); }catch(e){ /* storage unavailable -- fine, will just re-seed on next check */ }
+    } else if(isInactivityStale()){
+      await handleSignOut('inactivity');
+      return;
+    }
     initialView = VIEW_FOR_PATH[location.pathname] || null;
     if(initialView === 'admin' && profile.role !== 'admin') initialView = null;
   }
@@ -1362,7 +1392,7 @@ supabaseClient.auth.onAuthStateChange((event, session) => {
     return;
   }
   if(event === 'SIGNED_IN'){ logSignInEvent(); }
-  applyAccessGate();
+  applyAccessGate(event);
 });
 
 tabProgress.onclick = ()=> showView('progress');
