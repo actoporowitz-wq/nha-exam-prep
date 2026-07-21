@@ -1151,6 +1151,7 @@ async function handleDeleteAccount(){
   flashOnlineAttempts = null;
   flashSelectedAttemptIds = new Set();
   flashPickOpen = false;
+  if(location.pathname !== '/') history.pushState({view: 'quiz'}, '', '/'); // see the matching comment in handleSignOut
   await applyAccessGate();
   alert('Your account and all saved progress have been deleted.');
 }
@@ -1166,6 +1167,16 @@ async function handleSignOut(reason){
   flashOnlineAttempts = null;
   flashSelectedAttemptIds = new Set();
   flashPickOpen = false;
+  /* showView('auth') (called next, inside applyAccessGate) never touches
+     the URL -- 'auth' isn't a routed view -- so without this the address
+     bar is left sitting on whatever tab was open (e.g. /progress).
+     Signing back in would then read that leftover path as if it were a
+     deep link and land back on the same tab instead of defaulting to
+     Take Exam. Resetting it here, specifically on sign-out, still leaves
+     a genuine deep link (bookmarking /admin and signing in for the first
+     time) intact, since that path was never "left over" from an active
+     session in the first place. */
+  if(location.pathname !== '/') history.pushState({view: 'quiz'}, '', '/');
   /* applyAccessGate() resets authScreen/authError/authMessage to a blank
      signin state as part of handling the signed-out case -- so any
      reason-specific message has to be set AFTER it runs, not before, or
