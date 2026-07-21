@@ -3,9 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <title>Exam Practice Tool</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 <style>
@@ -70,7 +67,6 @@
 
   textarea{width:100%;min-height:220px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.82rem;border:1px solid var(--line);border-radius:10px;padding:12px;resize:vertical;}
   .format-help{font-family:system-ui,sans-serif;font-size:.8rem;color:var(--muted);background:var(--chip);border-radius:10px;padding:12px 14px;margin-bottom:14px;white-space:pre-wrap;line-height:1.5;}
-  .file-row{font-family:system-ui,sans-serif;font-size:.85rem;margin-bottom:14px;}
   .msg{font-family:system-ui,sans-serif;font-size:.85rem;margin-top:10px;}
   .msg.err{color:var(--bad);}
   .msg.ok{color:var(--good);}
@@ -270,7 +266,7 @@ function renderLibrary(){
     btn.onclick = async ()=>{
       const e = EXAM_LIBRARY[parseInt(btn.dataset.idx,10)];
       try{
-        await beginTrackedAttempt({ title: e.title, questions: e.questions, examKey: 'lib:' + slugify(e.title) }, 'full', null);
+        await beginOnlineAttempt({ title: e.title, questions: e.questions, examKey: 'lib:' + slugify(e.title) });
       } catch(err){
         alert('Could not start this exam online: ' + err.message);
       }
@@ -395,7 +391,14 @@ function showConfirmDialog(message, onConfirm, confirmLabel, danger){
 function doSubmit(){
   const totalQ = exam.questions.length;
   const unanswered = totalQ - Object.keys(answers).length;
-  const finish = async ()=>{ await completeTrackedAttempt(); submitted = true; reviewFilter = 'missed'; showView('quiz'); };
+  const finish = async ()=>{
+    try{
+      await completeOnlineAttempt();
+      submitted = true; reviewFilter = 'missed'; showView('quiz');
+    } catch(err){
+      alert('Could not submit your exam: ' + err.message + ' — please check your connection and try again.');
+    }
+  };
   if(unanswered > 0){
     showConfirmDialog(`You have ${unanswered} unanswered question(s) remaining. End the exam and see your results now?`, finish);
   } else {
@@ -419,7 +422,7 @@ function renderResults(){
      original exam (originalTotal - stillMissed, same numbers the Progress
      tab already shows for a round), not just this subset. Falls back to the
      plain attempt score when there's no active round (untracked exam). */
-  const round = (appMode === 'online' && currentUser) ? activeOnlineRound : activeOfflineRound;
+  const round = activeOnlineRound;
   const originalTotal = round ? (round.originalTotal ?? round.original_total) : total;
   const funnelMissed = round ? (round.funnelMissedCount ?? round.funnel_missed_count) : missed.length;
   const masteredSoFar = originalTotal - funnelMissed;
@@ -438,41 +441,34 @@ function renderResults(){
     </div>
   `;
   document.getElementById('retakeBtn').onclick = async ()=>{
-    /* "Retake Full Exam" abandons any in-progress round for this exam and starts the next one */
-    if(appMode === 'online' && currentUser && exam.examKey){
-      if(activeOnlineRound && activeOnlineRound.status==='in_progress') await onlineStore.abandonRound(activeOnlineRound.id);
-      const round = await onlineStore.createRound(exam.examKey, exam.title, exam.questions.length, activeOnlineRound ? activeOnlineRound.round_number : 0);
-      activeOnlineRound = round;
-      activeOnlineAttempt = await onlineStore.createAttemptWithQuestions(round.id, 1, 'full', null, exam.questions);
-    } else if(exam.examKey){
-      if(activeOfflineRound && activeOfflineRound.status==='in_progress') activeOfflineRound.status = 'abandoned';
-      activeOfflineRound = funnelEngine.startRound(exam.examKey, exam.title, exam.questions.length, offlineRounds);
-      offlineRounds.push(activeOfflineRound);
-      activeOfflineAttempt = funnelEngine.startAttempt(activeOfflineRound, exam.questions, 'full', null);
+    try{
+      /* "Retake Full Exam" abandons any in-progress round for this exam and starts the next one */
+      if(exam.examKey){
+        if(activeOnlineRound && activeOnlineRound.status==='in_progress') await onlineStore.abandonRound(activeOnlineRound.id);
+        const round = await onlineStore.createRound(exam.examKey, exam.title, exam.questions.length, activeOnlineRound ? activeOnlineRound.round_number : 0);
+        activeOnlineRound = round;
+        activeOnlineAttempt = await onlineStore.createAttemptWithQuestions(round.id, 1, 'full', null, exam.questions);
+      }
+      answers = {}; flags = {}; current = 0; submitted = false; showView('quiz'); renderQuestion(); renderDots();
+    } catch(err){
+      alert('Could not start the retake: ' + err.message);
     }
-    answers = {}; flags = {}; current = 0; submitted = false; showView('quiz'); renderQuestion(); renderDots();
   };
   const retakeMissedBtn = document.getElementById('retakeMissedBtn');
   if(retakeMissedBtn){
     retakeMissedBtn.onclick = async ()=>{
-      if(appMode === 'online' && currentUser && activeOnlineRound && exam.examKey){
+      try{
         const missedQs = missed.map(i=>({...exam.questions[i], originalNumber: exam.questions[i].originalNumber || (i+1)}));
-        const sourceAttemptId = activeOnlineAttempt ? activeOnlineAttempt.id : null;
-        const nextAttemptNumber = (activeOnlineAttempt ? activeOnlineAttempt.attempt_number : 0) + 1;
-        activeOnlineAttempt = await onlineStore.createAttemptWithQuestions(activeOnlineRound.id, nextAttemptNumber, 'missed_retake', sourceAttemptId, missedQs);
+        let nextAttemptNumber = 1;
+        if(activeOnlineRound && exam.examKey){
+          const sourceAttemptId = activeOnlineAttempt ? activeOnlineAttempt.id : null;
+          nextAttemptNumber = (activeOnlineAttempt ? activeOnlineAttempt.attempt_number : 0) + 1;
+          activeOnlineAttempt = await onlineStore.createAttemptWithQuestions(activeOnlineRound.id, nextAttemptNumber, 'missed_retake', sourceAttemptId, missedQs);
+        }
         loadExam({ title: "Retake — Missed Questions", subtitle: "from " + exam.title, questions: missedQs, examKey: exam.examKey }, nextAttemptNumber);
-        return;
+      } catch(err){
+        alert('Could not start the retake: ' + err.message);
       }
-      const missedQs = (activeOfflineAttempt && activeOfflineAttempt.status==='completed')
-        ? funnelEngine.missedQuestionsForNextAttempt(activeOfflineAttempt)
-        : missed.map(i=>({...exam.questions[i], originalNumber: exam.questions[i].originalNumber || (i+1)}));
-      const sourceAttemptNumber = activeOfflineAttempt ? activeOfflineAttempt.attemptNumber : null;
-      let nextAttemptNumber = 1;
-      if(activeOfflineRound && exam.examKey){
-        activeOfflineAttempt = funnelEngine.startAttempt(activeOfflineRound, missedQs, 'missed_retake', sourceAttemptNumber);
-        nextAttemptNumber = activeOfflineAttempt.attemptNumber;
-      }
-      loadExam({ title: "Retake — Missed Questions", subtitle: "from " + exam.title, questions: missedQs, examKey: exam.examKey }, nextAttemptNumber);
     };
   }
   renderReviewPanel(missed, total);
@@ -847,9 +843,6 @@ function libraryExplanationLookup(examKey){
   entry.questions.forEach(q=>{ if(q.explanation) map.set(q.text, q.explanation); });
   return map;
 }
-function newCustomExamId(){
-  return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now() + '-' + Math.random().toString(36).slice(2));
-}
 const MASTERY_THRESHOLD = 0.98;
 const funnelEngine = {
   startRound(examKey, examTitle, originalTotal, existingRounds){
@@ -896,60 +889,6 @@ const funnelEngine = {
   }
 };
 
-/* ================= OFFLINE MODE: round tracking + save/load JSON file =================
-   Purely in-memory bookkeeping alongside the existing offline flow — no new
-   prompts or interruptions are added to offline mode itself. It only exists
-   so "Save Progress to File" has real round/attempt history to export, using
-   the same schema an online account exports (see cross-mode JSON below). */
-let offlineRounds = [];
-let activeOfflineRound = null;
-let activeOfflineAttempt = null;
-const CROSS_MODE_SCHEMA_VERSION = 1;
-
-/* Starts a brand-new round (fresh full attempt) for examData and loads it via
-   the existing, unmodified loadExam(). Used by every "start a full exam"
-   entry point (library, pasted/uploaded text). */
-async function beginTrackedAttempt(examData, scope, sourceAttemptNumber){
-  if(appMode === 'online' && currentUser){
-    await beginOnlineAttempt(examData);
-    return;
-  }
-  if(examData.examKey){
-    activeOfflineRound = funnelEngine.startRound(examData.examKey, examData.title, examData.questions.length, offlineRounds);
-    offlineRounds.push(activeOfflineRound);
-    activeOfflineAttempt = funnelEngine.startAttempt(activeOfflineRound, examData.questions, scope, sourceAttemptNumber);
-  } else {
-    activeOfflineRound = null;
-    activeOfflineAttempt = null;
-  }
-  loadExam(examData);
-}
-
-/* Finds the latest in-progress round for examKey, or starts one — used when
-   resuming a missed-question retake from a source (PDF upload) that doesn't
-   carry an in-memory round reference from this session. */
-function ensureActiveRound(examKey, examTitle, fallbackOriginalTotal){
-  let round = offlineRounds.slice().reverse().find(r=>r.examKey===examKey && r.status==='in_progress');
-  if(!round){
-    round = funnelEngine.startRound(examKey, examTitle, fallbackOriginalTotal, offlineRounds);
-    offlineRounds.push(round);
-  }
-  activeOfflineRound = round;
-  return round;
-}
-
-/* Called from doSubmit()'s finish() — snapshots answers into the active
-   attempt and recomputes round mastery. No-ops silently if this exam wasn't
-   started through a tracked entry point (defensive, never blocks offline use). */
-async function completeTrackedAttempt(){
-  if(appMode === 'online' && currentUser){
-    await completeOnlineAttempt();
-    return;
-  }
-  if(!activeOfflineRound || !activeOfflineAttempt) return;
-  funnelEngine.recordAnswers(activeOfflineAttempt, exam.questions, answers, flags);
-  funnelEngine.completeAttempt(activeOfflineRound, activeOfflineAttempt);
-}
 /* ================= ONLINE MODE: Supabase client & config =================
    Only the public anon key is ever embedded here — it's meant to be public
    and is safe only because every table has RLS scoping reads/writes to
@@ -1150,8 +1089,18 @@ function renderStatusBar(){
    not just a click, since a normal confirm dialog is too easy to click through.
    message/buttonLabel let this be reused for the admin's "delete another
    account" path, not just self-deletion. */
-function askDeleteAccountConfirmation(message, buttonLabel){
-  message = message || "This permanently deletes your account and all saved progress — there's no undo. Type <strong>DELETE</strong> to confirm.";
+/* targetEmail is raw, untrusted text (an account's email) -- escaped here,
+   internally, rather than trusting callers to pre-build safe HTML. A
+   caller previously built the <strong>-wrapped message itself and handed
+   it in pre-escaped, but that string round-trips through a button's
+   data-* attribute first (see the admin delete-user handler below), and
+   reading a data attribute back via .dataset automatically un-escapes
+   HTML entities -- so an already-escaped email came back out raw here,
+   right before being inserted via innerHTML with no second escaping pass. */
+function askDeleteAccountConfirmation(targetEmail, buttonLabel){
+  const message = targetEmail
+    ? `This permanently deletes <strong>${escapeHtml(targetEmail)}</strong>'s account and all its saved progress — there's no undo. Type <strong>DELETE</strong> to confirm.`
+    : "This permanently deletes your account and all saved progress — there's no undo. Type <strong>DELETE</strong> to confirm.";
   buttonLabel = buttonLabel || 'Delete My Account';
   return new Promise(resolve=>{
     const overlay = document.createElement('div');
@@ -1623,7 +1572,7 @@ async function beginOnlineAttempt(examData){
 /* Fire-and-forget per-answer save so an online attempt is always resumable
    from the DB, not just recoverable at submit time. */
 function syncOnlineAnswer(index){
-  if(appMode !== 'online' || !activeOnlineAttempt) return;
+  if(!activeOnlineAttempt) return;
   onlineStore.saveAnswer(activeOnlineAttempt.id, index, answers[index], !!flags[index]);
 }
 
@@ -1970,7 +1919,7 @@ async function continueRoundFromProgress(round){
       .select('*').eq('attempt_id', latest.id).order('question_index');
     if(error) throw error;
     if(!rows.length){
-      throw new Error("This round's latest attempt has no saved question data (it was reconstructed from an uploaded PDF) — re-upload the PDF(s) through Progress's importer to make it continuable.");
+      throw new Error("This round's latest attempt predates detailed answer tracking, so it can't be continued automatically — start a fresh round instead.");
     }
     const liveExplanations = libraryExplanationLookup(round.exam_key);
     const missedQs = rows.filter(r=>r.selected_option !== r.correct_option).map(r=>({
@@ -2147,10 +2096,7 @@ function renderAdminPanel(){
     btn.onclick = async ()=>{
       const targetId = btn.dataset.deleteUser;
       const targetEmail = btn.dataset.deleteEmail;
-      const confirmed = await askDeleteAccountConfirmation(
-        `This permanently deletes <strong>${targetEmail}</strong>'s account and all its saved progress — there's no undo. Type <strong>DELETE</strong> to confirm.`,
-        'Permanently Delete'
-      );
+      const confirmed = await askDeleteAccountConfirmation(targetEmail, 'Permanently Delete');
       if(!confirmed) return;
       try{
         const { error } = await supabaseClient.rpc('admin_delete_user', { target_user_id: targetId });
