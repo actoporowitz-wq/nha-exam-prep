@@ -937,6 +937,22 @@ let authError = '';
 let authMessage = '';
 let turnstileWidgetId = null;
 
+/* True for the length of one page load if the URL looks like a password
+   recovery link (Supabase appends the recovery token as a URL hash or
+   query string once its own verify endpoint validates it and redirects
+   back here). Only ONE of PASSWORD_RECOVERY / SIGNED_IN ever fires for a
+   given detected session -- never both -- so that part isn't a race. The
+   real race is against a SEPARATE, already-persisted session from a
+   previous sign-in on this same browser: restoring THAT can grant full
+   access before the recovery link's own validation (a network round trip
+   to Supabase) has resolved and fired PASSWORD_RECOVERY, which looks
+   exactly like the reset flow "auto signing you in" instead of showing
+   the new-password form. applyAccessGate() refuses to grant access while
+   this is true, no matter what event fires in the meantime; a timeout
+   below clears it so an invalid/expired link doesn't get stuck forever. */
+let pendingPasswordRecovery = /type=recovery/.test(location.hash) || /type=recovery/.test(location.search);
+if(pendingPasswordRecovery) setTimeout(()=>{ pendingPasswordRecovery = false; }, 8000);
+
 /* Turnstile's script only auto-renders .cf-turnstile elements present at
    script-load time — since the sign-up form is injected later via
    innerHTML, the widget must be rendered explicitly. */
@@ -1351,6 +1367,16 @@ async function fetchExamLibrary(){
 }
 
 async function applyAccessGate(authEvent){
+  if(pendingPasswordRecovery && authEvent !== 'PASSWORD_RECOVERY'){
+    /* Neither grant access nor show the normal sign-in form -- both would
+       be a confusing flash of the wrong screen while the recovery link's
+       own validation is still in flight. See pendingPasswordRecovery's
+       declaration for why this race exists at all. */
+    appShell.style.display = 'none';
+    authView.style.display = 'block';
+    authPanel.innerHTML = '<h2>Verifying your reset link…</h2>';
+    return;
+  }
   if(!currentUser){
     stopInactivityWatch();
     appShell.style.display = 'none';
@@ -1443,6 +1469,7 @@ async function applyAccessGate(authEvent){
 supabaseClient.auth.onAuthStateChange((event, session) => {
   currentUser = session ? session.user : null;
   if(event === 'PASSWORD_RECOVERY'){
+    pendingPasswordRecovery = false;
     authScreen = 'reset-password'; authError=''; authMessage='';
     appShell.style.display = 'none';
     showView('auth');
