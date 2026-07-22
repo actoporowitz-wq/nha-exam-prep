@@ -1086,6 +1086,20 @@ async function handleAuthSubmit(){
       const newPassword = document.getElementById('authNewPassword').value;
       const { error } = await supabaseClient.auth.updateUser({ password: newPassword });
       if(error) throw error;
+      /* updateUser() succeeding leaves the recovery link's session fully
+         valid -- without an explicit sign-out here, currentUser stays set,
+         and the next event that re-triggers applyAccessGate() (Supabase
+         refreshes tokens in the background on its own, so one will fire
+         even with nobody touching anything) finds that still-valid session
+         and logs the person straight into the app, skipping the "sign in
+         with your new password" step entirely. Same reason as
+         handleSignOut(): the success message has to be set AFTER
+         applyAccessGate() runs, not before, or its signed-out branch wipes
+         it right back out. */
+      await supabaseClient.auth.signOut();
+      currentUser = null;
+      profile = null;
+      await applyAccessGate();
       authScreen = 'signin';
       authMessage = 'Password updated — sign in with your new password.';
       renderAuthView();
