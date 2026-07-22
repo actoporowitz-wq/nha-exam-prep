@@ -2128,6 +2128,13 @@ async function renderAdminView(){
       const signIns = userEvents.filter(e=>e.event_type==='sign_in' && (!deviceDismissal || e.created_at > deviceDismissal.dismissed_at));
       const distinctIpsWeek = new Set(signIns.filter(e=>e.ip_address).map(e=>e.ip_address));
       const deviceFlag = distinctIpsWeek.size > 2;
+      /* Breakdown by device_type for the admin-facing label only -- the
+         flag itself still fires on total distinct IPs above, regardless
+         of type mix, since two computers plus one phone is just as much
+         evidence of sharing as three phones. */
+      const phoneIpsWeek = new Set(signIns.filter(e=>e.ip_address && e.device_type==='phone').map(e=>e.ip_address));
+      const computerIpsWeek = new Set(signIns.filter(e=>e.ip_address && e.device_type==='computer').map(e=>e.ip_address));
+      const otherIpsWeek = new Set(signIns.filter(e=>e.ip_address && e.device_type!=='phone' && e.device_type!=='computer').map(e=>e.ip_address));
 
       /* Rate flag: get_exam_library() already debounces repeat fetches
          from the same user+IP within a 5-minute window server-side, so a
@@ -2145,6 +2152,7 @@ async function renderAdminView(){
 
       flagsByUser[p.user_id] = {
         deviceFlag, distinctIpCountWeek: distinctIpsWeek.size, deviceDismissed: !!deviceDismissal,
+        phoneIpCountWeek: phoneIpsWeek.size, computerIpCountWeek: computerIpsWeek.size, otherIpCountWeek: otherIpsWeek.size,
         rateFlag, fetchesLast24h: fetches.length, distinctIpCountDay: distinctIpsDay.size, rateDismissed: !!rateDismissal
       };
     });
@@ -2183,6 +2191,18 @@ function renderAdminPanel(){
   else renderAdminAccountsView();
 }
 
+/* "2 phones, 1 computer" instead of a flat IP count -- distinguishes an
+   account signed in from two different phones (worth a closer look) from
+   one signed in from a phone and a laptop (probably just their own two
+   devices), which a bare count can't tell apart. */
+function describeDeviceBreakdown(flags){
+  const parts = [];
+  if(flags.phoneIpCountWeek) parts.push(`${flags.phoneIpCountWeek} phone${flags.phoneIpCountWeek>1?'s':''}`);
+  if(flags.computerIpCountWeek) parts.push(`${flags.computerIpCountWeek} computer${flags.computerIpCountWeek>1?'s':''}`);
+  if(flags.otherIpCountWeek) parts.push(`${flags.otherIpCountWeek} other device${flags.otherIpCountWeek>1?'s':''}`);
+  return parts.length ? parts.join(', ') : `${flags.distinctIpCountWeek} IP addresses`;
+}
+
 function renderAdminAccountsView(){
   const sub = document.getElementById('adminSubPanel');
   const total = adminData.profiles.length;
@@ -2219,7 +2239,7 @@ function renderAdminAccountsView(){
     const isProtected = p.email === 'ahrontoporowitz@gmail.com';
     const badges = [];
     if(flags.deviceFlag){
-      badges.push(`<span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">Shared across ${flags.distinctIpCountWeek} IP addresses</span><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="device">Dismiss</button>`);
+      badges.push(`<span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">Shared across ${describeDeviceBreakdown(flags)}</span><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="device">Dismiss</button>`);
     } else if(flags.deviceDismissed){
       badges.push(`<span class="lib-badge" style="background:var(--chip);">Reviewed — device</span><button class="link-btn" data-undismiss-user="${p.user_id}" data-undismiss-type="device">Un-dismiss</button>`);
     }
@@ -2467,14 +2487,42 @@ async function renderAdminSecurityEvents(targetUserId){
     const { data: rows, error } = await supabaseClient.from('security_events')
       .select('*').eq('user_id', targetUserId).order('created_at', { ascending: false }).limit(200);
     if(error) throw error;
-    const rowsHtml = rows.length ? rows.map(e=>`
+
+    /* Label each distinct IP as "Phone 1"/"Phone 2"/"Computer 1" etc. instead
+       of a bare device_type repeated on every row -- otherwise two different
+       phones are both just "(phone)" and look identical in the timeline.
+       Numbering is assigned in chronological (oldest-first) order of first
+       appearance per device type. library_fetch rows have no device_type of
+       their own, so they borrow the label from the same IP's sign-in, when
+       one is present in this same 200-event window. */
+    const chronological = [...rows].reverse();
+    const ipDeviceType = {};
+    chronological.forEach(e=>{
+      if(e.event_type==='sign_in' && e.ip_address && e.device_type && !(e.ip_address in ipDeviceType)){
+        ipDeviceType[e.ip_address] = e.device_type;
+      }
+    });
+    const typeCounters = {};
+    const ipLabel = {};
+    chronological.forEach(e=>{
+      if(!e.ip_address || e.ip_address in ipLabel) return;
+      const type = e.device_type || ipDeviceType[e.ip_address];
+      if(!type) return;
+      typeCounters[type] = (typeCounters[type]||0) + 1;
+      ipLabel[e.ip_address] = `${type.charAt(0).toUpperCase()}${type.slice(1)} ${typeCounters[type]}`;
+    });
+
+    const rowsHtml = rows.length ? rows.map(e=>{
+      const label = e.ip_address ? ipLabel[e.ip_address] : null;
+      return `
       <div class="lib-row">
         <div class="lib-info">
-          <div class="lib-title">${e.event_type === 'sign_in' ? 'Sign-in' : 'Library fetch'}${e.device_type ? ` (${escapeHtml(e.device_type)})` : ''}</div>
+          <div class="lib-title">${e.event_type === 'sign_in' ? 'Sign-in' : 'Library fetch'}${label ? ` (${escapeHtml(label)})` : ''}</div>
           <div class="lib-meta">${new Date(e.created_at).toLocaleString()} · IP: ${escapeHtml(e.ip_address || 'unknown')}</div>
         </div>
       </div>
-    `).join('') : `<div class="format-help">No security events recorded for this account.</div>`;
+    `;
+    }).join('') : `<div class="format-help">No security events recorded for this account.</div>`;
     adminPanel.innerHTML = `
       <h2>Admin — Security events for ${escapeHtml(label)}</h2>
       <button class="link-btn" id="backToAdminBtn">← Back to Admin</button>
