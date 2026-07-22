@@ -2,9 +2,23 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Exam Practice Tool</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#2f6f5e">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+<script>
+/* App-shell caching only -- see sw.js for the same-origin allowlist that
+   keeps every Supabase request (auth, RPCs, exam content) out of it. */
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(()=>{ /* best-effort */ });
+  });
+}
+</script>
 <style>
   :root{
     --bg:#f6f5f2; --panel:#ffffff; --ink:#1f2422; --muted:#6b7370; --line:#e3e0d8;
