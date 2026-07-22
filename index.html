@@ -164,6 +164,12 @@ let flashOnlineAttempts = null; // null = not yet loaded; [] | [{attemptId,examT
 let flashAttemptsLoading = false;
 let flashSelectedAttemptIds = new Set();
 let flashPickOpen = false;
+/* Purely a rendering overlay on the live quiz screen -- toggling it never
+   touches answers/scoring/navigation, only whether renderQuestion() paints
+   correct/incorrect on top of the option you've already picked. Persisted
+   so it doesn't need re-enabling on every exam. */
+let instantFeedback = false;
+try{ instantFeedback = localStorage.getItem('nha_instant_feedback') === 'true'; }catch(e){ /* fine, defaults to off */ }
 
 /* ================= elements ================= */
 const quizPanel = document.getElementById('quizPanel');
@@ -307,14 +313,27 @@ function renderQuestion(){
       <span>${answeredCount} answered</span>
     </div>
     <div class="bar"><div class="bar-fill" style="width:${(answeredCount/total*100).toFixed(1)}%"></div></div>
+    <label style="display:flex;align-items:center;gap:6px;font-family:system-ui,sans-serif;font-size:.78rem;color:var(--muted);margin-bottom:16px;cursor:pointer;">
+      <input type="checkbox" id="instantFeedbackToggle" ${instantFeedback?'checked':''}> Show correct answer instantly
+    </label>
     <div class="qnum">Question ${qNum}</div>
     <div class="qtext">${escapeHtml(q.text)}</div>
   `;
 
+  /* Purely visual -- which option is "selected" for scoring/resume purposes
+     is unaffected either way, this only changes what renderQuestion() paints
+     on top of it. */
+  const showFeedback = instantFeedback && answers[current] !== undefined;
   q.options.forEach((opt, i) => {
     const sel = answers[current] === i;
-    html += `<div class="opt ${sel?'selected':''}" data-i="${i}">
-      <span class="letter">${letters[i]}</span><span>${escapeHtml(opt)}</span>
+    let cls = sel ? 'selected' : '';
+    let tag = '';
+    if(showFeedback){
+      if(i === q.correct){ cls = 'correct'; tag = ' ✓'; }
+      else if(sel){ cls = 'incorrect'; tag = ' — not correct'; }
+    }
+    html += `<div class="opt ${cls}" data-i="${i}">
+      <span class="letter">${letters[i]}</span><span>${escapeHtml(opt)}${tag}</span>
     </div>`;
   });
 
@@ -337,6 +356,11 @@ function renderQuestion(){
 
   quizPanel.innerHTML = html;
 
+  document.getElementById('instantFeedbackToggle').onchange = (e)=>{
+    instantFeedback = e.target.checked;
+    try{ localStorage.setItem('nha_instant_feedback', String(instantFeedback)); }catch(err){ /* fine, just won't persist */ }
+    renderQuestion();
+  };
   quizPanel.querySelectorAll('.opt').forEach(el=>{
     el.onclick = ()=>{ answers[current] = parseInt(el.dataset.i); syncOnlineAnswer(current); renderQuestion(); renderDots(); };
   });
