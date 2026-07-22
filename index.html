@@ -8,6 +8,9 @@
 <meta name="theme-color" content="#2f6f5e">
 <link rel="icon" href="/icons/icon-192.png">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="NHA Exam Prep">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 <script>
@@ -102,6 +105,17 @@ if('serviceWorker' in navigator){
   .lib-title{font-size:1rem;}
   .lib-meta{font-family:system-ui,sans-serif;font-size:.78rem;color:var(--muted);}
   .subsection:first-child{border-top:none;margin-top:0;padding-top:0;}
+
+  /* Phone-width fixes. Everything else already reflows via flex-wrap;
+     .nav-row is the one place three unwrapped buttons (Previous / Flag /
+     Next) don't fit and were breaking mid-word. Stack Previous+Next as a
+     two-corner row (order pushes Flag below, full-width) instead. */
+  @media (max-width: 480px){
+    .wrap{padding:20px 14px 60px;}
+    .nav-row{flex-wrap:wrap;row-gap:10px;}
+    .nav-row .flag-btn{order:3;flex:1 0 100%;text-align:center;}
+    .dot{width:34px;height:34px;}
+  }
 </style>
 </head>
 <body>
