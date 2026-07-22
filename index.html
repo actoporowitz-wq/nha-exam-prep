@@ -1255,32 +1255,24 @@ async function refreshProfile(){
   profile = error ? null : data;
 }
 
-/* Coarse, client-supplied signals for the admin tab's abuse flags --
-   good enough to catch a real person casually sharing a password across
-   their own phone/laptop, not meant to resist someone deliberately
-   faking the values (see plan notes on this tradeoff). */
+/* device_type is a coarse, client-supplied label (phone/computer/other)
+   used only for display context in the admin tab -- it never gates a
+   flag, so its coarseness doesn't matter. The actual device/rate flags
+   are keyed off the caller's real IP address, captured server-side in
+   log_sign_in()/get_exam_library() -- not something the client computes
+   or sends, so unlike the old browser-fingerprint hash it can't be
+   spoofed from here and doesn't get manufactured into a "new device" by
+   a routine browser auto-update. */
 function computeDeviceType(){
   const ua = navigator.userAgent || '';
   if(/Mobi|Android|iPhone|iPad|iPod/i.test(ua)) return 'phone';
   if(/Windows|Macintosh|Linux|X11/i.test(ua)) return 'computer';
   return 'other';
 }
-function computeDeviceFingerprint(){
-  // Sort screen dimensions rather than using width/height directly --
-  // rotating a phone between portrait and landscape swaps those values on
-  // many mobile browsers, which would otherwise turn one real device into
-  // two different fingerprints between sign-ins.
-  const dims = [screen.width, screen.height].sort((a,b)=>a-b);
-  const raw = navigator.userAgent + '|' + dims[0] + 'x' + dims[1] + '|' +
-    (Intl.DateTimeFormat().resolvedOptions().timeZone || '');
-  let hash = 0;
-  for(let i=0;i<raw.length;i++){ hash = ((hash<<5)-hash + raw.charCodeAt(i))|0; }
-  return 'fp_' + Math.abs(hash).toString(36);
-}
 async function logSignInEvent(){
   try{ await supabaseClient.rpc('touch_last_seen'); }catch(e){ /* best-effort */ }
   try{
-    await supabaseClient.rpc('log_sign_in', { fingerprint: computeDeviceFingerprint(), device_type: computeDeviceType() });
+    await supabaseClient.rpc('log_sign_in', { device_type: computeDeviceType() });
   }catch(e){ /* best-effort */ }
 }
 
@@ -2092,12 +2084,18 @@ function renderProgressAttemptDetail(){
 
 /* ================= ADMIN TAB (role==='admin' only) ================= */
 let adminData = null; // { profiles: [...], flagsByUser: {...} }
-let adminDrilldownUserId = null;
+let adminDrilldownUserId = null; // "View Progress" drilldown
+let adminSecurityEventsUserId = null; // "View Security Events" drilldown
 let adminReviewAttempt = null; // { id, label } | null -- set when drilling into one attempt's question-by-question review
 let adminReviewFilter = 'missed'; // 'missed' | 'all' -- mirrors reviewFilter, for renderAdminAttemptReview
+let adminSubView = 'accounts'; // 'accounts' | 'auditLog' | 'tools' -- sub-nav within the Admin tab
+let adminSearch = ''; // account-list email search
+let adminFilter = 'all'; // 'all' | 'pending' | 'flagged' | 'admins'
+let adminSort = 'lastActive'; // 'lastActive' | 'signupDate' | 'flagSeverity'
 
 async function renderAdminView(){
   adminDrilldownUserId = null;
+  adminSecurityEventsUserId = null;
   adminReviewAttempt = null;
   adminPanel.innerHTML = `<h2>Admin</h2><div class="format-help">Loading…</div>`;
   try{
@@ -2108,23 +2106,47 @@ async function renderAdminView(){
     const { data: events, error: eErr } = await supabaseClient.from('security_events')
       .select('*').gte('created_at', sevenDaysAgo);
     if(eErr) throw eErr;
+    const { data: dismissals, error: dErr } = await supabaseClient.from('flag_dismissals').select('*');
+    if(dErr) throw dErr;
+    const dismissalByUserType = {};
+    dismissals.forEach(d=>{ dismissalByUserType[d.user_id + ':' + d.flag_type] = d; });
+
     const flagsByUser = {};
     profiles.forEach(p=>{
       const userEvents = events.filter(e=>e.user_id===p.user_id);
-      const signIns = userEvents.filter(e=>e.event_type==='sign_in');
-      /* Flag: more than one phone, or more than two computers, seen in the
-         last 7 days -- the realistic signature of a shared password rather
-         than one person's own devices. */
-      const phoneDevices = new Set(signIns.filter(e=>e.device_type==='phone').map(e=>e.device_fingerprint));
-      const computerDevices = new Set(signIns.filter(e=>e.device_type==='computer').map(e=>e.device_fingerprint));
-      const deviceFlag = phoneDevices.size > 1 || computerDevices.size > 2;
-      const fetchesLast24h = userEvents.filter(e=>e.event_type==='library_fetch' && e.created_at >= oneDayAgo).length;
-      /* Admins legitimately reload/test far more than a normal studying
-         account -- exclude them from the rate flag so routine admin use
-         doesn't read as scraping. Device-sharing detection still applies;
-         that signal isn't about volume. */
-      const rateFlag = p.role !== 'admin' && fetchesLast24h > 5;
-      flagsByUser[p.user_id] = { deviceFlag, rateFlag, phoneCount: phoneDevices.size, computerCount: computerDevices.size, fetchesLast24h };
+      const deviceDismissal = dismissalByUserType[p.user_id + ':device'];
+      const rateDismissal = dismissalByUserType[p.user_id + ':rate'];
+
+      /* Device-sharing flag: distinct real IP addresses (captured
+         server-side in log_sign_in, not a client-computed hash) seen
+         signing in over the trailing 7 days -- more than 2 is a
+         meaningfully stronger signal of a shared password than the old
+         browser-fingerprint count, since it can't be manufactured by a
+         routine browser auto-update. Only sign-ins after a dismissal
+         count, so dismissing clears the slate rather than requiring
+         things to get "worse" than before. */
+      const signIns = userEvents.filter(e=>e.event_type==='sign_in' && (!deviceDismissal || e.created_at > deviceDismissal.dismissed_at));
+      const distinctIpsWeek = new Set(signIns.filter(e=>e.ip_address).map(e=>e.ip_address));
+      const deviceFlag = distinctIpsWeek.size > 2;
+
+      /* Rate flag: get_exam_library() already debounces repeat fetches
+         from the same user+IP within a 5-minute window server-side, so a
+         flaky session re-authenticating and reloading no longer inflates
+         this count the way it used to. Flag on multiple distinct IPs
+         pulling in a day (sharing, regardless of volume) or a single IP
+         pulling an unusually high number of times (raised from the old
+         >5 threshold now that reload-storm noise is gone at the source). */
+      const fetches = userEvents.filter(e=>e.event_type==='library_fetch' && e.created_at >= oneDayAgo && (!rateDismissal || e.created_at > rateDismissal.dismissed_at));
+      const distinctIpsDay = new Set(fetches.filter(e=>e.ip_address).map(e=>e.ip_address));
+      const perIpCount = {};
+      fetches.forEach(e=>{ if(e.ip_address) perIpCount[e.ip_address] = (perIpCount[e.ip_address]||0) + 1; });
+      const maxSingleIpFetches = Object.values(perIpCount).reduce((m,c)=>Math.max(m,c), 0);
+      const rateFlag = p.role !== 'admin' && (distinctIpsDay.size > 1 || maxSingleIpFetches > 15);
+
+      flagsByUser[p.user_id] = {
+        deviceFlag, distinctIpCountWeek: distinctIpsWeek.size, deviceDismissed: !!deviceDismissal,
+        rateFlag, fetchesLast24h: fetches.length, distinctIpCountDay: distinctIpsDay.size, rateDismissed: !!rateDismissal
+      };
     });
     adminData = { profiles, flagsByUser };
   } catch(err){
@@ -2134,25 +2156,86 @@ async function renderAdminView(){
   renderAdminPanel();
 }
 
+/* Dispatch on drilldown state first (attempt review > user progress >
+   security-events timeline), then the three sub-nav views -- kept as
+   separate pills instead of one long scrolling page per the "don't
+   clutter, use menus" steer on this tab. */
 function renderAdminPanel(){
   if(adminReviewAttempt){ renderAdminAttemptReview(adminReviewAttempt); return; }
   if(adminDrilldownUserId){ renderAdminUserProgress(adminDrilldownUserId); return; }
-  const rows = adminData.profiles.map(p=>{
+  if(adminSecurityEventsUserId){ renderAdminSecurityEvents(adminSecurityEventsUserId); return; }
+
+  adminPanel.innerHTML = `
+    <h2>Admin</h2>
+    <div class="toplinks">
+      <button id="adminNavAccounts" class="${adminSubView==='accounts'?'active':''}">Accounts</button>
+      <button id="adminNavAuditLog" class="${adminSubView==='auditLog'?'active':''}">Audit Log</button>
+      <button id="adminNavTools" class="${adminSubView==='tools'?'active':''}">Tools</button>
+    </div>
+    <div id="adminSubPanel"></div>
+  `;
+  document.getElementById('adminNavAccounts').onclick = ()=>{ adminSubView='accounts'; renderAdminPanel(); };
+  document.getElementById('adminNavAuditLog').onclick = ()=>{ adminSubView='auditLog'; renderAdminPanel(); };
+  document.getElementById('adminNavTools').onclick = ()=>{ adminSubView='tools'; renderAdminPanel(); };
+
+  if(adminSubView==='auditLog') renderAdminAuditLogView();
+  else if(adminSubView==='tools') renderAdminToolsView();
+  else renderAdminAccountsView();
+}
+
+function renderAdminAccountsView(){
+  const sub = document.getElementById('adminSubPanel');
+  const total = adminData.profiles.length;
+  const pendingCount = adminData.profiles.filter(p=>!p.approved).length;
+  const adminCount = adminData.profiles.filter(p=>p.role==='admin').length;
+  const flaggedCount = adminData.profiles.filter(p=>{
+    const f = adminData.flagsByUser[p.user_id] || {};
+    return f.deviceFlag || f.rateFlag;
+  }).length;
+
+  const filtered = adminData.profiles.filter(p=>{
+    const f = adminData.flagsByUser[p.user_id] || {};
+    if(adminFilter==='pending' && p.approved) return false;
+    if(adminFilter==='flagged' && !(f.deviceFlag || f.rateFlag)) return false;
+    if(adminFilter==='admins' && p.role!=='admin') return false;
+    if(adminSearch && !p.email.toLowerCase().includes(adminSearch.toLowerCase())) return false;
+    return true;
+  });
+
+  filtered.sort((a,b)=>{
+    if(adminSort==='signupDate') return new Date(b.created_at) - new Date(a.created_at);
+    if(adminSort==='flagSeverity'){
+      const fa = adminData.flagsByUser[a.user_id]||{}, fb = adminData.flagsByUser[b.user_id]||{};
+      const sa = (fa.deviceFlag?1:0)+(fa.rateFlag?1:0), sb = (fb.deviceFlag?1:0)+(fb.rateFlag?1:0);
+      return sb - sa;
+    }
+    return new Date(b.last_seen_at||0) - new Date(a.last_seen_at||0);
+  });
+
+  const rowsHtml = filtered.map(p=>{
     const flags = adminData.flagsByUser[p.user_id] || {};
     const isSelf = p.user_id === currentUser.id;
-    const flagBadges = [
-      flags.deviceFlag ? `<span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">Shared device (${flags.phoneCount} phone, ${flags.computerCount} computer)</span>` : '',
-      flags.rateFlag ? `<span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">${flags.fetchesLast24h} library fetches/24h</span>` : ''
-    ].filter(Boolean).join(' ');
+    const badges = [];
+    if(flags.deviceFlag){
+      badges.push(`<span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">Shared across ${flags.distinctIpCountWeek} IP addresses</span><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="device">Dismiss</button>`);
+    } else if(flags.deviceDismissed){
+      badges.push(`<span class="lib-badge" style="background:var(--chip);">Reviewed — device</span><button class="link-btn" data-undismiss-user="${p.user_id}" data-undismiss-type="device">Un-dismiss</button>`);
+    }
+    if(flags.rateFlag){
+      badges.push(`<span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">${flags.fetchesLast24h} library fetches/24h</span><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="rate">Dismiss</button>`);
+    } else if(flags.rateDismissed){
+      badges.push(`<span class="lib-badge" style="background:var(--chip);">Reviewed — rate</span><button class="link-btn" data-undismiss-user="${p.user_id}" data-undismiss-type="rate">Un-dismiss</button>`);
+    }
     return `
       <div class="lib-row">
         <div class="lib-info">
           <div class="lib-title">${escapeHtml(p.email)} ${p.role==='admin' ? '<span class="lib-badge verified">Admin</span>' : ''} ${p.approved ? '' : '<span class="lib-badge" style="background:var(--chip);">Pending</span>'}</div>
           <div class="lib-meta">Signed up ${new Date(p.created_at).toLocaleDateString()} · Last active ${p.last_seen_at ? new Date(p.last_seen_at).toLocaleString() : 'never'}</div>
-          ${flagBadges ? `<div class="lib-meta" style="margin-top:4px;">${flagBadges}</div>` : ''}
+          ${badges.length ? `<div class="lib-meta" style="margin-top:4px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">${badges.join('')}</div>` : ''}
         </div>
-        <div style="display:flex;align-items:center;gap:10px;">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <button class="link-btn" data-view-user="${p.user_id}">View Progress</button>
+          <button class="link-btn" data-view-events="${p.user_id}">View Security Events</button>
           ${isSelf ? '' : `
             <button class="btn ${p.approved ? 'btn-ghost' : 'btn-primary'}" data-toggle-approve="${p.user_id}" data-new-approved="${!p.approved}">${p.approved ? 'Suspend' : 'Approve'}</button>
             <button class="link-btn" style="color:var(--bad);" data-delete-user="${p.user_id}" data-delete-email="${escapeHtml(p.email)}">Permanently Delete</button>
@@ -2160,11 +2243,134 @@ function renderAdminPanel(){
         </div>
       </div>
     `;
-  }).join('');
-  adminPanel.innerHTML = `
-    <h2>Admin</h2>
-    <div class="format-help">${adminData.profiles.length} account(s) total. "Suspend" keeps all their progress and can be undone with "Approve" — "Permanently Delete" removes the account and all its data for good.</div>
-    ${rows}
+  }).join('') || `<div class="format-help">No accounts match this filter.</div>`;
+
+  sub.innerHTML = `
+    <div class="format-help">${total} account(s) total · ${pendingCount} pending · ${flaggedCount} flagged · ${adminCount} admin(s). "Suspend" keeps all their progress and can be undone with "Approve" — "Permanently Delete" removes the account and all its data for good.</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px;font-family:system-ui,sans-serif;">
+      <input type="text" id="adminSearchInput" placeholder="Search by email…" value="${escapeHtml(adminSearch)}" style="flex:1;min-width:160px;padding:8px 12px;border-radius:8px;border:1px solid var(--line);">
+      <select id="adminFilterSelect" style="padding:8px 12px;border-radius:8px;border:1px solid var(--line);">
+        <option value="all" ${adminFilter==='all'?'selected':''}>All</option>
+        <option value="pending" ${adminFilter==='pending'?'selected':''}>Pending</option>
+        <option value="flagged" ${adminFilter==='flagged'?'selected':''}>Flagged</option>
+        <option value="admins" ${adminFilter==='admins'?'selected':''}>Admins</option>
+      </select>
+      <select id="adminSortSelect" style="padding:8px 12px;border-radius:8px;border:1px solid var(--line);">
+        <option value="lastActive" ${adminSort==='lastActive'?'selected':''}>Sort: Last active</option>
+        <option value="signupDate" ${adminSort==='signupDate'?'selected':''}>Sort: Signup date</option>
+        <option value="flagSeverity" ${adminSort==='flagSeverity'?'selected':''}>Sort: Flag severity</option>
+      </select>
+    </div>
+    ${rowsHtml}
+  `;
+
+  document.getElementById('adminSearchInput').oninput = (e)=>{ adminSearch = e.target.value; renderAdminAccountsView(); };
+  document.getElementById('adminFilterSelect').onchange = (e)=>{ adminFilter = e.target.value; renderAdminAccountsView(); };
+  document.getElementById('adminSortSelect').onchange = (e)=>{ adminSort = e.target.value; renderAdminAccountsView(); };
+
+  sub.querySelectorAll('button[data-toggle-approve]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const targetId = btn.dataset.toggleApprove;
+      const newApproved = btn.dataset.newApproved === 'true';
+      btn.disabled = true;
+      try{
+        const { error } = await supabaseClient.rpc('admin_set_approved', { target_user_id: targetId, new_approved: newApproved });
+        if(error) throw error;
+        await renderAdminView();
+      } catch(err){
+        alert('Could not update: ' + err.message);
+        btn.disabled = false;
+      }
+    };
+  });
+  sub.querySelectorAll('button[data-delete-user]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const targetId = btn.dataset.deleteUser;
+      const targetEmail = btn.dataset.deleteEmail;
+      const confirmed = await askDeleteAccountConfirmation(targetEmail, 'Permanently Delete');
+      if(!confirmed) return;
+      try{
+        const { error } = await supabaseClient.rpc('admin_delete_user', { target_user_id: targetId });
+        if(error) throw error;
+        await renderAdminView();
+      } catch(err){
+        alert('Could not delete: ' + err.message);
+      }
+    };
+  });
+  sub.querySelectorAll('button[data-view-user]').forEach(btn=>{
+    btn.onclick = ()=>{ adminDrilldownUserId = btn.dataset.viewUser; renderAdminPanel(); };
+  });
+  sub.querySelectorAll('button[data-view-events]').forEach(btn=>{
+    btn.onclick = ()=>{ adminSecurityEventsUserId = btn.dataset.viewEvents; renderAdminPanel(); };
+  });
+  sub.querySelectorAll('button[data-dismiss-user]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      btn.disabled = true;
+      try{
+        const { error } = await supabaseClient.rpc('admin_dismiss_flag', { target_user_id: btn.dataset.dismissUser, flag_type: btn.dataset.dismissType });
+        if(error) throw error;
+        await renderAdminView();
+      } catch(err){
+        alert('Could not dismiss: ' + err.message);
+        btn.disabled = false;
+      }
+    };
+  });
+  sub.querySelectorAll('button[data-undismiss-user]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      btn.disabled = true;
+      try{
+        const { error } = await supabaseClient.rpc('admin_undismiss_flag', { target_user_id: btn.dataset.undismissUser, flag_type: btn.dataset.undismissType });
+        if(error) throw error;
+        await renderAdminView();
+      } catch(err){
+        alert('Could not un-dismiss: ' + err.message);
+        btn.disabled = false;
+      }
+    };
+  });
+}
+
+async function renderAdminAuditLogView(){
+  const sub = document.getElementById('adminSubPanel');
+  sub.innerHTML = `<div class="format-help">Loading…</div>`;
+  try{
+    const { data: rows, error } = await supabaseClient.from('admin_action_log')
+      .select('*').order('created_at', { ascending: false }).limit(200);
+    if(error) throw error;
+    if(!rows.length){
+      sub.innerHTML = `<div class="format-help">No admin actions recorded yet.</div>`;
+      return;
+    }
+    const actionLabels = {
+      approve: 'Approved', suspend: 'Suspended', delete_user: 'Permanently deleted',
+      grant_admin: 'Granted admin to', revoke_admin: 'Revoked admin from',
+      dismiss_flag: 'Dismissed flag for', undismiss_flag: 'Un-dismissed flag for'
+    };
+    sub.innerHTML = `
+      <div class="format-help">Most recent 200 admin actions, newest first.</div>
+      ${rows.map(r=>{
+        const label = actionLabels[r.action] || r.action;
+        const flagType = r.detail && r.detail.flag_type ? ` (${r.detail.flag_type})` : '';
+        return `
+          <div class="lib-row">
+            <div class="lib-info">
+              <div class="lib-title">${escapeHtml(r.actor_email || 'Unknown admin')} — ${label}${flagType} ${escapeHtml(r.target_email || r.target_user_id || '')}</div>
+              <div class="lib-meta">${new Date(r.created_at).toLocaleString()}</div>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    `;
+  } catch(err){
+    sub.innerHTML = `<div class="msg err">Could not load audit log: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderAdminToolsView(){
+  const sub = document.getElementById('adminSubPanel');
+  sub.innerHTML = `
     <div class="subsection">
       <h3>Trace a leaked copy of exam content</h3>
       <div class="format-help">Paste suspicious content here — every account's copy carries an invisible fingerprint, so this can identify whose account it came from.</div>
@@ -2191,39 +2397,6 @@ function renderAdminPanel(){
       <div class="msg" id="revokeAdminResult"></div>
     </div>
   `;
-  adminPanel.querySelectorAll('button[data-toggle-approve]').forEach(btn=>{
-    btn.onclick = async ()=>{
-      const targetId = btn.dataset.toggleApprove;
-      const newApproved = btn.dataset.newApproved === 'true';
-      btn.disabled = true;
-      try{
-        const { error } = await supabaseClient.rpc('admin_set_approved', { target_user_id: targetId, new_approved: newApproved });
-        if(error) throw error;
-        await renderAdminView();
-      } catch(err){
-        alert('Could not update: ' + err.message);
-        btn.disabled = false;
-      }
-    };
-  });
-  adminPanel.querySelectorAll('button[data-delete-user]').forEach(btn=>{
-    btn.onclick = async ()=>{
-      const targetId = btn.dataset.deleteUser;
-      const targetEmail = btn.dataset.deleteEmail;
-      const confirmed = await askDeleteAccountConfirmation(targetEmail, 'Permanently Delete');
-      if(!confirmed) return;
-      try{
-        const { error } = await supabaseClient.rpc('admin_delete_user', { target_user_id: targetId });
-        if(error) throw error;
-        await renderAdminView();
-      } catch(err){
-        alert('Could not delete: ' + err.message);
-      }
-    };
-  });
-  adminPanel.querySelectorAll('button[data-view-user]').forEach(btn=>{
-    btn.onclick = ()=>{ adminDrilldownUserId = btn.dataset.viewUser; renderAdminPanel(); };
-  });
   document.getElementById('decodeWatermarkBtn').onclick = ()=>{
     document.getElementById('watermarkResult').textContent = decodeWatermark(document.getElementById('watermarkInput').value, adminData.profiles);
   };
@@ -2277,6 +2450,41 @@ function renderAdminPanel(){
       true
     );
   };
+}
+
+/* Raw sign-in/library-fetch timeline for one account -- the actual
+   evidence behind the device/rate flags, not just a computed count. */
+async function renderAdminSecurityEvents(targetUserId){
+  const targetProfile = adminData.profiles.find(p=>p.user_id===targetUserId);
+  const label = targetProfile ? targetProfile.email : targetUserId;
+  adminPanel.innerHTML = `<h2>Admin — Security events for ${escapeHtml(label)}</h2><div class="format-help">Loading…</div>`;
+  try{
+    const { data: rows, error } = await supabaseClient.from('security_events')
+      .select('*').eq('user_id', targetUserId).order('created_at', { ascending: false }).limit(200);
+    if(error) throw error;
+    const rowsHtml = rows.length ? rows.map(e=>`
+      <div class="lib-row">
+        <div class="lib-info">
+          <div class="lib-title">${e.event_type === 'sign_in' ? 'Sign-in' : 'Library fetch'}${e.device_type ? ` (${escapeHtml(e.device_type)})` : ''}</div>
+          <div class="lib-meta">${new Date(e.created_at).toLocaleString()} · IP: ${escapeHtml(e.ip_address || 'unknown')}</div>
+        </div>
+      </div>
+    `).join('') : `<div class="format-help">No security events recorded for this account.</div>`;
+    adminPanel.innerHTML = `
+      <h2>Admin — Security events for ${escapeHtml(label)}</h2>
+      <button class="link-btn" id="backToAdminBtn">← Back to Admin</button>
+      <div class="format-help" style="margin-top:12px;">Most recent 200 events, newest first — the evidence behind the device/rate flags.</div>
+      ${rowsHtml}
+    `;
+    document.getElementById('backToAdminBtn').onclick = ()=>{ adminSecurityEventsUserId = null; renderAdminPanel(); };
+  } catch(err){
+    adminPanel.innerHTML = `
+      <h2>Admin</h2>
+      <div class="msg err">Could not load security events: ${escapeHtml(err.message)}</div>
+      <button class="link-btn" id="backToAdminBtn">← Back to Admin</button>
+    `;
+    document.getElementById('backToAdminBtn').onclick = ()=>{ adminSecurityEventsUserId = null; renderAdminPanel(); };
+  }
 }
 
 /* Reverses get_exam_library()'s watermarking scheme: each stamped question
