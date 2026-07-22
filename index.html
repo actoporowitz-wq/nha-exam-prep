@@ -2091,7 +2091,7 @@ let adminReviewFilter = 'missed'; // 'missed' | 'all' -- mirrors reviewFilter, f
 let adminSubView = 'accounts'; // 'accounts' | 'auditLog' | 'tools' -- sub-nav within the Admin tab
 let adminSearch = ''; // account-list email search
 let adminFilter = 'all'; // 'all' | 'pending' | 'flagged' | 'admins'
-let adminSort = 'lastActive'; // 'lastActive' | 'signupDate' | 'flagSeverity'
+let adminSort = 'lastActive'; // 'lastActive' | 'signupDate' | 'flagSeverity' | 'name'
 
 async function renderAdminView(){
   adminDrilldownUserId = null;
@@ -2203,6 +2203,7 @@ function renderAdminAccountsView(){
   });
 
   filtered.sort((a,b)=>{
+    if(adminSort==='name') return a.email.localeCompare(b.email);
     if(adminSort==='signupDate') return new Date(b.created_at) - new Date(a.created_at);
     if(adminSort==='flagSeverity'){
       const fa = adminData.flagsByUser[a.user_id]||{}, fb = adminData.flagsByUser[b.user_id]||{};
@@ -2215,6 +2216,7 @@ function renderAdminAccountsView(){
   const rowsHtml = filtered.map(p=>{
     const flags = adminData.flagsByUser[p.user_id] || {};
     const isSelf = p.user_id === currentUser.id;
+    const isProtected = p.email === 'ahrontoporowitz@gmail.com';
     const badges = [];
     if(flags.deviceFlag){
       badges.push(`<span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">Shared across ${flags.distinctIpCountWeek} IP addresses</span><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="device">Dismiss</button>`);
@@ -2236,7 +2238,9 @@ function renderAdminAccountsView(){
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <button class="link-btn" data-view-user="${p.user_id}">View Progress</button>
           <button class="link-btn" data-view-events="${p.user_id}">View Security Events</button>
-          ${isSelf ? '' : `
+          ${isSelf ? '' : isProtected ? `
+            <span class="lib-badge" style="background:var(--chip);" title="Suspend/delete/role-change are blocked server-side for this account">Protected account</span>
+          ` : `
             <button class="btn ${p.approved ? 'btn-ghost' : 'btn-primary'}" data-toggle-approve="${p.user_id}" data-new-approved="${!p.approved}">${p.approved ? 'Suspend' : 'Approve'}</button>
             <button class="link-btn" style="color:var(--bad);" data-delete-user="${p.user_id}" data-delete-email="${escapeHtml(p.email)}">Permanently Delete</button>
           `}
@@ -2259,6 +2263,7 @@ function renderAdminAccountsView(){
         <option value="lastActive" ${adminSort==='lastActive'?'selected':''}>Sort: Last active</option>
         <option value="signupDate" ${adminSort==='signupDate'?'selected':''}>Sort: Signup date</option>
         <option value="flagSeverity" ${adminSort==='flagSeverity'?'selected':''}>Sort: Flag severity</option>
+        <option value="name" ${adminSort==='name'?'selected':''}>Sort: Name (A–Z)</option>
       </select>
     </div>
     ${rowsHtml}
