@@ -61,6 +61,11 @@ if('serviceWorker' in navigator){
 
   .nav-backdrop{display:none;}
 
+  /* Question-list toggle: mobile-only (see the collapsed rule in the
+     media query below) -- desktop always shows the full dot grid, no
+     toggle needed there. */
+  .dots-toggle{display:none;}
+
   /* Flashcard study mode -- covers the whole viewport (header/tabs/
      generator hidden) so the card gets full presence instead of
      competing for space with page chrome, most valuable on a small
@@ -165,6 +170,17 @@ if('serviceWorker' in navigator){
     .nav-row{flex-wrap:wrap;row-gap:10px;position:fixed;left:0;right:0;bottom:0;margin:0;background:var(--panel);padding:10px max(14px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left));border-radius:0;box-shadow:0 -2px 12px rgba(0,0,0,.15);z-index:5;}
     .nav-row .flag-btn{order:3;flex:1 0 100%;text-align:center;}
     .dot{width:38px;height:38px;}
+    .dots-toggle{display:inline-block;margin-bottom:10px;}
+    .dotgrid.collapsed{display:none;}
+
+    /* The fixed nav-row above needs the same bottom clearance inside
+       full-screen mode that .wrap gives it normally -- full-screen's own
+       padding (set unconditionally, all widths) is only 20px, not enough
+       room once the bar is fixed instead of in normal flow. */
+    #flashPanel.flash-fullscreen,
+    #quizView.quiz-fullscreen{
+      padding-bottom:150px;
+    }
 
     /* Main-tab and Admin-sub-nav rows collapse into a hamburger-triggered
        slide-in drawer here -- desktop keeps the plain row (base .toplinks
@@ -253,6 +269,7 @@ let flags = {};
 let current = 0;
 let submitted = false;
 let quizFullScreen = false; // true = the question + navigator cover the whole viewport (header/tabs hidden), study-mode style
+let dotsExpanded = false; // mobile only (see .dots-toggle/.dotgrid.collapsed) -- desktop always shows the full grid regardless
 let currentAttempt = 1;
 let flashcards = [];
 let flashIndex = 0;
@@ -596,7 +613,8 @@ function renderDots(){
   const restoreDotI = (activeEl && dotsPanel.contains(activeEl) && activeEl.classList.contains('dot')) ? activeEl.dataset.i : null;
 
   const total = exam.questions.length;
-  let html = '<div class="dotgrid">';
+  let html = `<button class="link-btn dots-toggle" id="dotsToggleBtn" type="button">${dotsExpanded ? 'Hide question list' : 'Show question list'}</button>`;
+  html += `<div class="dotgrid${dotsExpanded ? '' : ' collapsed'}">`;
   for(let i=0;i<total;i++){
     let cls = 'dot';
     if(i===current) cls += ' current';
@@ -609,6 +627,7 @@ function renderDots(){
   dotsPanel.querySelectorAll('.dot').forEach(el=>{
     el.onclick = ()=>{ current = parseInt(el.dataset.i); renderQuestion(); renderDots(); };
   });
+  document.getElementById('dotsToggleBtn').onclick = ()=>{ dotsExpanded = !dotsExpanded; renderDots(); };
 
   if(restoreDotI !== null){ dotsPanel.querySelector(`.dot[data-i="${restoreDotI}"]`)?.focus(); }
 }
