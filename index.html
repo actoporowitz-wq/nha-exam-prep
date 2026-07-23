@@ -153,7 +153,6 @@ if('serviceWorker' in navigator){
     <div id="libraryView" style="display:none">
       <div class="panel subsection">
         <h2>Test Library</h2>
-        <div class="format-help">Installing this as an app speeds up loading, but taking an exam still needs a connection — exam content isn't stored on your device.</div>
         <div id="libraryList"></div>
       </div>
     </div>
@@ -1886,53 +1885,6 @@ async function renderProgressView(){
   renderProgressPanel();
 }
 
-/* Cumulative mastery % at each completed attempt, across every round for
-   this exam (a fresh full retake starts a new round/funnel, so the line
-   can dip when one begins -- that's real signal, not a bug). */
-function computeMasteryTimeline(ex){
-  const points = [];
-  ex.rounds.forEach(r=>{
-    r.attempts.forEach(a=>{
-      if(a.status!=='completed' || !a.completed_at || !r.original_total) return;
-      const stillMissed = a.total_questions - a.correct_count;
-      const pct = ((r.original_total - stillMissed) / r.original_total) * 100;
-      points.push({ completedAt: a.completed_at, pct, roundNumber: r.round_number, attemptNumber: a.attempt_number });
-    });
-  });
-  points.sort((a,b)=> new Date(a.completedAt) - new Date(b.completedAt));
-  return points;
-}
-
-/* Small inline-SVG line chart, no library -- matches the project's
-   zero-dependency, no-build-step static deploy. Evenly spaced by attempt
-   sequence rather than literal elapsed time: with only a handful of
-   points, real time-spacing can leave large gaps that make the line
-   harder to read than informative. Skipped below 2 points -- a single
-   value belongs in a stat tile, not a chart. */
-function renderMasteryChartSvg(points){
-  if(points.length < 2) return '';
-  const W = 320, H = 100, padL = 8, padR = 8, padT = 14, padB = 20;
-  const plotW = W - padL - padR, plotH = H - padT - padB;
-  const x = i => padL + (i/(points.length-1))*plotW;
-  const y = pct => padT + plotH - (Math.max(0,Math.min(100,pct))/100)*plotH;
-  const linePoints = points.map((p,i)=>`${x(i).toFixed(1)},${y(p.pct).toFixed(1)}`).join(' ');
-  const circles = points.map((p,i)=>{
-    const dateLabel = new Date(p.completedAt).toLocaleDateString();
-    return `<circle cx="${x(i).toFixed(1)}" cy="${y(p.pct).toFixed(1)}" r="4" fill="var(--accent)"><title>Round ${p.roundNumber}, Attempt ${p.attemptNumber} — ${p.pct.toFixed(1)}% on ${dateLabel}</title></circle>`;
-  }).join('');
-  const firstLabel = `${points[0].pct.toFixed(0)}%`;
-  const lastLabel = `${points[points.length-1].pct.toFixed(0)}%`;
-  return `
-    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;margin-bottom:10px;" role="img" aria-label="Mastery over time, from ${firstLabel} to ${lastLabel} across ${points.length} attempts">
-      <line x1="${padL}" y1="${(padT+plotH).toFixed(1)}" x2="${W-padR}" y2="${(padT+plotH).toFixed(1)}" stroke="var(--line)" stroke-width="1"/>
-      <polyline points="${linePoints}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-      ${circles}
-      <text x="${x(0).toFixed(1)}" y="${H-4}" font-family="system-ui,sans-serif" font-size="9" fill="var(--muted)" text-anchor="start">${firstLabel}</text>
-      <text x="${x(points.length-1).toFixed(1)}" y="${H-4}" font-family="system-ui,sans-serif" font-size="9" fill="var(--muted)" text-anchor="end">${lastLabel}</text>
-    </svg>
-  `;
-}
-
 function renderProgressPanel(){
   if(progressAttemptView){ renderProgressAttemptDetail(); return; }
   const d = progressData;
@@ -1960,7 +1912,6 @@ function renderProgressPanel(){
   }
   sortProgressExams(d.exams, progressSortMode).forEach(ex=>{
     html += `<div class="subsection"><h3>${escapeHtml(ex.examTitle)}</h3>`;
-    html += renderMasteryChartSvg(computeMasteryTimeline(ex));
     ex.rounds.forEach(r=>{
       /* Mastery badge fires only on the round's cumulative funnel score, never a single attempt's raw score */
       const masteryBadge = r.status==='mastered' ? '<span class="lib-badge verified" style="margin-left:8px;">Mastered</span>' : '';
