@@ -73,7 +73,18 @@ if('serviceWorker' in navigator){
     overflow-y:auto;background:var(--panel);
   }
   #flashPanel.flash-fullscreen .qtext{font-size:1.4rem;}
-  body.flash-fullscreen-active{overflow:hidden;}
+
+  /* Quiz-taking full screen -- same treatment, applied to #quizView
+     (covers both the question panel and the dot-grid navigator) instead
+     of a single panel. Shares body.fullscreen-active's scroll-lock with
+     the flashcard mode above since only one is ever active at a time. */
+  #quizView.quiz-fullscreen{
+    position:fixed;inset:0;z-index:70;overflow-y:auto;background:var(--bg);
+    padding:max(20px,env(safe-area-inset-top)) max(20px,env(safe-area-inset-right)) max(20px,env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left));
+  }
+  #quizView.quiz-fullscreen .qtext{font-size:1.4rem;}
+
+  body.fullscreen-active{overflow:hidden;}
 
   .progress-row{display:flex;justify-content:space-between;align-items:center;font-family:system-ui,sans-serif;font-size:.8rem;color:var(--muted);margin-bottom:10px;}
   .bar{height:6px;background:var(--line);border-radius:4px;overflow:hidden;margin-bottom:22px;}
@@ -232,6 +243,7 @@ let answers = {};
 let flags = {};
 let current = 0;
 let submitted = false;
+let quizFullScreen = false; // true = the question + navigator cover the whole viewport (header/tabs hidden), study-mode style
 let currentAttempt = 1;
 let flashcards = [];
 let flashIndex = 0;
@@ -385,13 +397,16 @@ function showView(v, opts){
   tabLibrary.classList.toggle('active', v==='library');
   tabProgress.classList.toggle('active', v==='progress');
   tabAdmin.classList.toggle('active', v==='admin');
-  /* Leaving the flash tab mid-full-screen (e.g. tapping another tab
-     instead of "Exit Full Screen") -- flashView going display:none
-     already hides the fixed-position card either way, but without this
-     body.flash-fullscreen-active's overflow:hidden would stay stuck on
-     for every other tab, since renderFlashcard() (the only place that
-     clears it) won't run again until they come back to Flashcards. */
-  if(v !== 'flash' && flashFullScreen){ flashFullScreen = false; document.body.classList.remove('flash-fullscreen-active'); }
+  /* Leaving the flash/quiz tab mid-full-screen (e.g. tapping another tab
+     or submitting the exam instead of "Exit Full Screen") -- the view
+     going display:none already hides the fixed-position overlay either
+     way, but without this body.fullscreen-active's overflow:hidden would
+     stay stuck on for every other tab, since the two render functions
+     (the only places that clear it) won't run again until you come back. */
+  if(v !== 'flash' && flashFullScreen){ flashFullScreen = false; }
+  const quizViewWillShow = v==='quiz' && !submitted;
+  if(!quizViewWillShow && quizFullScreen){ quizFullScreen = false; }
+  if(!flashFullScreen && !quizFullScreen){ document.body.classList.remove('fullscreen-active'); }
 
   if(v==='quiz' && submitted) renderResults();
   if(v==='flash'){
@@ -488,7 +503,13 @@ function renderQuestion(){
      original exam's question number -- qNum here made "Question 8 of 2"
      show up on any narrowed retake, mixing an original number that can
      exceed the retake's own size with a total it was never counted against. */
+  quizView.classList.toggle('quiz-fullscreen', quizFullScreen);
+  document.body.classList.toggle('fullscreen-active', quizFullScreen);
+
   let html = `
+    <div style="text-align:right;margin-bottom:6px;">
+      <button class="link-btn" id="quizFullscreenBtn" type="button">${quizFullScreen ? '✕ Exit Full Screen' : '⛶ Full Screen'}</button>
+    </div>
     <div class="progress-row">
       <span>Question ${current+1} of ${total}</span>
       <span>${answeredCount} answered</span>
@@ -554,6 +575,7 @@ function renderQuestion(){
   if(submitBtn) submitBtn.onclick = doSubmit;
   const endEarlyBtn = document.getElementById('endEarlyBtn');
   if(endEarlyBtn) endEarlyBtn.onclick = doSubmit;
+  document.getElementById('quizFullscreenBtn').onclick = ()=>{ quizFullScreen = !quizFullScreen; renderQuestion(); };
 
   if(restoreId){ document.getElementById(restoreId)?.focus(); }
   else if(restoreOptI !== null){ quizPanel.querySelector(`.opt[data-i="${restoreOptI}"]`)?.focus(); }
@@ -978,7 +1000,9 @@ function bindFlashGeneratorHandlers(){
 }
 
 document.addEventListener('keydown', (e)=>{
-  if(e.key === 'Escape' && flashFullScreen){ flashFullScreen = false; renderFlashcard(); }
+  if(e.key !== 'Escape') return;
+  if(flashFullScreen){ flashFullScreen = false; renderFlashcard(); }
+  else if(quizFullScreen){ quizFullScreen = false; renderQuestion(); }
 });
 
 function shuffleArrayInPlace(arr){
@@ -1046,7 +1070,7 @@ function renderFlashcard(){
     return;
   }
   flashPanel.classList.toggle('flash-fullscreen', flashFullScreen);
-  document.body.classList.toggle('flash-fullscreen-active', flashFullScreen);
+  document.body.classList.toggle('fullscreen-active', flashFullScreen);
   const genToggleHtml = (currentUser && !flashFullScreen)
     ? `<div style="margin-bottom:10px;"><button class="link-btn" id="flashToggleGenBtn" type="button">${flashGeneratorOpen ? 'Hide set options' : '⚙ Change flashcard set'}</button></div>`
     : '';
