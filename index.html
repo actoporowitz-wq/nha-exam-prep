@@ -40,7 +40,7 @@ if('serviceWorker' in navigator){
   .toplinks button{background:var(--chip);border:1px solid var(--line);color:var(--ink);padding:6px 12px;border-radius:20px;cursor:pointer;}
   .toplinks button.active{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);}
 
-  .mode-row{display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px;font-family:system-ui,sans-serif;}
+  .header-row{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;}
   .status-bar{font-size:.82rem;color:var(--muted);display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
   .status-bar .email{color:var(--ink);font-weight:600;}
   .link-btn{background:none;border:none;color:var(--accent);cursor:pointer;font-family:system-ui,sans-serif;font-size:.82rem;padding:0;text-decoration:underline;}
@@ -151,12 +151,12 @@ if('serviceWorker' in navigator){
        rule above, untouched), there's no space problem to fix there. */
     .nav-hamburger{display:inline-flex;}
     .toplinks.drawer{
-      position:fixed;top:0;right:0;height:100%;width:min(260px,80vw);
+      position:fixed;top:0;left:0;height:100%;width:min(260px,80vw);
       flex-direction:column;align-items:stretch;flex-wrap:nowrap;
-      background:var(--panel);box-shadow:-4px 0 24px rgba(0,0,0,.18);
+      background:var(--panel);box-shadow:4px 0 24px rgba(0,0,0,.18);
       z-index:60;padding:calc(60px + env(safe-area-inset-top)) 18px 18px;
-      padding-right:max(18px,env(safe-area-inset-right));
-      overflow-y:auto;transform:translateX(100%);transition:transform .22s ease;
+      padding-left:max(18px,env(safe-area-inset-left));
+      overflow-y:auto;transform:translateX(-100%);transition:transform .22s ease;
       margin:0;
     }
     .toplinks.drawer.open{transform:translateX(0);}
@@ -168,18 +168,19 @@ if('serviceWorker' in navigator){
 </head>
 <body>
 <div class="wrap">
-  <h1 id="examTitle">Exam Practice Tool</h1>
-  <div class="sub" id="examSub">Loading…</div>
+  <div class="header-row">
+    <div>
+      <h1 id="examTitle">Exam Practice Tool</h1>
+      <div class="sub" id="examSub">Loading…</div>
+    </div>
+    <div class="status-bar" id="statusBar"></div>
+  </div>
 
   <div id="authView" style="display:none">
     <div class="panel" id="authPanel"></div>
   </div>
 
   <div id="appShell" style="display:none">
-    <div class="mode-row">
-      <div class="status-bar" id="statusBar"></div>
-    </div>
-
     <button class="menu-trigger nav-hamburger" id="mainNavTrigger" aria-label="Open navigation menu" aria-haspopup="true" aria-expanded="false" aria-controls="mainNavDrawer">☰</button>
     <div class="nav-backdrop" id="mainNavBackdrop" hidden></div>
     <div class="toplinks drawer" id="mainNavDrawer">
@@ -394,6 +395,7 @@ function showView(v, opts){
 
   if(v==='quiz' && submitted) renderResults();
   if(v==='flash'){
+    if(!flashcards.length) loadFlashcardsFromStorage();
     renderFlashcard();
     /* Always refetch on entry (mirrors renderProgressView's unconditional
        refetch below) so a just-finished exam shows up immediately without
@@ -815,10 +817,12 @@ async function buildFlashcardsFromAttemptIds(attemptIds, scopeMsg){
     else tally.set(key, { text: r.question_text, options: r.options, correct: r.correct_option, count: 1 });
   });
   if(tally.size === 0) throw new Error('No missed questions found — nothing to build flashcards from.');
-  flashcards = Array.from(tally.values()).sort((a,b)=>b.count - a.count);
+  flashcards = Array.from(tally.values());
+  shuffleArrayInPlace(flashcards); // shuffled by default rather than sorted by miss-count -- see shuffleArrayInPlace
   flashIndex = 0;
   flashSelectedOption = null;
   flashProgressMsg = { text: `Built ${flashcards.length} flashcard(s) from ${attemptIds.length} completed attempt(s) ${scopeMsg}.`, ok:true };
+  saveFlashcardsToStorage();
 }
 
 async function generateFlashcardsFromOnlineProgress(){
@@ -977,14 +981,45 @@ document.addEventListener('keydown', (e)=>{
   if(e.key === 'Escape' && flashFullScreen){ flashFullScreen = false; renderFlashcard(); }
 });
 
-function shuffleFlashcards(){
-  for(let i=flashcards.length-1;i>0;i--){
+function shuffleArrayInPlace(arr){
+  for(let i=arr.length-1;i>0;i--){
     const j = Math.floor(Math.random()*(i+1));
-    [flashcards[i], flashcards[j]] = [flashcards[j], flashcards[i]];
+    [arr[i], arr[j]] = [arr[j], arr[i]];
   }
+}
+
+function shuffleFlashcards(){
+  shuffleArrayInPlace(flashcards);
   flashIndex = 0;
   flashSelectedOption = null;
+  saveFlashcardsToStorage();
   renderFlashcard();
+}
+
+/* Generated sets are derived, ephemeral data -- rebuildable any time from
+   the same missed-question history already in Supabase -- so caching the
+   current set in localStorage is purely a "don't lose my place on
+   refresh" convenience, not a data-integrity concern. Scoped per user id
+   so a second account signing in on the same browser never sees another
+   account's cached set. */
+function flashcardsStorageKey(){
+  return currentUser ? ('nha_flashcards_' + currentUser.id) : null;
+}
+function saveFlashcardsToStorage(){
+  const key = flashcardsStorageKey();
+  if(!key) return;
+  try{ localStorage.setItem(key, JSON.stringify({ flashcards, flashIndex })); }catch(e){ /* fine, just won't persist */ }
+}
+function loadFlashcardsFromStorage(){
+  const key = flashcardsStorageKey();
+  if(!key) return false;
+  try{
+    const saved = JSON.parse(localStorage.getItem(key));
+    if(!saved || !Array.isArray(saved.flashcards) || !saved.flashcards.length) return false;
+    flashcards = saved.flashcards;
+    flashIndex = (typeof saved.flashIndex === 'number' && saved.flashIndex < flashcards.length) ? saved.flashIndex : 0;
+    return true;
+  }catch(e){ return false; }
 }
 
 function renderFlashcard(){
