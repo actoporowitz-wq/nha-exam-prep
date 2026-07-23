@@ -61,6 +61,20 @@ if('serviceWorker' in navigator){
 
   .nav-backdrop{display:none;}
 
+  /* Flashcard study mode -- covers the whole viewport (header/tabs/
+     generator hidden) so the card gets full presence instead of
+     competing for space with page chrome, most valuable on a small
+     phone screen. body scroll is locked behind it via the second rule
+     so there's no double-scrollbar underneath. */
+  #flashPanel.flash-fullscreen{
+    position:fixed;inset:0;z-index:70;margin:0;max-width:none;
+    border-radius:0;border:none;box-shadow:none;
+    padding:max(20px,env(safe-area-inset-top)) max(20px,env(safe-area-inset-right)) max(20px,env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left));
+    overflow-y:auto;background:var(--panel);
+  }
+  #flashPanel.flash-fullscreen .qtext{font-size:1.4rem;}
+  body.flash-fullscreen-active{overflow:hidden;}
+
   .progress-row{display:flex;justify-content:space-between;align-items:center;font-family:system-ui,sans-serif;font-size:.8rem;color:var(--muted);margin-bottom:10px;}
   .bar{height:6px;background:var(--line);border-radius:4px;overflow:hidden;margin-bottom:22px;}
   .bar-fill{height:100%;background:var(--accent);transition:width .25s ease;}
@@ -221,6 +235,8 @@ let currentAttempt = 1;
 let flashcards = [];
 let flashIndex = 0;
 let flashSelectedOption = null; // null = unanswered; otherwise the clicked option index, revealing the correct answer
+let flashFullScreen = false; // true = card covers the whole viewport (header/tabs/generator hidden), study-mode style
+let flashGeneratorOpen = false; // once a set exists, the generator panel is collapsed by default -- this reopens it
 let reviewFilter = 'missed'; // 'missed' | 'all' — which questions renderReviewPanel shows
 let progressReviewFilter = 'missed'; // 'missed' | 'all' — same idea, for renderProgressAttemptDetail
 let flashProgressMsg = null; // { text, ok } | null
@@ -368,6 +384,14 @@ function showView(v, opts){
   tabLibrary.classList.toggle('active', v==='library');
   tabProgress.classList.toggle('active', v==='progress');
   tabAdmin.classList.toggle('active', v==='admin');
+  /* Leaving the flash tab mid-full-screen (e.g. tapping another tab
+     instead of "Exit Full Screen") -- flashView going display:none
+     already hides the fixed-position card either way, but without this
+     body.flash-fullscreen-active's overflow:hidden would stay stuck on
+     for every other tab, since renderFlashcard() (the only place that
+     clears it) won't run again until they come back to Flashcards. */
+  if(v !== 'flash' && flashFullScreen){ flashFullScreen = false; document.body.classList.remove('flash-fullscreen-active'); }
+
   if(v==='quiz' && submitted) renderResults();
   if(v==='flash'){
     renderFlashcard();
@@ -949,6 +973,10 @@ function bindFlashGeneratorHandlers(){
   });
 }
 
+document.addEventListener('keydown', (e)=>{
+  if(e.key === 'Escape' && flashFullScreen){ flashFullScreen = false; renderFlashcard(); }
+});
+
 function shuffleFlashcards(){
   for(let i=flashcards.length-1;i>0;i--){
     const j = Math.floor(Math.random()*(i+1));
@@ -971,15 +999,28 @@ function renderFlashcard(){
   const restoreId = focusedInPanel && activeEl.id ? activeEl.id : null;
   const restoreFlashOptI = focusedInPanel && activeEl.dataset.flashOpt !== undefined ? activeEl.dataset.flashOpt : null;
 
-  const topHtml = currentUser ? renderOnlineFlashGeneratorHtml() : '';
+  /* Once a set exists, the generator panel (description + build-a-set
+     buttons) is just clutter sitting on top of the card you're actually
+     studying -- collapse it behind a small toggle instead, and skip it
+     entirely in full-screen mode (exit full-screen first to change sets). */
+  const showGenerator = currentUser && (!flashcards.length || (flashGeneratorOpen && !flashFullScreen));
+  const topHtml = showGenerator ? renderOnlineFlashGeneratorHtml() : '';
   if(!flashcards.length){
     flashPanel.innerHTML = topHtml + `<h2>Flashcards</h2><div class="format-help">No flashcards yet. Generate a set from your progress above.</div>`;
     if(currentUser) bindFlashGeneratorHandlers();
     return;
   }
+  flashPanel.classList.toggle('flash-fullscreen', flashFullScreen);
+  document.body.classList.toggle('flash-fullscreen-active', flashFullScreen);
+  const genToggleHtml = (currentUser && !flashFullScreen)
+    ? `<div style="margin-bottom:10px;"><button class="link-btn" id="flashToggleGenBtn" type="button">${flashGeneratorOpen ? 'Hide set options' : '⚙ Change flashcard set'}</button></div>`
+    : '';
   const letters = ['1','2','3','4','5','6'];
   const card = flashcards[flashIndex];
   let html = `
+    <div style="text-align:right;margin-bottom:6px;">
+      <button class="link-btn" id="flashFullscreenBtn" type="button">${flashFullScreen ? '✕ Exit Full Screen' : '⛶ Full Screen'}</button>
+    </div>
     <div class="progress-row">
       <span>Card ${flashIndex+1} of ${flashcards.length}</span>
       <span>Missed ${card.count} time${card.count===1?'':'s'}</span>
@@ -1007,7 +1048,7 @@ function renderFlashcard(){
   if(flashcards.length>1){
     html += `<div style="margin-top:10px;text-align:center;"><button class="link-btn" id="flashShuffleBtn" type="button">🔀 Shuffle order</button></div>`;
   }
-  flashPanel.innerHTML = topHtml + html;
+  flashPanel.innerHTML = topHtml + genToggleHtml + html;
   document.getElementById('flashPrevBtn').onclick = ()=>{ if(flashIndex>0){ flashIndex--; flashSelectedOption=null; renderFlashcard(); } };
   document.getElementById('flashNextBtn').onclick = ()=>{ if(flashIndex<flashcards.length-1){ flashIndex++; flashSelectedOption=null; renderFlashcard(); } };
   if(!answered){
@@ -1017,6 +1058,9 @@ function renderFlashcard(){
   }
   const shuffleBtn = document.getElementById('flashShuffleBtn');
   if(shuffleBtn) shuffleBtn.onclick = shuffleFlashcards;
+  document.getElementById('flashFullscreenBtn').onclick = ()=>{ flashFullScreen = !flashFullScreen; renderFlashcard(); };
+  const toggleGenBtn = document.getElementById('flashToggleGenBtn');
+  if(toggleGenBtn) toggleGenBtn.onclick = ()=>{ flashGeneratorOpen = !flashGeneratorOpen; renderFlashcard(); };
   if(currentUser) bindFlashGeneratorHandlers();
 
   if(restoreId){ document.getElementById(restoreId)?.focus(); }
@@ -2437,13 +2481,6 @@ function describeDeviceBreakdown(flags){
 
 function renderAdminAccountsView(){
   const sub = document.getElementById('adminSubPanel');
-  const total = adminData.profiles.length;
-  const pendingCount = adminData.profiles.filter(p=>!p.approved).length;
-  const adminCount = adminData.profiles.filter(p=>p.role==='admin').length;
-  const flaggedCount = adminData.profiles.filter(p=>{
-    const f = adminData.flagsByUser[p.user_id] || {};
-    return f.deviceFlag || f.rateFlag;
-  }).length;
 
   const filtered = adminData.profiles.filter(p=>{
     const f = adminData.flagsByUser[p.user_id] || {};
@@ -2502,7 +2539,6 @@ function renderAdminAccountsView(){
   }).join('') || `<div class="format-help">No accounts match this filter.</div>`;
 
   sub.innerHTML = `
-    <div class="format-help">${total} account(s) total · ${pendingCount} pending · ${flaggedCount} flagged · ${adminCount} admin(s). "Suspend" keeps all their progress and can be undone with "Approve" — "Permanently Delete" removes the account and all its data for good.</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px;font-family:system-ui,sans-serif;">
       <input type="text" id="adminSearchInput" placeholder="Search by email…" value="${escapeHtml(adminSearch)}" style="flex:1;min-width:160px;padding:8px 12px;border-radius:8px;border:1px solid var(--line);">
       <select id="adminFilterSelect" style="padding:8px 12px;border-radius:8px;border:1px solid var(--line);">
