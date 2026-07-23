@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Exam Practice Tool</title>
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#2f6f5e">
@@ -32,7 +32,7 @@ if('serviceWorker' in navigator){
   }
   *{box-sizing:border-box;}
   body{margin:0;font-family:"Iowan Old Style","Georgia",serif;background:var(--bg);color:var(--ink);}
-  .wrap{max-width:760px;margin:0 auto;padding:28px 20px 80px;}
+  .wrap{max-width:760px;margin:0 auto;padding:28px max(20px,env(safe-area-inset-right)) max(80px,env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left));}
   h1{font-size:1.5rem;letter-spacing:.02em;margin:0 0 4px;font-weight:600;}
   .sub{color:var(--muted);font-size:.92rem;margin-bottom:22px;}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin-bottom:18px;box-shadow:0 1px 2px rgba(0,0,0,.03);}
@@ -52,7 +52,7 @@ if('serviceWorker' in navigator){
   .qnum{font-family:system-ui,sans-serif;font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);font-weight:600;margin-bottom:8px;}
   .qtext{font-size:1.18rem;line-height:1.5;margin-bottom:20px;}
 
-  .opt{display:flex;align-items:flex-start;gap:12px;padding:13px 16px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px;cursor:pointer;font-size:1rem;line-height:1.45;transition:border-color .15s, background .15s;background:var(--panel);}
+  .opt{display:flex;align-items:flex-start;gap:12px;padding:13px 16px;border:1px solid var(--line);border-radius:10px;margin:0 0 10px;width:100%;font-family:inherit;color:inherit;cursor:pointer;font-size:1rem;line-height:1.45;transition:border-color .15s, background .15s;background:var(--panel);}
   .opt:hover{border-color:var(--accent);}
   .opt .letter{font-family:system-ui,sans-serif;font-weight:700;font-size:.82rem;color:var(--muted);min-width:20px;}
   .opt.selected{border-color:var(--accent);background:#eef6f2;}
@@ -73,7 +73,7 @@ if('serviceWorker' in navigator){
   .flag-btn.on{background:#f6e6c8;border-color:#d8ae4e;color:#7a5a10;}
 
   .dotgrid{display:flex;flex-wrap:wrap;gap:6px;margin-top:18px;}
-  .dot{width:30px;height:30px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif;font-size:.72rem;font-weight:600;border:1px solid var(--line);cursor:pointer;background:var(--panel);color:var(--muted);}
+  .dot{width:30px;height:30px;border-radius:7px;display:flex;align-items:center;justify-content:center;margin:0;font-family:system-ui,sans-serif;font-size:.72rem;font-weight:600;border:1px solid var(--line);cursor:pointer;background:var(--panel);color:var(--muted);}
   .dot.current{border-color:var(--accent);color:var(--accent);}
   .dot.answered{background:var(--chip);color:var(--ink);}
   .dot.flagged{box-shadow:inset 0 -3px 0 #d8ae4e;}
@@ -111,10 +111,10 @@ if('serviceWorker' in navigator){
      Next) don't fit and were breaking mid-word. Stack Previous+Next as a
      two-corner row (order pushes Flag below, full-width) instead. */
   @media (max-width: 480px){
-    .wrap{padding:20px 14px 60px;}
-    .nav-row{flex-wrap:wrap;row-gap:10px;}
+    .wrap{padding:20px max(14px,env(safe-area-inset-right)) max(60px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left));}
+    .nav-row{flex-wrap:wrap;row-gap:10px;position:sticky;bottom:max(10px,env(safe-area-inset-bottom));background:var(--panel);padding:10px;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.15);z-index:5;}
     .nav-row .flag-btn{order:3;flex:1 0 100%;text-align:center;}
-    .dot{width:34px;height:34px;}
+    .dot{width:38px;height:38px;}
   }
 </style>
 </head>
@@ -153,6 +153,7 @@ if('serviceWorker' in navigator){
     <div id="libraryView" style="display:none">
       <div class="panel subsection">
         <h2>Test Library</h2>
+        <div class="format-help">Installing this as an app speeds up loading, but taking an exam still needs a connection — exam content isn't stored on your device.</div>
         <div id="libraryList"></div>
       </div>
     </div>
@@ -324,6 +325,18 @@ function loadExam(examData, attemptNumber){
 
 /* ================= quiz rendering ================= */
 function renderQuestion(){
+  /* quizPanel.innerHTML gets fully rebuilt below on every answer/nav
+     click, which destroys and recreates the DOM -- silently dropping
+     keyboard focus to <body> even though the buttons themselves are now
+     focusable (see the .opt/.dot button conversion above). Capture what
+     had focus beforehand and restore the equivalent new element after
+     rebuilding, so a keyboard-only user doesn't lose their place on
+     every single interaction. */
+  const activeEl = document.activeElement;
+  const focusedInPanel = activeEl && quizPanel.contains(activeEl);
+  const restoreId = focusedInPanel && activeEl.id ? activeEl.id : null;
+  const restoreOptI = focusedInPanel && activeEl.classList.contains('opt') ? activeEl.dataset.i : null;
+
   const q = exam.questions[current];
   const total = exam.questions.length;
   const answeredCount = Object.keys(answers).length;
@@ -360,9 +373,9 @@ function renderQuestion(){
       if(i === q.correct){ cls = 'correct'; tag = ' ✓'; }
       else if(sel){ cls = 'incorrect'; tag = ' — not correct'; }
     }
-    html += `<div class="opt ${cls}" data-i="${i}">
+    html += `<button type="button" class="opt ${cls}" data-i="${i}" aria-pressed="${sel}">
       <span class="letter">${letters[i]}</span><span>${escapeHtml(opt)}${tag}</span>
-    </div>`;
+    </button>`;
   });
 
   html += `
@@ -401,9 +414,16 @@ function renderQuestion(){
   if(submitBtn) submitBtn.onclick = doSubmit;
   const endEarlyBtn = document.getElementById('endEarlyBtn');
   if(endEarlyBtn) endEarlyBtn.onclick = doSubmit;
+
+  if(restoreId){ document.getElementById(restoreId)?.focus(); }
+  else if(restoreOptI !== null){ quizPanel.querySelector(`.opt[data-i="${restoreOptI}"]`)?.focus(); }
 }
 
 function renderDots(){
+  /* Same focus-loss problem as renderQuestion() above, same fix. */
+  const activeEl = document.activeElement;
+  const restoreDotI = (activeEl && dotsPanel.contains(activeEl) && activeEl.classList.contains('dot')) ? activeEl.dataset.i : null;
+
   const total = exam.questions.length;
   let html = '<div class="dotgrid">';
   for(let i=0;i<total;i++){
@@ -411,13 +431,15 @@ function renderDots(){
     if(i===current) cls += ' current';
     if(answers[i]!==undefined) cls += ' answered';
     if(flags[i]) cls += ' flagged';
-    html += `<div class="${cls}" data-i="${i}">${exam.questions[i].originalNumber || (i+1)}</div>`;
+    html += `<button type="button" class="${cls}" data-i="${i}" aria-current="${i===current}">${exam.questions[i].originalNumber || (i+1)}</button>`;
   }
   html += '</div>';
   dotsPanel.innerHTML = html;
   dotsPanel.querySelectorAll('.dot').forEach(el=>{
     el.onclick = ()=>{ current = parseInt(el.dataset.i); renderQuestion(); renderDots(); };
   });
+
+  if(restoreDotI !== null){ dotsPanel.querySelector(`.dot[data-i="${restoreDotI}"]`)?.focus(); }
 }
 
 /* ================= submit / results (no grading until now) ================= */
@@ -824,6 +846,17 @@ function shuffleFlashcards(){
 }
 
 function renderFlashcard(){
+  /* Same focus-loss problem as renderQuestion()/renderDots() -- flashPanel
+     gets fully rebuilt on every interaction. Picking an answer is the one
+     case where there's no equivalent element to restore focus to
+     afterward (the option buttons go inert once answered, dropping their
+     data-flash-opt), so that specific case falls forward to the Next
+     button instead of just losing focus. */
+  const activeEl = document.activeElement;
+  const focusedInPanel = activeEl && flashPanel.contains(activeEl);
+  const restoreId = focusedInPanel && activeEl.id ? activeEl.id : null;
+  const restoreFlashOptI = focusedInPanel && activeEl.dataset.flashOpt !== undefined ? activeEl.dataset.flashOpt : null;
+
   const topHtml = currentUser ? renderOnlineFlashGeneratorHtml() : '';
   if(!flashcards.length){
     flashPanel.innerHTML = topHtml + `<h2>Flashcards</h2><div class="format-help">No flashcards yet. Generate a set from your progress above.</div>`;
@@ -847,9 +880,9 @@ function renderFlashcard(){
       if(oi===card.correct){ cls = 'correct'; tag = ' ✓'; }
       else if(oi===flashSelectedOption){ cls = 'incorrect'; tag = ' — your answer'; }
     }
-    html += `<div class="opt ${cls}" ${answered?'':`data-flash-opt="${oi}"`}>
+    html += `<button type="button" class="opt ${cls}" ${answered?'':`data-flash-opt="${oi}"`}>
       <span class="letter">${letters[oi]}</span><span>${escapeHtml(opt)}${tag}</span>
-    </div>`;
+    </button>`;
   });
   html += `
     <div class="nav-row">
@@ -871,6 +904,13 @@ function renderFlashcard(){
   const shuffleBtn = document.getElementById('flashShuffleBtn');
   if(shuffleBtn) shuffleBtn.onclick = shuffleFlashcards;
   if(currentUser) bindFlashGeneratorHandlers();
+
+  if(restoreId){ document.getElementById(restoreId)?.focus(); }
+  else if(restoreFlashOptI !== null){
+    const sameOpt = flashPanel.querySelector(`[data-flash-opt="${restoreFlashOptI}"]`);
+    if(sameOpt) sameOpt.focus();
+    else document.getElementById('flashNextBtn')?.focus(); // just answered -- option went inert, move on to Next
+  }
 }
 
 /* ================= SHARED: round/attempt funnel engine =================
@@ -954,6 +994,30 @@ const TURNSTILE_SITE_KEY = '0x4AAAAAAD2sW9Vf3k0VKwOZ';
 
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+/* Best-effort client error logging -- the only way to learn about a
+   production JS error today is the affected person describing it, or
+   personally opening their DevTools. user_id is whatever's signed in at
+   the moment (or null, before sign-in) -- see client_errors' insert
+   policy in 0012_client_error_log.sql for why that's allowed. Must never
+   itself throw or block the app, so every failure path is swallowed. */
+function logClientError(message, stack){
+  try{
+    supabaseClient.from('client_errors').insert({
+      user_id: currentUser ? currentUser.id : null,
+      message: String(message || '').slice(0, 2000),
+      stack: stack ? String(stack).slice(0, 4000) : null,
+      url: location.pathname
+    }).then(()=>{}, ()=>{});
+  }catch(e){ /* logging must never break the app it's trying to observe */ }
+}
+window.addEventListener('error', (e)=>{
+  logClientError(e.message, e.error && e.error.stack);
+});
+window.addEventListener('unhandledrejection', (e)=>{
+  const reason = e.reason;
+  logClientError(reason && reason.message ? reason.message : String(reason), reason && reason.stack);
+});
+
 /* ================= ONLINE MODE: auth state & views ================= */
 let appMode = 'online'; // always 'online' now -- offline mode lives only in the separate offline app
 let currentUser = null;
@@ -1001,7 +1065,7 @@ function renderAuthView(){
   if(currentUser && profile && profile.approved !== true && profile.role !== 'admin'){
     authPanel.innerHTML = `
       <h2>Awaiting Approval</h2>
-      <div class="format-help">Your account (${escapeHtml(currentUser.email)}) is awaiting admin approval. You'll get access once it's approved.</div>
+      <div class="format-help">Your account (${escapeHtml(currentUser.email)}) is waiting on manual admin review — there's no fixed timeline. This page checks automatically, so you don't need to keep refreshing; it'll move on by itself once you're approved.</div>
       <button class="btn btn-ghost" id="pendingSignOutBtn">Sign Out</button>
     `;
     document.getElementById('pendingSignOutBtn').onclick = handleSignOut;
@@ -1368,6 +1432,18 @@ function stopInactivityWatch(){
   if(inactivityCheckInterval){ clearInterval(inactivityCheckInterval); inactivityCheckInterval = null; }
 }
 
+/* While parked on the "Awaiting Approval" screen, re-run the same gate
+   check an admin approval would need anyway -- so approval takes effect
+   on its own instead of requiring a manual sign-out/sign-in to notice. */
+let approvalCheckInterval = null;
+function startApprovalWatch(){
+  if(approvalCheckInterval) return; // already running
+  approvalCheckInterval = setInterval(()=>{ applyAccessGate(); }, 30 * 1000);
+}
+function stopApprovalWatch(){
+  if(approvalCheckInterval){ clearInterval(approvalCheckInterval); approvalCheckInterval = null; }
+}
+
 /* The exam library is fetched exactly once per page load, right after
    the gate passes, from the get_exam_library() RPC -- server-enforced
    approval check, per-caller watermark, access logged server-side. */
@@ -1399,6 +1475,7 @@ async function applyAccessGate(authEvent){
   }
   if(!currentUser){
     stopInactivityWatch();
+    stopApprovalWatch();
     appShell.style.display = 'none';
     /* examTitle/examSub sit outside #appShell entirely (page furniture,
        not part of the gated content) -- loadExam() sets them straight to
@@ -1415,12 +1492,14 @@ async function applyAccessGate(authEvent){
   const granted = !!profile && (profile.approved === true || profile.role === 'admin');
   if(!granted){
     stopInactivityWatch();
+    startApprovalWatch();
     appShell.style.display = 'none';
     examTitle.textContent = 'Exam Practice Tool';
     examSub.textContent = '';
     showView('auth'); // renderAuthView() renders the pending-approval branch for this case
     return;
   }
+  stopApprovalWatch();
   /* onAuthStateChange can fire more than once during a single page load
      (e.g. an initial session restore followed by a token refresh) --
      capture whether we were already showing the gated app BEFORE this
@@ -1807,6 +1886,53 @@ async function renderProgressView(){
   renderProgressPanel();
 }
 
+/* Cumulative mastery % at each completed attempt, across every round for
+   this exam (a fresh full retake starts a new round/funnel, so the line
+   can dip when one begins -- that's real signal, not a bug). */
+function computeMasteryTimeline(ex){
+  const points = [];
+  ex.rounds.forEach(r=>{
+    r.attempts.forEach(a=>{
+      if(a.status!=='completed' || !a.completed_at || !r.original_total) return;
+      const stillMissed = a.total_questions - a.correct_count;
+      const pct = ((r.original_total - stillMissed) / r.original_total) * 100;
+      points.push({ completedAt: a.completed_at, pct, roundNumber: r.round_number, attemptNumber: a.attempt_number });
+    });
+  });
+  points.sort((a,b)=> new Date(a.completedAt) - new Date(b.completedAt));
+  return points;
+}
+
+/* Small inline-SVG line chart, no library -- matches the project's
+   zero-dependency, no-build-step static deploy. Evenly spaced by attempt
+   sequence rather than literal elapsed time: with only a handful of
+   points, real time-spacing can leave large gaps that make the line
+   harder to read than informative. Skipped below 2 points -- a single
+   value belongs in a stat tile, not a chart. */
+function renderMasteryChartSvg(points){
+  if(points.length < 2) return '';
+  const W = 320, H = 100, padL = 8, padR = 8, padT = 14, padB = 20;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const x = i => padL + (i/(points.length-1))*plotW;
+  const y = pct => padT + plotH - (Math.max(0,Math.min(100,pct))/100)*plotH;
+  const linePoints = points.map((p,i)=>`${x(i).toFixed(1)},${y(p.pct).toFixed(1)}`).join(' ');
+  const circles = points.map((p,i)=>{
+    const dateLabel = new Date(p.completedAt).toLocaleDateString();
+    return `<circle cx="${x(i).toFixed(1)}" cy="${y(p.pct).toFixed(1)}" r="4" fill="var(--accent)"><title>Round ${p.roundNumber}, Attempt ${p.attemptNumber} — ${p.pct.toFixed(1)}% on ${dateLabel}</title></circle>`;
+  }).join('');
+  const firstLabel = `${points[0].pct.toFixed(0)}%`;
+  const lastLabel = `${points[points.length-1].pct.toFixed(0)}%`;
+  return `
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;margin-bottom:10px;" role="img" aria-label="Mastery over time, from ${firstLabel} to ${lastLabel} across ${points.length} attempts">
+      <line x1="${padL}" y1="${(padT+plotH).toFixed(1)}" x2="${W-padR}" y2="${(padT+plotH).toFixed(1)}" stroke="var(--line)" stroke-width="1"/>
+      <polyline points="${linePoints}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      ${circles}
+      <text x="${x(0).toFixed(1)}" y="${H-4}" font-family="system-ui,sans-serif" font-size="9" fill="var(--muted)" text-anchor="start">${firstLabel}</text>
+      <text x="${x(points.length-1).toFixed(1)}" y="${H-4}" font-family="system-ui,sans-serif" font-size="9" fill="var(--muted)" text-anchor="end">${lastLabel}</text>
+    </svg>
+  `;
+}
+
 function renderProgressPanel(){
   if(progressAttemptView){ renderProgressAttemptDetail(); return; }
   const d = progressData;
@@ -1834,6 +1960,7 @@ function renderProgressPanel(){
   }
   sortProgressExams(d.exams, progressSortMode).forEach(ex=>{
     html += `<div class="subsection"><h3>${escapeHtml(ex.examTitle)}</h3>`;
+    html += renderMasteryChartSvg(computeMasteryTimeline(ex));
     ex.rounds.forEach(r=>{
       /* Mastery badge fires only on the round's cumulative funnel score, never a single attempt's raw score */
       const masteryBadge = r.status==='mastered' ? '<span class="lib-badge verified" style="margin-left:8px;">Mastered</span>' : '';
@@ -2116,7 +2243,7 @@ let adminDrilldownUserId = null; // "View Progress" drilldown
 let adminSecurityEventsUserId = null; // "View Security Events" drilldown
 let adminReviewAttempt = null; // { id, label } | null -- set when drilling into one attempt's question-by-question review
 let adminReviewFilter = 'missed'; // 'missed' | 'all' -- mirrors reviewFilter, for renderAdminAttemptReview
-let adminSubView = 'accounts'; // 'accounts' | 'auditLog' | 'tools' -- sub-nav within the Admin tab
+let adminSubView = 'accounts'; // 'accounts' | 'auditLog' | 'errors' | 'tools' -- sub-nav within the Admin tab
 let adminSearch = ''; // account-list email search
 let adminFilter = 'all'; // 'all' | 'pending' | 'flagged' | 'admins'
 let adminSort = 'lastActive'; // 'lastActive' | 'signupDate' | 'flagSeverity' | 'name'
@@ -2206,15 +2333,18 @@ function renderAdminPanel(){
     <div class="toplinks">
       <button id="adminNavAccounts" class="${adminSubView==='accounts'?'active':''}">Accounts</button>
       <button id="adminNavAuditLog" class="${adminSubView==='auditLog'?'active':''}">Audit Log</button>
+      <button id="adminNavErrors" class="${adminSubView==='errors'?'active':''}">Errors</button>
       <button id="adminNavTools" class="${adminSubView==='tools'?'active':''}">Tools</button>
     </div>
     <div id="adminSubPanel"></div>
   `;
   document.getElementById('adminNavAccounts').onclick = ()=>{ adminSubView='accounts'; renderAdminPanel(); };
   document.getElementById('adminNavAuditLog').onclick = ()=>{ adminSubView='auditLog'; renderAdminPanel(); };
+  document.getElementById('adminNavErrors').onclick = ()=>{ adminSubView='errors'; renderAdminPanel(); };
   document.getElementById('adminNavTools').onclick = ()=>{ adminSubView='tools'; renderAdminPanel(); };
 
   if(adminSubView==='auditLog') renderAdminAuditLogView();
+  else if(adminSubView==='errors') renderAdminErrorsView();
   else if(adminSubView==='tools') renderAdminToolsView();
   else renderAdminAccountsView();
 }
@@ -2418,6 +2548,44 @@ async function renderAdminAuditLogView(){
     `;
   } catch(err){
     sub.innerHTML = `<div class="msg err">Could not load audit log: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+/* Same list pattern as the audit log above. The extra profiles lookup is
+   just to turn a user_id into a readable email -- client_errors itself
+   only stores the id (see 0012_client_error_log.sql), same as every
+   other admin-facing table in this app. */
+async function renderAdminErrorsView(){
+  const sub = document.getElementById('adminSubPanel');
+  sub.innerHTML = `<div class="format-help">Loading…</div>`;
+  try{
+    const { data: rows, error } = await supabaseClient.from('client_errors')
+      .select('*').order('created_at', { ascending: false }).limit(200);
+    if(error) throw error;
+    if(!rows.length){
+      sub.innerHTML = `<div class="format-help">No client errors recorded yet.</div>`;
+      return;
+    }
+    const userIds = [...new Set(rows.filter(r=>r.user_id).map(r=>r.user_id))];
+    let emailByUserId = {};
+    if(userIds.length){
+      const { data: profiles } = await supabaseClient.from('profiles').select('user_id,email').in('user_id', userIds);
+      (profiles||[]).forEach(p=>{ emailByUserId[p.user_id] = p.email; });
+    }
+    sub.innerHTML = `
+      <div class="format-help">Most recent 200 client-side errors, newest first — best-effort, silently logged from every signed-in and signed-out screen.</div>
+      ${rows.map(r=>`
+        <div class="lib-row">
+          <div class="lib-info">
+            <div class="lib-title">${escapeHtml(r.message)}</div>
+            <div class="lib-meta">${new Date(r.created_at).toLocaleString()} · ${escapeHtml(r.user_id ? (emailByUserId[r.user_id] || r.user_id) : 'signed out')} · ${escapeHtml(r.url || '')}</div>
+            ${r.stack ? `<div class="lib-meta" style="white-space:pre-wrap;">${escapeHtml(r.stack)}</div>` : ''}
+          </div>
+        </div>
+      `).join('')}
+    `;
+  } catch(err){
+    sub.innerHTML = `<div class="msg err">Could not load client errors: ${escapeHtml(err.message)}</div>`;
   }
 }
 
