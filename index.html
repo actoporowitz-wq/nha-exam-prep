@@ -100,7 +100,7 @@ if('serviceWorker' in navigator){
   .all-correct{text-align:center;font-family:system-ui,sans-serif;color:var(--good);padding:10px 0;}
 
   .subsection{border-top:1px solid var(--line);margin-top:18px;padding-top:18px;}
-  .lib-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;}
+  .lib-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;}
   .lib-info{display:flex;flex-direction:column;gap:2px;}
   .lib-title{font-size:1rem;}
   .lib-meta{font-family:system-ui,sans-serif;font-size:.78rem;color:var(--muted);}
@@ -1859,12 +1859,12 @@ function renderProgressPanel(){
         (latestAttempt.status==='completed' ? r.funnel_missed_count > 0 : true);
       html += `
         <div class="lib-row" style="flex-direction:column;align-items:stretch;">
-          <div style="display:flex;justify-content:space-between;align-items:center;width:100%;cursor:pointer;" data-round-toggle="${r.id}">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;width:100%;cursor:pointer;" data-round-toggle="${r.id}">
             <div class="lib-info">
               <div class="lib-title">Round ${r.round_number}${masteryBadge}${r.status==='abandoned' ? ' <span class="lib-meta">(abandoned)</span>' : ''}</div>
               <div class="lib-meta">${masteredPct}% — ${masteredSoFar} of ${r.original_total} mastered so far · ${r.attempts.length} attempt(s)</div>
             </div>
-            <div style="display:flex;align-items:center;gap:10px;">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
               ${canContinue ? `<button class="btn btn-ghost" data-continue-round="${r.id}" style="padding:4px 10px;font-size:.8rem;">Continue (Missed Only)</button>` : ''}
               <span class="link-btn">${expanded ? 'Hide' : 'Show'} attempts</span>
             </div>
@@ -1907,9 +1907,9 @@ function renderProgressPanel(){
           const noReviewNote = (a.status==='completed' && !a.hasAnswers)
             ? `<span class="lib-meta" style="font-size:.78rem;">from an uploaded PDF — no detailed review available</span>` : '';
           html += `
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-family:system-ui,sans-serif;font-size:.85rem;">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;padding:6px 0;font-family:system-ui,sans-serif;font-size:.85rem;">
               <span>Attempt ${a.attempt_number} (${a.attempt_scope==='full'?'full exam':'missed-only retake'}) — ${a.correct_count}/${a.total_questions}${a.status==='completed' ? ` (${cumulativePct}% cumulative)` : ' · in progress'}</span>
-              <span style="display:flex;gap:12px;align-items:center;">
+              <span style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
                 ${noReviewNote}
                 ${(a.status==='completed' && a.hasAnswers) ? `<button class="link-btn" data-review-attempt="${a.id}" data-exam-key="${escapeHtml(r.exam_key)}">Review</button>` : ''}
                 <button class="link-btn" style="color:#b3401f;" data-delete-attempt="${a.id}" data-round-id="${r.id}" data-attempt-number="${a.attempt_number}">Delete</button>
