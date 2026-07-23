@@ -45,6 +45,22 @@ if('serviceWorker' in navigator){
   .status-bar .email{color:var(--ink);font-weight:600;}
   .link-btn{background:none;border:none;color:var(--accent);cursor:pointer;font-family:system-ui,sans-serif;font-size:.82rem;padding:0;text-decoration:underline;}
 
+  /* Small icon-trigger buttons: the account kebab (always visible, plain
+     .menu-trigger) and the mobile nav hamburgers (.menu-trigger.nav-hamburger,
+     hidden here and shown only inside the max-width:480px query below). */
+  .menu-trigger{background:var(--chip);border:1px solid var(--line);border-radius:8px;color:var(--ink);cursor:pointer;font-size:1.05rem;line-height:1;padding:7px 11px;}
+  .nav-hamburger{display:none;}
+
+  /* Account dropdown -- replaces the always-visible email/Sign Out/Delete
+     Account row with a small anchored popover, at every screen width
+     (these are secondary/rare actions, not a mobile-only space problem). */
+  .account-menu{position:relative;}
+  .account-dropdown{position:absolute;top:100%;right:0;margin-top:6px;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:12px 14px;display:flex;flex-direction:column;align-items:flex-start;gap:9px;min-width:190px;z-index:60;}
+  .account-dropdown[hidden]{display:none;}
+  .account-email{font-family:system-ui,sans-serif;font-size:.82rem;color:var(--ink);font-weight:600;border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:1px;width:100%;word-break:break-all;}
+
+  .nav-backdrop{display:none;}
+
   .progress-row{display:flex;justify-content:space-between;align-items:center;font-family:system-ui,sans-serif;font-size:.8rem;color:var(--muted);margin-bottom:10px;}
   .bar{height:6px;background:var(--line);border-radius:4px;overflow:hidden;margin-bottom:22px;}
   .bar-fill{height:100%;background:var(--accent);transition:width .25s ease;}
@@ -115,6 +131,24 @@ if('serviceWorker' in navigator){
     .nav-row{flex-wrap:wrap;row-gap:10px;position:sticky;bottom:max(10px,env(safe-area-inset-bottom));background:var(--panel);padding:10px;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.15);z-index:5;}
     .nav-row .flag-btn{order:3;flex:1 0 100%;text-align:center;}
     .dot{width:38px;height:38px;}
+
+    /* Main-tab and Admin-sub-nav rows collapse into a hamburger-triggered
+       slide-in drawer here -- desktop keeps the plain row (base .toplinks
+       rule above, untouched), there's no space problem to fix there. */
+    .nav-hamburger{display:inline-flex;}
+    .toplinks.drawer{
+      position:fixed;top:0;right:0;height:100%;width:min(260px,80vw);
+      flex-direction:column;align-items:stretch;flex-wrap:nowrap;
+      background:var(--panel);box-shadow:-4px 0 24px rgba(0,0,0,.18);
+      z-index:60;padding:calc(60px + env(safe-area-inset-top)) 18px 18px;
+      padding-right:max(18px,env(safe-area-inset-right));
+      overflow-y:auto;transform:translateX(100%);transition:transform .22s ease;
+      margin:0;
+    }
+    .toplinks.drawer.open{transform:translateX(0);}
+    .toplinks.drawer button{width:100%;text-align:left;}
+    .nav-backdrop{display:block;position:fixed;inset:0;background:rgba(31,36,34,.4);z-index:55;}
+    .nav-backdrop[hidden]{display:none;}
   }
 </style>
 </head>
@@ -132,7 +166,9 @@ if('serviceWorker' in navigator){
       <div class="status-bar" id="statusBar"></div>
     </div>
 
-    <div class="toplinks">
+    <button class="menu-trigger nav-hamburger" id="mainNavTrigger" aria-label="Open navigation menu" aria-haspopup="true" aria-expanded="false" aria-controls="mainNavDrawer">☰</button>
+    <div class="nav-backdrop" id="mainNavBackdrop" hidden></div>
+    <div class="toplinks drawer" id="mainNavDrawer">
       <button id="tabQuiz" class="active">Take Exam</button>
       <button id="tabLibrary">Test Library</button>
       <button id="tabFlash">Flashcards</button>
@@ -227,10 +263,89 @@ const tabLibrary = document.getElementById('tabLibrary');
 const tabProgress = document.getElementById('tabProgress');
 const tabAdmin = document.getElementById('tabAdmin');
 
+/* Shared open/close/focus behavior for the mobile nav drawers (main tabs,
+   Admin sub-nav) and the account dropdown -- Escape closes, Tab is
+   trapped inside while open, focus moves in on open and back to the
+   trigger on close, selecting an item closes it. The two differ only in
+   how an outside click is detected: the drawer has a dedicated backdrop
+   element to tap; the compact dropdown just checks click targets, since
+   a full-screen backdrop would look wrong for something that small. */
+function setupNavDrawer(triggerId, drawerId, backdropId){
+  const trigger = document.getElementById(triggerId);
+  const drawer = document.getElementById(drawerId);
+  const backdrop = document.getElementById(backdropId);
+  function isOpen(){ return drawer.classList.contains('open'); }
+  function open(){
+    drawer.classList.add('open');
+    backdrop.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    const first = drawer.querySelector('button');
+    if(first) first.focus();
+    document.addEventListener('keydown', onKeydown);
+  }
+  function close(){
+    drawer.classList.remove('open');
+    backdrop.hidden = true;
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.focus();
+    document.removeEventListener('keydown', onKeydown);
+  }
+  function onKeydown(e){
+    if(e.key === 'Escape'){ close(); return; }
+    if(e.key === 'Tab'){
+      const items = drawer.querySelectorAll('button');
+      if(!items.length) return;
+      const first = items[0], last = items[items.length - 1];
+      if(e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+      else if(!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
+    }
+  }
+  trigger.onclick = () => isOpen() ? close() : open();
+  backdrop.onclick = close;
+  drawer.querySelectorAll('button').forEach(btn => btn.addEventListener('click', close));
+}
+
+function setupPopoverMenu(triggerId, popoverId){
+  const trigger = document.getElementById(triggerId);
+  const popover = document.getElementById(popoverId);
+  function isOpen(){ return !popover.hidden; }
+  function open(){
+    popover.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    const first = popover.querySelector('button');
+    if(first) first.focus();
+    document.addEventListener('keydown', onKeydown);
+    document.addEventListener('click', onOutsideClick, true);
+  }
+  function close(){
+    popover.hidden = true;
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.focus();
+    document.removeEventListener('keydown', onKeydown);
+    document.removeEventListener('click', onOutsideClick, true);
+  }
+  function onKeydown(e){
+    if(e.key === 'Escape'){ close(); return; }
+    if(e.key === 'Tab'){
+      const items = popover.querySelectorAll('button');
+      if(!items.length) return;
+      const first = items[0], last = items[items.length - 1];
+      if(e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+      else if(!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
+    }
+  }
+  function onOutsideClick(e){
+    if(!popover.contains(e.target) && e.target !== trigger) close();
+  }
+  trigger.onclick = () => isOpen() ? close() : open();
+  popover.querySelectorAll('button').forEach(btn => btn.addEventListener('click', close));
+}
+
 tabQuiz.onclick = () => showView('quiz');
 tabFlash.onclick = () => showView('flash');
 tabLibrary.onclick = () => showView('library');
 tabAdmin.onclick = () => showView('admin');
+setupNavDrawer('mainNavTrigger', 'mainNavDrawer', 'mainNavBackdrop');
 
 /* Only the top-level "tab" screens get a real URL -- 'auth' is
    session-driven (applyAccessGate forces it regardless of URL) and the
@@ -1224,9 +1339,19 @@ function renderStatusBar(){
     tabProgress.style.display = 'none';
     return;
   }
-  statusBar.innerHTML = `<span class="email">${escapeHtml(currentUser.email)}</span><button class="link-btn" id="signOutBtn">Sign Out</button><button class="link-btn" id="deleteAccountBtn" style="color:var(--bad);">Delete Account</button>`;
+  statusBar.innerHTML = `
+    <div class="account-menu">
+      <button class="menu-trigger" id="accountMenuBtn" aria-label="Account menu" aria-haspopup="true" aria-expanded="false">⋮</button>
+      <div class="account-dropdown" id="accountDropdown" hidden>
+        <div class="account-email">${escapeHtml(currentUser.email)}</div>
+        <button class="link-btn" id="signOutBtn">Sign Out</button>
+        <button class="link-btn" id="deleteAccountBtn" style="color:var(--bad);">Delete Account</button>
+      </div>
+    </div>
+  `;
   document.getElementById('signOutBtn').onclick = handleSignOut;
   document.getElementById('deleteAccountBtn').onclick = handleDeleteAccount;
+  setupPopoverMenu('accountMenuBtn', 'accountDropdown');
   tabProgress.style.display = '';
 }
 
@@ -1899,12 +2024,11 @@ function renderProgressPanel(){
   if(d.exams.length){
     html += `
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;font-family:system-ui,sans-serif;font-size:.85rem;color:var(--muted);">
-        <span>Sort by:</span>
-        <div class="toplinks" style="margin:0;">
-          <button id="progressSortNameBtn" class="${progressSortMode==='name'?'active':''}">Test Name</button>
-          <button id="progressSortLastBtn" class="${progressSortMode==='last'?'active':''}">Last Attempt</button>
-          <button id="progressSortFirstBtn" class="${progressSortMode==='first'?'active':''}">First Attempt</button>
-        </div>
+        <select id="progressSortSelect" style="padding:8px 12px;border-radius:8px;border:1px solid var(--line);">
+          <option value="name" ${progressSortMode==='name'?'selected':''}>Sort: Test Name</option>
+          <option value="last" ${progressSortMode==='last'?'selected':''}>Sort: Last Attempt</option>
+          <option value="first" ${progressSortMode==='first'?'selected':''}>Sort: First Attempt</option>
+        </select>
       </div>
     `;
   } else {
@@ -2001,12 +2125,8 @@ function renderProgressPanel(){
     html += `</div>`;
   });
   progressPanel.innerHTML = html;
-  const sortNameBtn = document.getElementById('progressSortNameBtn');
-  const sortLastBtn = document.getElementById('progressSortLastBtn');
-  const sortFirstBtn = document.getElementById('progressSortFirstBtn');
-  if(sortNameBtn) sortNameBtn.onclick = ()=>{ progressSortMode = 'name'; renderProgressPanel(); };
-  if(sortLastBtn) sortLastBtn.onclick = ()=>{ progressSortMode = 'last'; renderProgressPanel(); };
-  if(sortFirstBtn) sortFirstBtn.onclick = ()=>{ progressSortMode = 'first'; renderProgressPanel(); };
+  const sortSelect = document.getElementById('progressSortSelect');
+  if(sortSelect) sortSelect.onchange = (e)=>{ progressSortMode = e.target.value; renderProgressPanel(); };
   progressPanel.querySelectorAll('[data-round-toggle]').forEach(el=>{
     el.onclick = ()=>{
       const id = el.dataset.roundToggle;
@@ -2281,7 +2401,9 @@ function renderAdminPanel(){
 
   adminPanel.innerHTML = `
     <h2>Admin</h2>
-    <div class="toplinks">
+    <button class="menu-trigger nav-hamburger" id="adminNavTrigger" aria-label="Open admin menu" aria-haspopup="true" aria-expanded="false" aria-controls="adminNavDrawer">☰</button>
+    <div class="nav-backdrop" id="adminNavBackdrop" hidden></div>
+    <div class="toplinks drawer" id="adminNavDrawer">
       <button id="adminNavAccounts" class="${adminSubView==='accounts'?'active':''}">Accounts</button>
       <button id="adminNavAuditLog" class="${adminSubView==='auditLog'?'active':''}">Audit Log</button>
       <button id="adminNavErrors" class="${adminSubView==='errors'?'active':''}">Errors</button>
@@ -2293,6 +2415,7 @@ function renderAdminPanel(){
   document.getElementById('adminNavAuditLog').onclick = ()=>{ adminSubView='auditLog'; renderAdminPanel(); };
   document.getElementById('adminNavErrors').onclick = ()=>{ adminSubView='errors'; renderAdminPanel(); };
   document.getElementById('adminNavTools').onclick = ()=>{ adminSubView='tools'; renderAdminPanel(); };
+  setupNavDrawer('adminNavTrigger', 'adminNavDrawer', 'adminNavBackdrop');
 
   if(adminSubView==='auditLog') renderAdminAuditLogView();
   else if(adminSubView==='errors') renderAdminErrorsView();
