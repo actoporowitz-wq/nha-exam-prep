@@ -985,19 +985,18 @@ function renderOnlineFlashGeneratorHtml(){
       `;
     }).join('');
     attemptPickHtml = `
-      <div style="margin-bottom:18px;">
-        <div style="display:flex;gap:14px;margin-bottom:8px;">
-          <button class="link-btn" id="flashSelectAllBtn" type="button">Select all</button>
-          <button class="link-btn" id="flashSelectNoneBtn" type="button">Clear</button>
-        </div>
-        ${groupsHtml}
-        <div style="margin-top:10px;">
-          <button class="btn btn-ghost" id="flashGenerateSelectedBtn">Generate from Selected (${flashSelectedAttemptIds.size})</button>
-        </div>
+      <div class="format-help">Pick specific past attempts to pull their missed questions from.</div>
+      <div style="margin:10px 0 8px;display:flex;gap:14px;">
+        <button class="link-btn" id="flashSelectAllBtn" type="button">Select all</button>
+        <button class="link-btn" id="flashSelectNoneBtn" type="button">Clear</button>
+      </div>
+      ${groupsHtml}
+      <div style="margin-top:10px;">
+        <button class="btn btn-ghost" id="flashGenerateSelectedBtn">Generate from Selected (${flashSelectedAttemptIds.size})</button>
       </div>
     `;
   } else {
-    attemptPickHtml = `<div class="format-help" style="margin-bottom:18px;">No completed attempts yet, so there's nothing to pick attempts from — take an exam from the Test Library first to unlock that, or pick specific questions from any test below regardless.</div>`;
+    attemptPickHtml = `<div class="format-help">No completed attempts yet, so there's nothing to pick attempts from — take an exam from the Test Library first to unlock this, or use "By specific question" instead.</div>`;
   }
   const inner = `
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
@@ -1006,9 +1005,12 @@ function renderOnlineFlashGeneratorHtml(){
     </div>
     ${flashPickOpen ? `
       <div style="margin-top:14px;">
-        ${attemptPickHtml}
         <div class="subsection">
-          <h3 style="margin:0 0 6px;font-size:1rem;">Pick specific questions from any test</h3>
+          <h3 style="margin:0 0 6px;font-size:1rem;">By attempt</h3>
+          ${attemptPickHtml}
+        </div>
+        <div class="subsection">
+          <h3 style="margin:0 0 6px;font-size:1rem;">By specific question</h3>
           <div class="format-help">Pick a test, then click individual questions to add them to your deck — irrespective of whether you've actually taken that test.</div>
           <div style="margin-top:10px;">
             ${renderFlashLibraryPickerInnerHtml()}
