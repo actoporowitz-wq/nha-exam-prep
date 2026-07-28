@@ -295,6 +295,8 @@ let flashSavedSetsOpen = false; // "My Saved Sets" panel open/closed
 let flashSaveOpen = false; // inline "save this set" name-input row open/closed
 let flashSaveNameDraft = '';
 let flashSaveMsg = null; // { text, ok } | null -- transient status line under the inline save row
+let currentSetId = null; // id of the saved flashcard_sets row the in-progress deck was loaded from, if any -- lets "Update" overwrite that row instead of always inserting a new one
+let currentSetName = null; // paired with currentSetId, for the "Update "<name>"" button label
 /* Purely a rendering overlay on the live quiz screen -- toggling it never
    touches answers/scoring/navigation, only whether renderQuestion() paints
    correct/incorrect on top of the option you've already picked. Persisted
@@ -884,6 +886,8 @@ async function buildFlashcardsFromAttemptIds(attemptIds, scopeMsg){
   shuffleArrayInPlace(flashcards); // shuffled by default rather than sorted by miss-count -- see shuffleArrayInPlace
   flashIndex = 0;
   flashSelectedOption = null;
+  currentSetId = null; // a fresh build from attempt history replaces whatever saved set was loaded, rather than editing it
+  currentSetName = null;
   flashProgressMsg = { text: `Built ${flashcards.length} flashcard(s) from ${attemptIds.length} completed attempt(s) ${scopeMsg}.`, ok:true };
   saveFlashcardsToStorage();
 }
@@ -1055,7 +1059,7 @@ function renderSavedFlashcardSetsListHtml(){
   return savedFlashcardSets.map(s=>`
     <div class="lib-row">
       <div class="lib-info">
-        <div class="lib-title">${escapeHtml(s.name)}</div>
+        <div class="lib-title">${escapeHtml(s.name)}${s.id===currentSetId ? ` <span style="font-weight:400;color:var(--muted);">(currently loaded)</span>` : ''}</div>
         <div class="lib-meta">${s.cards.length} card(s) · saved ${new Date(s.created_at).toLocaleDateString()}</div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;">
@@ -1140,21 +1144,38 @@ function bindFlashLibraryPickerHandlers(){
    attempt-based generators above, these were never necessarily missed (or
    even attempted at all), so `count` (miss-tally) is omitted --
    renderFlashcard() treats a missing count as not applicable and hides
-   that line. */
+   that line.
+
+   Adds to whatever deck is already in progress rather than replacing it
+   (matching the button's own "Add N Selected" label) -- this is also how
+   you add questions to a saved set you've loaded: pick more questions here,
+   then "Update" the set. Deduped by question text so re-adding an already-
+   present question (e.g. one already in a loaded saved set) is a no-op
+   instead of a duplicate card. */
 function addSelectedLibraryQuestionsToFlashcards(){
   if(!flashLibrarySelectedKeys.size) return;
+  const existingKeys = new Set(flashcards.map(c=>c.text.trim().toLowerCase()));
   const picked = [];
   flashLibrarySelectedKeys.forEach(key=>{
     const [testIdx, qIdx] = key.split('::').map(Number);
     const q = EXAM_LIBRARY[testIdx] && EXAM_LIBRARY[testIdx].questions[qIdx];
-    if(q) picked.push({ text: q.text, options: q.options, correct: q.correct });
+    if(!q) return;
+    const dedupeKey = q.text.trim().toLowerCase();
+    if(existingKeys.has(dedupeKey)) return;
+    existingKeys.add(dedupeKey);
+    picked.push({ text: q.text, options: q.options, correct: q.correct });
   });
-  if(!picked.length) return;
-  flashcards = picked;
+  flashLibrarySelectedKeys = new Set();
+  if(!picked.length){
+    flashProgressMsg = { text: 'Those questions are already in this deck.', ok:false };
+    renderFlashcard();
+    return;
+  }
+  flashcards = flashcards.concat(picked);
   shuffleArrayInPlace(flashcards);
   flashIndex = 0;
   flashSelectedOption = null;
-  flashProgressMsg = { text: `Built ${flashcards.length} flashcard(s) from your selected questions.`, ok:true };
+  flashProgressMsg = { text: `Added ${picked.length} card(s) — ${flashcards.length} total.`, ok:true };
   saveFlashcardsToStorage();
   renderFlashcard();
 }
@@ -1193,10 +1214,12 @@ async function saveCurrentFlashcardSetAs(name){
   flashSaveMsg = { text: 'Saving…', ok:true };
   renderFlashcard();
   try{
-    const { error } = await supabaseClient.from('flashcard_sets').insert({
+    const { data, error } = await supabaseClient.from('flashcard_sets').insert({
       user_id: currentUser.id, name: trimmed, cards: flashcards
-    });
+    }).select('id').single();
     if(error) throw error;
+    currentSetId = data.id; // further edits can now go through "Update" instead of another insert
+    currentSetName = trimmed;
     flashSaveMsg = { text: `Saved "${trimmed}".`, ok:true };
     flashSaveOpen = false;
     flashSaveNameDraft = '';
@@ -1207,12 +1230,38 @@ async function saveCurrentFlashcardSetAs(name){
   renderFlashcard();
 }
 
+/* Overwrites the cards on an already-saved set with whatever's currently in
+   the study deck -- the counterpart to saveCurrentFlashcardSetAs's insert.
+   This is how you add/remove questions on a set you've previously saved:
+   load it, edit the deck (add via the library picker, remove via "Remove
+   this card"), then Update instead of saving a duplicate under a new name. */
+async function updateSavedFlashcardSet(){
+  if(!currentSetId || !flashcards.length) return;
+  flashSaveMsg = { text: 'Updating…', ok:true };
+  renderFlashcard();
+  try{
+    const { error } = await supabaseClient.from('flashcard_sets')
+      .update({ cards: flashcards }).eq('id', currentSetId);
+    if(error) throw error;
+    flashSaveMsg = { text: `Updated "${currentSetName}".`, ok:true };
+    if(savedFlashcardSets){
+      const row = savedFlashcardSets.find(s=>s.id===currentSetId);
+      if(row) row.cards = flashcards;
+    }
+  } catch(err){
+    flashSaveMsg = { text: 'Could not update: ' + err.message, ok:false };
+  }
+  renderFlashcard();
+}
+
 function loadSavedSetIntoStudy(set){
   flashcards = set.cards;
   flashIndex = 0;
   flashSelectedOption = null;
   flashGeneratorOpen = false;
   flashSavedSetsOpen = false;
+  currentSetId = set.id;
+  currentSetName = set.name;
   flashProgressMsg = { text: `Loaded "${set.name}" (${set.cards.length} card(s)).`, ok:true };
   saveFlashcardsToStorage();
   renderFlashcard();
@@ -1226,6 +1275,7 @@ function deleteSavedFlashcardSet(set){
         const { error } = await supabaseClient.from('flashcard_sets').delete().eq('id', set.id);
         if(error) throw error;
         savedFlashcardSets = (savedFlashcardSets || []).filter(s=>s.id !== set.id);
+        if(currentSetId === set.id){ currentSetId = null; currentSetName = null; } // the loaded deck stays, just no longer tied to a (now-deleted) row
       } catch(err){
         flashSaveMsg = { text: 'Could not delete: ' + err.message, ok:false };
       }
@@ -1234,6 +1284,20 @@ function deleteSavedFlashcardSet(set){
     'Delete',
     true
   );
+}
+
+/* Edits the in-progress deck without touching the saved row until "Update"
+   is clicked -- mirrors shuffleFlashcards below in scope (deck-local state
+   only). Deliberately no confirm dialog: unlike deleteSavedFlashcardSet this
+   can't destroy anything server-side by itself, and reloading the saved set
+   undoes it. */
+function removeCurrentFlashcard(){
+  if(!flashcards.length) return;
+  flashcards.splice(flashIndex, 1);
+  if(flashIndex >= flashcards.length) flashIndex = Math.max(0, flashcards.length - 1);
+  flashSelectedOption = null;
+  saveFlashcardsToStorage();
+  renderFlashcard();
 }
 
 function bindFlashGeneratorHandlers(){
@@ -1366,7 +1430,8 @@ function renderFlashcard(){
     ? `
       <div style="margin-bottom:10px;display:flex;gap:14px;flex-wrap:wrap;align-items:center;">
         <button class="link-btn" id="flashToggleGenBtn" type="button">${flashGeneratorOpen ? 'Hide set options' : '⚙ Change flashcard set'}</button>
-        <button class="link-btn" id="flashSaveToggleBtn" type="button">${flashSaveOpen ? 'Cancel save' : '💾 Save this set'}</button>
+        ${currentSetId ? `<button class="link-btn" id="flashUpdateSetBtn" type="button">💾 Update "${escapeHtml(currentSetName)}"</button>` : ''}
+        <button class="link-btn" id="flashSaveToggleBtn" type="button">${flashSaveOpen ? 'Cancel save' : (currentSetId ? 'Save as new set' : '💾 Save this set')}</button>
       </div>
       ${flashSaveOpen ? `
         <div style="margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
@@ -1407,9 +1472,10 @@ function renderFlashcard(){
       <button class="btn btn-ghost" id="flashNextBtn" ${flashIndex===flashcards.length-1?'disabled':''}>Next →</button>
     </div>
   `;
-  if(flashcards.length>1){
-    html += `<div style="margin-top:10px;text-align:center;"><button class="link-btn" id="flashShuffleBtn" type="button">🔀 Shuffle order</button></div>`;
-  }
+  html += `<div style="margin-top:10px;text-align:center;display:flex;gap:16px;justify-content:center;flex-wrap:wrap;">
+    ${flashcards.length>1 ? `<button class="link-btn" id="flashShuffleBtn" type="button">🔀 Shuffle order</button>` : ''}
+    <button class="link-btn" id="flashRemoveCardBtn" type="button" style="color:#b3401f;">🗑 Remove this card</button>
+  </div>`;
   flashPanel.innerHTML = topHtml + genToggleHtml + html;
   document.getElementById('flashPrevBtn').onclick = ()=>{ if(flashIndex>0){ flashIndex--; flashSelectedOption=null; renderFlashcard(); } };
   document.getElementById('flashNextBtn').onclick = ()=>{ if(flashIndex<flashcards.length-1){ flashIndex++; flashSelectedOption=null; renderFlashcard(); } };
@@ -1420,6 +1486,10 @@ function renderFlashcard(){
   }
   const shuffleBtn = document.getElementById('flashShuffleBtn');
   if(shuffleBtn) shuffleBtn.onclick = shuffleFlashcards;
+  const removeCardBtn = document.getElementById('flashRemoveCardBtn');
+  if(removeCardBtn) removeCardBtn.onclick = removeCurrentFlashcard;
+  const updateSetBtn = document.getElementById('flashUpdateSetBtn');
+  if(updateSetBtn) updateSetBtn.onclick = updateSavedFlashcardSet;
   document.getElementById('flashFullscreenBtn').onclick = ()=>{ flashFullScreen = !flashFullScreen; renderFlashcard(); };
   const toggleGenBtn = document.getElementById('flashToggleGenBtn');
   if(toggleGenBtn) toggleGenBtn.onclick = ()=>{ flashGeneratorOpen = !flashGeneratorOpen; renderFlashcard(); };
@@ -1854,6 +1924,8 @@ async function handleDeleteAccount(){
   flashSavedSetsOpen = false;
   flashSaveOpen = false;
   flashSaveNameDraft = '';
+  currentSetId = null;
+  currentSetName = null;
   if(location.pathname !== '/') history.pushState({view: 'quiz'}, '', '/'); // see the matching comment in handleSignOut
   await applyAccessGate();
   alert('Your account and all saved progress have been deleted.');
@@ -1878,6 +1950,8 @@ async function handleSignOut(reason){
   flashSavedSetsOpen = false;
   flashSaveOpen = false;
   flashSaveNameDraft = '';
+  currentSetId = null;
+  currentSetName = null;
   /* showView('auth') (called next, inside applyAccessGate) never touches
      the URL -- 'auth' isn't a routed view -- so without this the address
      bar is left sitting on whatever tab was open (e.g. /progress).
