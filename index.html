@@ -287,6 +287,7 @@ let flashSelectedAttemptIds = new Set();
 let flashPickOpen = false;
 let flashLibraryTestIdx = null; // index into EXAM_LIBRARY currently expanded into a question grid, for the "build from specific questions" picker
 let flashLibrarySelectedKeys = new Set(); // `${testIdx}::${questionIdx}` -- persists across switching which test's grid is open, so a deck can span multiple tests
+let flashCustomizeMode = 'attempt'; // 'attempt' | 'question' -- which of Customize's two equal-weight modes is showing; switching modes doesn't clear either one's picks
 /* Purely a rendering overlay on the live quiz screen -- toggling it never
    touches answers/scoring/navigation, only whether renderQuestion() paints
    correct/incorrect on top of the option you've already picked. Persisted
@@ -996,8 +997,14 @@ function renderOnlineFlashGeneratorHtml(){
       </div>
     `;
   } else {
-    attemptPickHtml = `<div class="format-help">No completed attempts yet, so there's nothing to pick attempts from — take an exam from the Test Library first to unlock this, or use "By specific question" instead.</div>`;
+    attemptPickHtml = `<div class="format-help">No completed attempts yet, so there's nothing to pick attempts from — take an exam from the Test Library first to unlock this, or switch to "By Question" instead.</div>`;
   }
+  const questionPickHtml = `
+    <div class="format-help">Pick a test, then click individual questions to add them to your deck — irrespective of whether you've actually taken that test.</div>
+    <div style="margin-top:10px;">
+      ${renderFlashLibraryPickerInnerHtml()}
+    </div>
+  `;
   const inner = `
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
       ${attemptButtonsHtml}
@@ -1005,17 +1012,11 @@ function renderOnlineFlashGeneratorHtml(){
     </div>
     ${flashPickOpen ? `
       <div style="margin-top:14px;">
-        <div class="subsection">
-          <h3 style="margin:0 0 6px;font-size:1rem;">By attempt</h3>
-          ${attemptPickHtml}
+        <div style="display:flex;gap:10px;margin-bottom:14px;">
+          <button class="btn ${flashCustomizeMode==='attempt' ? 'btn-primary' : 'btn-ghost'}" id="flashModeAttemptBtn" type="button">By Attempt</button>
+          <button class="btn ${flashCustomizeMode==='question' ? 'btn-primary' : 'btn-ghost'}" id="flashModeQuestionBtn" type="button">By Question</button>
         </div>
-        <div class="subsection">
-          <h3 style="margin:0 0 6px;font-size:1rem;">By specific question</h3>
-          <div class="format-help">Pick a test, then click individual questions to add them to your deck — irrespective of whether you've actually taken that test.</div>
-          <div style="margin-top:10px;">
-            ${renderFlashLibraryPickerInnerHtml()}
-          </div>
-        </div>
+        ${flashCustomizeMode==='attempt' ? attemptPickHtml : questionPickHtml}
       </div>
     ` : ''}
     ${flashProgressMsg ? `<div class="msg ${flashProgressMsg.ok?'ok':'err'}">${escapeHtml(flashProgressMsg.text)}</div>` : ''}
@@ -1129,9 +1130,13 @@ function bindFlashGeneratorHandlers(){
   const selAllBtn = document.getElementById('flashSelectAllBtn');
   const selNoneBtn = document.getElementById('flashSelectNoneBtn');
   const genSelectedBtn = document.getElementById('flashGenerateSelectedBtn');
+  const modeAttemptBtn = document.getElementById('flashModeAttemptBtn');
+  const modeQuestionBtn = document.getElementById('flashModeQuestionBtn');
   if(genFinalBtn) genFinalBtn.onclick = ()=> generateFlashcardsFromFinalAttempts();
   if(genAllBtn) genAllBtn.onclick = ()=> generateFlashcardsFromOnlineProgress();
   if(toggleBtn) toggleBtn.onclick = ()=>{ flashPickOpen = !flashPickOpen; renderFlashcard(); };
+  if(modeAttemptBtn) modeAttemptBtn.onclick = ()=>{ flashCustomizeMode = 'attempt'; renderFlashcard(); };
+  if(modeQuestionBtn) modeQuestionBtn.onclick = ()=>{ flashCustomizeMode = 'question'; renderFlashcard(); };
   if(selAllBtn) selAllBtn.onclick = ()=>{ flashSelectedAttemptIds = new Set((flashOnlineAttempts||[]).map(a=>a.attemptId)); renderFlashcard(); };
   if(selNoneBtn) selNoneBtn.onclick = ()=>{ flashSelectedAttemptIds = new Set(); renderFlashcard(); };
   if(genSelectedBtn) genSelectedBtn.onclick = ()=> generateFlashcardsFromSelectedAttempts(Array.from(flashSelectedAttemptIds));
@@ -1681,6 +1686,7 @@ async function handleDeleteAccount(){
   flashPickOpen = false;
   flashLibraryTestIdx = null;
   flashLibrarySelectedKeys = new Set();
+  flashCustomizeMode = 'attempt';
   if(location.pathname !== '/') history.pushState({view: 'quiz'}, '', '/'); // see the matching comment in handleSignOut
   await applyAccessGate();
   alert('Your account and all saved progress have been deleted.');
@@ -1699,6 +1705,7 @@ async function handleSignOut(reason){
   flashPickOpen = false;
   flashLibraryTestIdx = null;
   flashLibrarySelectedKeys = new Set();
+  flashCustomizeMode = 'attempt';
   /* showView('auth') (called next, inside applyAccessGate) never touches
      the URL -- 'auth' isn't a routed view -- so without this the address
      bar is left sitting on whatever tab was open (e.g. /progress).
