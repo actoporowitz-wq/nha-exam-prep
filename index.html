@@ -287,7 +287,7 @@ let flashSelectedAttemptIds = new Set();
 let flashPickOpen = false;
 let flashLibraryTestIdx = null; // index into EXAM_LIBRARY currently expanded into a question grid, for the "build from specific questions" picker
 let flashLibrarySelectedKeys = new Set(); // `${testIdx}::${questionIdx}` -- persists across switching which test's grid is open, so a deck can span multiple tests
-let flashCustomizeMode = 'attempt'; // 'attempt' | 'question' -- which of Customize's two equal-weight modes is showing; switching modes doesn't clear either one's picks
+let flashLibPickOpen = false; // the "pick specific questions" library picker -- own toggle, separate from Customize (which is by-attempt only), since picking questions is really "add to my current deck," a different action from "build a different deck"
 let savedFlashcardSets = null; // null = not yet loaded; [] | [{id,name,cards,created_at}] -- server-side (flashcard_sets table), not the localStorage current-set cache
 let savedSetsLoading = false;
 let savedSetsError = null; // error from the last loadSavedFlashcardSets() fetch, if any -- shown only inside the saved-sets list, separate from flashSaveMsg
@@ -450,7 +450,6 @@ function showView(v, opts){
 
   if(v==='quiz' && submitted) renderResults();
   if(v==='flash'){
-    if(!flashcards.length) loadFlashcardsFromStorage();
     renderFlashcard();
     /* Always refetch on entry (mirrors renderProgressView's unconditional
        refetch below) so a just-finished exam shows up immediately without
@@ -889,7 +888,6 @@ async function buildFlashcardsFromAttemptIds(attemptIds, scopeMsg){
   currentSetId = null; // a fresh build from attempt history replaces whatever saved set was loaded, rather than editing it
   currentSetName = null;
   flashProgressMsg = { text: `Built ${flashcards.length} flashcard(s) from ${attemptIds.length} completed attempt(s) ${scopeMsg}.`, ok:true };
-  saveFlashcardsToStorage();
 }
 
 async function generateFlashcardsFromOnlineProgress(){
@@ -957,11 +955,8 @@ function renderOnlineFlashGeneratorHtml(){
       </div>
     `;
   }
-  /* Final Attempts Only / All Attempts need real attempt history to draw
-     from, so they're only offered once some exists. Customize doesn't have
-     that restriction any more -- the specific-questions picker nested
-     inside it works from the library directly, so it stays reachable even
-     for a brand-new account with zero completed attempts. */
+  /* Final Attempts Only / All Attempts / Customize all need real attempt
+     history to draw from, so they're only offered once some exists. */
   const hasAttempts = flashOnlineAttempts && flashOnlineAttempts.length;
   let attemptButtonsHtml = '';
   let attemptPickHtml = '';
@@ -1009,27 +1004,32 @@ function renderOnlineFlashGeneratorHtml(){
       </div>
     `;
   } else {
-    attemptPickHtml = `<div class="format-help">No completed attempts yet, so there's nothing to pick attempts from — take an exam from the Test Library first to unlock this, or switch to "By Question" instead.</div>`;
+    attemptPickHtml = `<div class="format-help">No completed attempts yet, so there's nothing to pick attempts from — take an exam from the Test Library first to unlock this.</div>`;
   }
-  const questionPickHtml = `
-    <div class="format-help">Pick a test, then click individual questions to add them to your deck — irrespective of whether you've actually taken that test.</div>
-    <div style="margin-top:10px;">
-      ${renderFlashLibraryPickerInnerHtml()}
-    </div>
-  `;
+  /* Picking specific questions is offered here too, but only to bootstrap a
+     first deck from nothing (e.g. a brand-new account with no attempt
+     history yet) -- it's the only one of these that doesn't need attempt
+     history. Once a deck already exists this same picker moves to a
+     dedicated "+ Add questions" button next to the deck itself (see
+     genToggleHtml in renderFlashcard()) instead of staying buried behind
+     "Change flashcard set" -- adding to what you have is a different,
+     more frequent action than starting over, and deserves its own button
+     rather than sharing this one. Both entry points toggle the same
+     flashLibPickOpen flag and render the same picker, so only one is ever
+     shown at a time. */
+  const showLibPickHere = !flashcards.length;
   const inner = `
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
       ${attemptButtonsHtml}
       <button class="btn btn-ghost" id="flashTogglePickBtn" type="button">${flashPickOpen ? 'Hide Customize' : 'Customize'}</button>
+      ${showLibPickHere ? `<button class="btn btn-ghost" id="flashLibPickToggleBtn" type="button">${flashLibPickOpen ? 'Hide Pick Questions' : 'Pick Questions'}</button>` : ''}
       <button class="btn btn-ghost" id="flashSavedSetsToggleBtn" type="button">${flashSavedSetsOpen ? 'Hide Saved Sets' : `My Saved Sets${savedFlashcardSets && savedFlashcardSets.length ? ` (${savedFlashcardSets.length})` : ''}`}</button>
     </div>
-    ${flashPickOpen ? `
+    ${flashPickOpen ? `<div style="margin-top:14px;">${attemptPickHtml}</div>` : ''}
+    ${showLibPickHere && flashLibPickOpen ? `
       <div style="margin-top:14px;">
-        <div style="display:flex;gap:10px;margin-bottom:14px;">
-          <button class="btn ${flashCustomizeMode==='attempt' ? 'btn-primary' : 'btn-ghost'}" id="flashModeAttemptBtn" type="button">By Attempt</button>
-          <button class="btn ${flashCustomizeMode==='question' ? 'btn-primary' : 'btn-ghost'}" id="flashModeQuestionBtn" type="button">By Question</button>
-        </div>
-        ${flashCustomizeMode==='attempt' ? attemptPickHtml : questionPickHtml}
+        <div class="format-help">Pick a test, then click individual questions to add them to your deck — irrespective of whether you've actually taken that test.</div>
+        <div style="margin-top:10px;">${renderFlashLibraryPickerInnerHtml()}</div>
       </div>
     ` : ''}
     ${flashSavedSetsOpen ? `<div class="subsection">${renderSavedFlashcardSetsListHtml()}</div>` : ''}
@@ -1038,7 +1038,7 @@ function renderOnlineFlashGeneratorHtml(){
   return `
     <div class="panel subsection">
       <h2>Generate flashcards from your progress</h2>
-      <div class="format-help">Three ways to build a set: <strong>Final Attempts Only</strong> uses just your most recent attempt in each round — what you're still missing right now. <strong>All Attempts</strong> pulls every question you've ever missed, on any attempt, across every round (most-missed first) — the same question can count more than once if you missed it on an earlier retake. <strong>Customize</strong> lets you pick specific attempts yourself, or specific questions from any test. <strong>My Saved Sets</strong> reloads a set you named and saved earlier — from any device.</div>
+      <div class="format-help">Ways to build a set: <strong>Final Attempts Only</strong> uses just your most recent attempt in each round — what you're still missing right now. <strong>All Attempts</strong> pulls every question you've ever missed, on any attempt, across every round (most-missed first) — the same question can count more than once if you missed it on an earlier retake. <strong>Customize</strong> lets you pick specific past attempts yourself.${showLibPickHere ? ' <strong>Pick Questions</strong> lets you hand-pick individual questions from any test.' : ''} <strong>My Saved Sets</strong> reloads a set you named and saved earlier — from any device.</div>
       ${inner}
     </div>
   `;
@@ -1176,7 +1176,6 @@ function addSelectedLibraryQuestionsToFlashcards(){
   flashIndex = 0;
   flashSelectedOption = null;
   flashProgressMsg = { text: `Added ${picked.length} card(s) — ${flashcards.length} total.`, ok:true };
-  saveFlashcardsToStorage();
   renderFlashcard();
 }
 
@@ -1263,7 +1262,6 @@ function loadSavedSetIntoStudy(set){
   currentSetId = set.id;
   currentSetName = set.name;
   flashProgressMsg = { text: `Loaded "${set.name}" (${set.cards.length} card(s)).`, ok:true };
-  saveFlashcardsToStorage();
   renderFlashcard();
 }
 
@@ -1296,7 +1294,6 @@ function removeCurrentFlashcard(){
   flashcards.splice(flashIndex, 1);
   if(flashIndex >= flashcards.length) flashIndex = Math.max(0, flashcards.length - 1);
   flashSelectedOption = null;
-  saveFlashcardsToStorage();
   renderFlashcard();
 }
 
@@ -1307,14 +1304,20 @@ function bindFlashGeneratorHandlers(){
   const selAllBtn = document.getElementById('flashSelectAllBtn');
   const selNoneBtn = document.getElementById('flashSelectNoneBtn');
   const genSelectedBtn = document.getElementById('flashGenerateSelectedBtn');
-  const modeAttemptBtn = document.getElementById('flashModeAttemptBtn');
-  const modeQuestionBtn = document.getElementById('flashModeQuestionBtn');
+  /* Two possible entry points for the same "pick specific questions" panel
+     -- flashLibPickToggleBtn (inside the generator, only when there's no
+     deck yet) and flashAddToggleBtn (the dedicated button next to an
+     existing deck) -- see the comment on flashLibPickOpen's declaration.
+     Only one is ever in the DOM at a time. */
+  const libPickToggleBtn = document.getElementById('flashLibPickToggleBtn');
+  const addToggleBtn = document.getElementById('flashAddToggleBtn');
   const savedSetsToggleBtn = document.getElementById('flashSavedSetsToggleBtn');
   if(genFinalBtn) genFinalBtn.onclick = ()=> generateFlashcardsFromFinalAttempts();
   if(genAllBtn) genAllBtn.onclick = ()=> generateFlashcardsFromOnlineProgress();
   if(toggleBtn) toggleBtn.onclick = ()=>{ flashPickOpen = !flashPickOpen; renderFlashcard(); };
-  if(modeAttemptBtn) modeAttemptBtn.onclick = ()=>{ flashCustomizeMode = 'attempt'; renderFlashcard(); };
-  if(modeQuestionBtn) modeQuestionBtn.onclick = ()=>{ flashCustomizeMode = 'question'; renderFlashcard(); };
+  const toggleLibPick = ()=>{ flashLibPickOpen = !flashLibPickOpen; renderFlashcard(); };
+  if(libPickToggleBtn) libPickToggleBtn.onclick = toggleLibPick;
+  if(addToggleBtn) addToggleBtn.onclick = toggleLibPick;
   if(savedSetsToggleBtn) savedSetsToggleBtn.onclick = ()=>{
     flashSavedSetsOpen = !flashSavedSetsOpen;
     if(flashSavedSetsOpen && savedFlashcardSets === null) loadSavedFlashcardSets();
@@ -1371,34 +1374,7 @@ function shuffleFlashcards(){
   shuffleArrayInPlace(flashcards);
   flashIndex = 0;
   flashSelectedOption = null;
-  saveFlashcardsToStorage();
   renderFlashcard();
-}
-
-/* Generated sets are derived, ephemeral data -- rebuildable any time from
-   the same missed-question history already in Supabase -- so caching the
-   current set in localStorage is purely a "don't lose my place on
-   refresh" convenience, not a data-integrity concern. Scoped per user id
-   so a second account signing in on the same browser never sees another
-   account's cached set. */
-function flashcardsStorageKey(){
-  return currentUser ? ('nha_flashcards_' + currentUser.id) : null;
-}
-function saveFlashcardsToStorage(){
-  const key = flashcardsStorageKey();
-  if(!key) return;
-  try{ localStorage.setItem(key, JSON.stringify({ flashcards, flashIndex })); }catch(e){ /* fine, just won't persist */ }
-}
-function loadFlashcardsFromStorage(){
-  const key = flashcardsStorageKey();
-  if(!key) return false;
-  try{
-    const saved = JSON.parse(localStorage.getItem(key));
-    if(!saved || !Array.isArray(saved.flashcards) || !saved.flashcards.length) return false;
-    flashcards = saved.flashcards;
-    flashIndex = (typeof saved.flashIndex === 'number' && saved.flashIndex < flashcards.length) ? saved.flashIndex : 0;
-    return true;
-  }catch(e){ return false; }
 }
 
 function renderFlashcard(){
@@ -1429,10 +1405,17 @@ function renderFlashcard(){
   const genToggleHtml = (currentUser && !flashFullScreen)
     ? `
       <div style="margin-bottom:10px;display:flex;gap:14px;flex-wrap:wrap;align-items:center;">
-        <button class="link-btn" id="flashToggleGenBtn" type="button">${flashGeneratorOpen ? 'Hide set options' : '⚙ Change flashcard set'}</button>
+        <button class="btn btn-primary" id="flashAddToggleBtn" type="button">${flashLibPickOpen ? 'Cancel' : '➕ Add questions'}</button>
         ${currentSetId ? `<button class="link-btn" id="flashUpdateSetBtn" type="button">💾 Update "${escapeHtml(currentSetName)}"</button>` : ''}
         <button class="link-btn" id="flashSaveToggleBtn" type="button">${flashSaveOpen ? 'Cancel save' : (currentSetId ? 'Save as new set' : '💾 Save this set')}</button>
+        <button class="link-btn" id="flashToggleGenBtn" type="button">${flashGeneratorOpen ? 'Hide set options' : '⚙ Start a different set'}</button>
       </div>
+      ${flashLibPickOpen ? `
+        <div class="subsection" style="margin-bottom:14px;">
+          <div class="format-help">Pick a test, then click questions to add them to this set.</div>
+          <div style="margin-top:10px;">${renderFlashLibraryPickerInnerHtml()}</div>
+        </div>
+      ` : ''}
       ${flashSaveOpen ? `
         <div style="margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
           <input type="text" id="flashSaveNameInput" placeholder="Name this set" value="${escapeHtml(flashSaveNameDraft)}" style="padding:8px 12px;border-radius:8px;border:1px solid var(--line);font-family:system-ui,sans-serif;font-size:.88rem;flex:1;min-width:160px;">
@@ -1918,7 +1901,7 @@ async function handleDeleteAccount(){
   flashPickOpen = false;
   flashLibraryTestIdx = null;
   flashLibrarySelectedKeys = new Set();
-  flashCustomizeMode = 'attempt';
+  flashLibPickOpen = false;
   savedFlashcardSets = null;
   savedSetsError = null;
   flashSavedSetsOpen = false;
@@ -1944,7 +1927,7 @@ async function handleSignOut(reason){
   flashPickOpen = false;
   flashLibraryTestIdx = null;
   flashLibrarySelectedKeys = new Set();
-  flashCustomizeMode = 'attempt';
+  flashLibPickOpen = false;
   savedFlashcardSets = null;
   savedSetsError = null;
   flashSavedSetsOpen = false;
