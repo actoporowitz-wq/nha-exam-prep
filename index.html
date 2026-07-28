@@ -288,6 +288,13 @@ let flashPickOpen = false;
 let flashLibraryTestIdx = null; // index into EXAM_LIBRARY currently expanded into a question grid, for the "build from specific questions" picker
 let flashLibrarySelectedKeys = new Set(); // `${testIdx}::${questionIdx}` -- persists across switching which test's grid is open, so a deck can span multiple tests
 let flashCustomizeMode = 'attempt'; // 'attempt' | 'question' -- which of Customize's two equal-weight modes is showing; switching modes doesn't clear either one's picks
+let savedFlashcardSets = null; // null = not yet loaded; [] | [{id,name,cards,created_at}] -- server-side (flashcard_sets table), not the localStorage current-set cache
+let savedSetsLoading = false;
+let savedSetsError = null; // error from the last loadSavedFlashcardSets() fetch, if any -- shown only inside the saved-sets list, separate from flashSaveMsg
+let flashSavedSetsOpen = false; // "My Saved Sets" panel open/closed
+let flashSaveOpen = false; // inline "save this set" name-input row open/closed
+let flashSaveNameDraft = '';
+let flashSaveMsg = null; // { text, ok } | null -- transient status line under the inline save row
 /* Purely a rendering overlay on the live quiz screen -- toggling it never
    touches answers/scoring/navigation, only whether renderQuestion() paints
    correct/incorrect on top of the option you've already picked. Persisted
@@ -447,6 +454,7 @@ function showView(v, opts){
        refetch below) so a just-finished exam shows up immediately without
        needing a manual page reload to invalidate a cache. */
     if(currentUser && !flashAttemptsLoading) loadFlashOnlineAttempts();
+    if(currentUser && !savedSetsLoading) loadSavedFlashcardSets();
   }
   if(v==='library') renderLibrary();
   if(v==='auth') renderAuthView();
@@ -1009,6 +1017,7 @@ function renderOnlineFlashGeneratorHtml(){
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
       ${attemptButtonsHtml}
       <button class="btn btn-ghost" id="flashTogglePickBtn" type="button">${flashPickOpen ? 'Hide Customize' : 'Customize'}</button>
+      <button class="btn btn-ghost" id="flashSavedSetsToggleBtn" type="button">${flashSavedSetsOpen ? 'Hide Saved Sets' : `My Saved Sets${savedFlashcardSets && savedFlashcardSets.length ? ` (${savedFlashcardSets.length})` : ''}`}</button>
     </div>
     ${flashPickOpen ? `
       <div style="margin-top:14px;">
@@ -1019,15 +1028,42 @@ function renderOnlineFlashGeneratorHtml(){
         ${flashCustomizeMode==='attempt' ? attemptPickHtml : questionPickHtml}
       </div>
     ` : ''}
+    ${flashSavedSetsOpen ? `<div class="subsection">${renderSavedFlashcardSetsListHtml()}</div>` : ''}
     ${flashProgressMsg ? `<div class="msg ${flashProgressMsg.ok?'ok':'err'}">${escapeHtml(flashProgressMsg.text)}</div>` : ''}
   `;
   return `
     <div class="panel subsection">
       <h2>Generate flashcards from your progress</h2>
-      <div class="format-help">Three ways to build a set: <strong>Final Attempts Only</strong> uses just your most recent attempt in each round — what you're still missing right now. <strong>All Attempts</strong> pulls every question you've ever missed, on any attempt, across every round (most-missed first) — the same question can count more than once if you missed it on an earlier retake. <strong>Customize</strong> lets you pick specific attempts yourself, or specific questions from any test.</div>
+      <div class="format-help">Three ways to build a set: <strong>Final Attempts Only</strong> uses just your most recent attempt in each round — what you're still missing right now. <strong>All Attempts</strong> pulls every question you've ever missed, on any attempt, across every round (most-missed first) — the same question can count more than once if you missed it on an earlier retake. <strong>Customize</strong> lets you pick specific attempts yourself, or specific questions from any test. <strong>My Saved Sets</strong> reloads a set you named and saved earlier — from any device.</div>
       ${inner}
     </div>
   `;
+}
+
+/* Nested inside the generator above, toggled by "My Saved Sets". Server-
+   side (flashcard_sets table, RLS'd to the owner) rather than the
+   localStorage-only current-set cache, specifically so a saved set follows
+   the account to any device instead of being stuck on whichever browser
+   built it -- see the migration file's own header comment for the full
+   reasoning. */
+function renderSavedFlashcardSetsListHtml(){
+  if(savedSetsLoading) return `<div class="format-help">Loading your saved sets…</div>`;
+  if(savedSetsError) return `<div class="msg err">${escapeHtml(savedSetsError)}</div>`;
+  if(!savedFlashcardSets || !savedFlashcardSets.length){
+    return `<div class="format-help">No saved sets yet. Build a deck above, then use "Save this set" while studying it.</div>`;
+  }
+  return savedFlashcardSets.map(s=>`
+    <div class="lib-row">
+      <div class="lib-info">
+        <div class="lib-title">${escapeHtml(s.name)}</div>
+        <div class="lib-meta">${s.cards.length} card(s) · saved ${new Date(s.created_at).toLocaleDateString()}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="link-btn" data-load-set="${escapeHtml(s.id)}">Load</button>
+        <button class="link-btn" style="color:#b3401f;" data-delete-set="${escapeHtml(s.id)}">Delete</button>
+      </div>
+    </div>
+  `).join('');
 }
 
 /* Nested inside the Customize panel above -- lets a user build a deck from
@@ -1123,6 +1159,83 @@ function addSelectedLibraryQuestionsToFlashcards(){
   renderFlashcard();
 }
 
+/* ================= saved flashcard sets (server-side, cross-device) ================= */
+/* Fetched eagerly on every Flashcards-tab visit (mirrors
+   loadFlashOnlineAttempts() above it) so the "My Saved Sets (N)" count
+   stays current without an extra click -- but a failure here (e.g. the
+   flashcard_sets table not existing yet, pre-migration) is stored
+   separately from flashSaveMsg and only surfaced inside the saved-sets
+   list itself, not as an unprompted error under "Save this set" on every
+   single visit to the tab. */
+async function loadSavedFlashcardSets(){
+  if(!currentUser) return;
+  savedSetsLoading = true;
+  savedSetsError = null;
+  renderFlashcard();
+  try{
+    const { data, error } = await supabaseClient.from('flashcard_sets')
+      .select('id,name,cards,created_at').eq('user_id', currentUser.id).order('created_at', { ascending:false });
+    if(error) throw error;
+    savedFlashcardSets = data;
+  } catch(err){
+    savedFlashcardSets = [];
+    savedSetsError = 'Could not load saved sets: ' + err.message;
+  } finally {
+    savedSetsLoading = false;
+    renderFlashcard();
+  }
+}
+
+async function saveCurrentFlashcardSetAs(name){
+  const trimmed = (name || '').trim();
+  if(!trimmed){ flashSaveMsg = { text: 'Enter a name for this set.', ok:false }; renderFlashcard(); return; }
+  if(!flashcards.length) return;
+  flashSaveMsg = { text: 'Saving…', ok:true };
+  renderFlashcard();
+  try{
+    const { error } = await supabaseClient.from('flashcard_sets').insert({
+      user_id: currentUser.id, name: trimmed, cards: flashcards
+    });
+    if(error) throw error;
+    flashSaveMsg = { text: `Saved "${trimmed}".`, ok:true };
+    flashSaveOpen = false;
+    flashSaveNameDraft = '';
+    savedFlashcardSets = null; // stale -- reloads next time the list is opened/tab is re-entered
+  } catch(err){
+    flashSaveMsg = { text: 'Could not save: ' + err.message, ok:false };
+  }
+  renderFlashcard();
+}
+
+function loadSavedSetIntoStudy(set){
+  flashcards = set.cards;
+  flashIndex = 0;
+  flashSelectedOption = null;
+  flashGeneratorOpen = false;
+  flashSavedSetsOpen = false;
+  flashProgressMsg = { text: `Loaded "${set.name}" (${set.cards.length} card(s)).`, ok:true };
+  saveFlashcardsToStorage();
+  renderFlashcard();
+}
+
+function deleteSavedFlashcardSet(set){
+  showConfirmDialog(
+    `Delete the saved set "${set.name}"? This can't be undone.`,
+    async ()=>{
+      try{
+        const { error } = await supabaseClient.from('flashcard_sets').delete().eq('id', set.id);
+        if(error) throw error;
+        savedFlashcardSets = (savedFlashcardSets || []).filter(s=>s.id !== set.id);
+      } catch(err){
+        flashSaveMsg = { text: 'Could not delete: ' + err.message, ok:false };
+      }
+      renderFlashcard();
+    },
+    'Delete',
+    true
+  );
+}
+
 function bindFlashGeneratorHandlers(){
   const genFinalBtn = document.getElementById('flashGenerateFinalBtn');
   const genAllBtn = document.getElementById('flashGenerateAllBtn');
@@ -1132,11 +1245,29 @@ function bindFlashGeneratorHandlers(){
   const genSelectedBtn = document.getElementById('flashGenerateSelectedBtn');
   const modeAttemptBtn = document.getElementById('flashModeAttemptBtn');
   const modeQuestionBtn = document.getElementById('flashModeQuestionBtn');
+  const savedSetsToggleBtn = document.getElementById('flashSavedSetsToggleBtn');
   if(genFinalBtn) genFinalBtn.onclick = ()=> generateFlashcardsFromFinalAttempts();
   if(genAllBtn) genAllBtn.onclick = ()=> generateFlashcardsFromOnlineProgress();
   if(toggleBtn) toggleBtn.onclick = ()=>{ flashPickOpen = !flashPickOpen; renderFlashcard(); };
   if(modeAttemptBtn) modeAttemptBtn.onclick = ()=>{ flashCustomizeMode = 'attempt'; renderFlashcard(); };
   if(modeQuestionBtn) modeQuestionBtn.onclick = ()=>{ flashCustomizeMode = 'question'; renderFlashcard(); };
+  if(savedSetsToggleBtn) savedSetsToggleBtn.onclick = ()=>{
+    flashSavedSetsOpen = !flashSavedSetsOpen;
+    if(flashSavedSetsOpen && savedFlashcardSets === null) loadSavedFlashcardSets();
+    else renderFlashcard();
+  };
+  flashPanel.querySelectorAll('[data-load-set]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const set = (savedFlashcardSets||[]).find(s=>s.id===btn.dataset.loadSet);
+      if(set) loadSavedSetIntoStudy(set);
+    };
+  });
+  flashPanel.querySelectorAll('[data-delete-set]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const set = (savedFlashcardSets||[]).find(s=>s.id===btn.dataset.deleteSet);
+      if(set) deleteSavedFlashcardSet(set);
+    };
+  });
   if(selAllBtn) selAllBtn.onclick = ()=>{ flashSelectedAttemptIds = new Set((flashOnlineAttempts||[]).map(a=>a.attemptId)); renderFlashcard(); };
   if(selNoneBtn) selNoneBtn.onclick = ()=>{ flashSelectedAttemptIds = new Set(); renderFlashcard(); };
   if(genSelectedBtn) genSelectedBtn.onclick = ()=> generateFlashcardsFromSelectedAttempts(Array.from(flashSelectedAttemptIds));
@@ -1232,7 +1363,19 @@ function renderFlashcard(){
   flashPanel.classList.toggle('flash-fullscreen', flashFullScreen);
   document.body.classList.toggle('fullscreen-active', flashFullScreen);
   const genToggleHtml = (currentUser && !flashFullScreen)
-    ? `<div style="margin-bottom:10px;"><button class="link-btn" id="flashToggleGenBtn" type="button">${flashGeneratorOpen ? 'Hide set options' : '⚙ Change flashcard set'}</button></div>`
+    ? `
+      <div style="margin-bottom:10px;display:flex;gap:14px;flex-wrap:wrap;align-items:center;">
+        <button class="link-btn" id="flashToggleGenBtn" type="button">${flashGeneratorOpen ? 'Hide set options' : '⚙ Change flashcard set'}</button>
+        <button class="link-btn" id="flashSaveToggleBtn" type="button">${flashSaveOpen ? 'Cancel save' : '💾 Save this set'}</button>
+      </div>
+      ${flashSaveOpen ? `
+        <div style="margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <input type="text" id="flashSaveNameInput" placeholder="Name this set" value="${escapeHtml(flashSaveNameDraft)}" style="padding:8px 12px;border-radius:8px;border:1px solid var(--line);font-family:system-ui,sans-serif;font-size:.88rem;flex:1;min-width:160px;">
+          <button class="btn btn-primary" id="flashSaveConfirmBtn" type="button">Save</button>
+        </div>
+      ` : ''}
+      ${flashSaveMsg ? `<div class="msg ${flashSaveMsg.ok?'ok':'err'}" style="margin-bottom:10px;">${escapeHtml(flashSaveMsg.text)}</div>` : ''}
+    `
     : '';
   const letters = ['1','2','3','4','5','6'];
   const card = flashcards[flashIndex];
@@ -1280,6 +1423,25 @@ function renderFlashcard(){
   document.getElementById('flashFullscreenBtn').onclick = ()=>{ flashFullScreen = !flashFullScreen; renderFlashcard(); };
   const toggleGenBtn = document.getElementById('flashToggleGenBtn');
   if(toggleGenBtn) toggleGenBtn.onclick = ()=>{ flashGeneratorOpen = !flashGeneratorOpen; renderFlashcard(); };
+  const saveToggleBtn = document.getElementById('flashSaveToggleBtn');
+  if(saveToggleBtn) saveToggleBtn.onclick = ()=>{
+    flashSaveOpen = !flashSaveOpen;
+    flashSaveMsg = null;
+    renderFlashcard();
+    /* Explicit re-focus, run AFTER the render's own generic focus-restore
+       (which would otherwise put focus back on this toggle button, since
+       that's what was active when the click happened) -- opening the
+       panel should land you straight in the name field, not require a
+       second click. */
+    if(flashSaveOpen) document.getElementById('flashSaveNameInput')?.focus();
+  };
+  const saveNameInput = document.getElementById('flashSaveNameInput');
+  if(saveNameInput){
+    saveNameInput.oninput = (e)=>{ flashSaveNameDraft = e.target.value; };
+    saveNameInput.onkeydown = (e)=>{ if(e.key === 'Enter') saveCurrentFlashcardSetAs(flashSaveNameDraft); };
+  }
+  const saveConfirmBtn = document.getElementById('flashSaveConfirmBtn');
+  if(saveConfirmBtn) saveConfirmBtn.onclick = ()=> saveCurrentFlashcardSetAs(flashSaveNameDraft);
   if(currentUser){ bindFlashGeneratorHandlers(); bindFlashLibraryPickerHandlers(); }
 
   if(restoreId){ document.getElementById(restoreId)?.focus(); }
@@ -1687,6 +1849,11 @@ async function handleDeleteAccount(){
   flashLibraryTestIdx = null;
   flashLibrarySelectedKeys = new Set();
   flashCustomizeMode = 'attempt';
+  savedFlashcardSets = null;
+  savedSetsError = null;
+  flashSavedSetsOpen = false;
+  flashSaveOpen = false;
+  flashSaveNameDraft = '';
   if(location.pathname !== '/') history.pushState({view: 'quiz'}, '', '/'); // see the matching comment in handleSignOut
   await applyAccessGate();
   alert('Your account and all saved progress have been deleted.');
@@ -1706,6 +1873,11 @@ async function handleSignOut(reason){
   flashLibraryTestIdx = null;
   flashLibrarySelectedKeys = new Set();
   flashCustomizeMode = 'attempt';
+  savedFlashcardSets = null;
+  savedSetsError = null;
+  flashSavedSetsOpen = false;
+  flashSaveOpen = false;
+  flashSaveNameDraft = '';
   /* showView('auth') (called next, inside applyAccessGate) never touches
      the URL -- 'auth' isn't a routed view -- so without this the address
      bar is left sitting on whatever tab was open (e.g. /progress).
