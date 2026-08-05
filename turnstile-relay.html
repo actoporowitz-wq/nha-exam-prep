@@ -1,0 +1,58 @@
+<!doctype html>
+<!--
+  Turnstile relay page for the native Android app.
+
+  The Turnstile site key (see exam_practice_app.html) is domain-locked in
+  the Cloudflare dashboard to nha-exam-prep.pages.dev and localhost -- a
+  WebView loading a captcha widget from any other origin gets rejected.
+  This page exists purely so the native app's WebView has something
+  hosted on an allowed hostname to load: it renders the same widget,
+  and on success posts the resulting token back to the app via the
+  `FlutterChannel` JavaScript channel (registered by the Flutter side
+  before this page loads). Not linked from anywhere in the main app --
+  reached only by the native client.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verifying…</title>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #ffffff;
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  #status { color: #666; font-size: 14px; margin-top: 12px; }
+  #wrap { text-align: center; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div class="cf-turnstile"
+       data-sitekey="0x4AAAAAAD2sW9Vf3k0VKwOZ"
+       data-callback="onTurnstileSuccess"
+       data-error-callback="onTurnstileError"></div>
+  <div id="status">Verifying…</div>
+</div>
+<script>
+  function onTurnstileSuccess(token) {
+    document.getElementById('status').textContent = 'Verified.';
+    if (window.FlutterChannel) {
+      window.FlutterChannel.postMessage(JSON.stringify({ ok: true, token: token }));
+    }
+  }
+  function onTurnstileError(errorCode) {
+    document.getElementById('status').textContent = 'Verification failed.';
+    if (window.FlutterChannel) {
+      window.FlutterChannel.postMessage(JSON.stringify({ ok: false, error: String(errorCode) }));
+    }
+  }
+</script>
+</body>
+</html>
