@@ -2690,7 +2690,21 @@ function deleteAttemptFromProgress(attemptId, attemptNumber, round){
         if(wasLatest){
           const maxNum = await onlineStore.maxAttemptNumber(round.id);
           if(!maxNum){
+            const latestBeforeDelete = await onlineStore.findLatestRound(round.exam_key);
+            const wasLatestRound = latestBeforeDelete && latestBeforeDelete.id === round.id;
             await onlineStore.deleteRound(round.id);
+            /* This round's existence may be what marked the round before it
+               "abandoned" -- beginOnlineAttempt does that whenever a fresh
+               round supersedes an unfinished one. If it's now gone entirely
+               and nothing else was ever built on top of it, the prior round
+               is the current one for this exam again, so un-stick it from
+               "(abandoned)" instead of leaving it stuck that way forever. */
+            if(wasLatestRound && round.round_number > 1){
+              const prevRound = await onlineStore.findRoundByNumber(round.exam_key, round.round_number - 1);
+              if(prevRound && prevRound.status === 'abandoned'){
+                await onlineStore.updateRound(prevRound.id, prevRound.funnel_missed_count, false, null);
+              }
+            }
           } else {
             let n = maxNum, driver = null;
             while(n >= 1 && !driver){
