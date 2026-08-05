@@ -287,7 +287,7 @@ let flashSelectedAttemptIds = new Set();
 let flashPickOpen = false;
 let flashLibraryTestIdx = null; // index into EXAM_LIBRARY currently expanded into a question grid, for the "build from specific questions" picker
 let flashLibrarySelectedKeys = new Set(); // `${testIdx}::${questionIdx}` -- persists across switching which test's grid is open, so a deck can span multiple tests
-let flashLibPickOpen = false; // the "pick specific questions" library picker -- own toggle, separate from Customize (which is by-attempt only), since picking questions is really "add to my current deck," a different action from "build a different deck"
+let flashLibPickOpen = false; // the "pick specific questions" library picker -- own toggle, separate from the attempt picker (which only chooses among past attempts, not individual questions). Reached via "+ Add questions" (adds to the current deck) or "New custom set" (clears the deck first) -- same picker, two entry points depending on whether you're starting over or adding on
 let savedFlashcardSets = null; // null = not yet loaded; [] | [{id,name,cards,created_at}] -- server-side (flashcard_sets table), not the localStorage current-set cache
 let savedSetsLoading = false;
 let savedSetsError = null; // error from the last loadSavedFlashcardSets() fetch, if any -- shown only inside the saved-sets list, separate from flashSaveMsg
@@ -1006,23 +1006,22 @@ function renderOnlineFlashGeneratorHtml(){
   } else {
     attemptPickHtml = `<div class="format-help">No completed attempts yet, so there's nothing to pick attempts from — take an exam from the Test Library first to unlock this.</div>`;
   }
-  /* Picking specific questions is offered here too, but only to bootstrap a
-     first deck from nothing (e.g. a brand-new account with no attempt
-     history yet) -- it's the only one of these that doesn't need attempt
-     history. Once a deck already exists this same picker moves to a
-     dedicated "+ Add questions" button next to the deck itself (see
-     genToggleHtml in renderFlashcard()) instead of staying buried behind
-     "Change flashcard set" -- adding to what you have is a different,
-     more frequent action than starting over, and deserves its own button
-     rather than sharing this one. Both entry points toggle the same
-     flashLibPickOpen flag and render the same picker, so only one is ever
-     shown at a time. */
+  /* "New custom set" always offers the same hand-pick-any-question picker
+     used by "+ Add questions" on an existing deck (see genToggleHtml in
+     renderFlashcard()) -- the only difference is this one clears the
+     current deck first (confirming if there's anything unsaved to lose),
+     so building fresh is a real one-click action instead of something
+     only reachable by removing every card by hand. Both entry points
+     toggle the same flashLibPickOpen flag and render the same picker, but
+     only one is ever mounted at a time: this one only renders it while the
+     deck is actually empty (right after a fresh start, or before any deck
+     exists) -- genToggleHtml's copy covers the rest of the time. */
   const showLibPickHere = !flashcards.length;
   const inner = `
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
       ${attemptButtonsHtml}
-      <button class="btn btn-ghost" id="flashTogglePickBtn" type="button">${flashPickOpen ? 'Hide Customize' : 'Customize'}</button>
-      ${showLibPickHere ? `<button class="btn btn-ghost" id="flashLibPickToggleBtn" type="button">${flashLibPickOpen ? 'Hide Pick Questions' : 'Pick Questions'}</button>` : ''}
+      <button class="btn btn-ghost" id="flashTogglePickBtn" type="button">${flashPickOpen ? 'Hide attempt picker' : 'Pick specific attempts'}</button>
+      <button class="btn btn-ghost" id="flashNewCustomSetBtn" type="button">🆕 New custom set</button>
       <button class="btn btn-ghost" id="flashSavedSetsToggleBtn" type="button">${flashSavedSetsOpen ? 'Hide Saved Sets' : `My Saved Sets${savedFlashcardSets && savedFlashcardSets.length ? ` (${savedFlashcardSets.length})` : ''}`}</button>
     </div>
     ${flashPickOpen ? `<div style="margin-top:14px;">${attemptPickHtml}</div>` : ''}
@@ -1038,7 +1037,7 @@ function renderOnlineFlashGeneratorHtml(){
   return `
     <div class="panel subsection">
       <h2>Generate flashcards from your progress</h2>
-      <div class="format-help">Ways to build a set: <strong>Final Attempts Only</strong> uses just your most recent attempt in each round — what you're still missing right now. <strong>All Attempts</strong> pulls every question you've ever missed, on any attempt, across every round (most-missed first) — the same question can count more than once if you missed it on an earlier retake. <strong>Customize</strong> lets you pick specific past attempts yourself.${showLibPickHere ? ' <strong>Pick Questions</strong> lets you hand-pick individual questions from any test.' : ''} <strong>My Saved Sets</strong> reloads a set you named and saved earlier — from any device.</div>
+      <div class="format-help">Ways to build a set: <strong>Final Attempts Only</strong> uses just your most recent attempt in each round — what you're still missing right now. <strong>All Attempts</strong> pulls every question you've ever missed, on any attempt, across every round (most-missed first) — the same question can count more than once if you missed it on an earlier retake. <strong>Pick specific attempts</strong> lets you choose which past attempts to pull from yourself. <strong>New custom set</strong> clears the deck and lets you hand-pick individual questions from any test, whether or not you've taken it. <strong>My Saved Sets</strong> reloads a set you named and saved earlier — from any device.</div>
       ${inner}
     </div>
   `;
@@ -1070,8 +1069,10 @@ function renderSavedFlashcardSetsListHtml(){
   `).join('');
 }
 
-/* Nested inside the Customize panel above -- lets a user build a deck from
-   any question in any test, whether or not they've ever taken it, by
+/* Renders the actual test-dropdown + question-grid picker, invoked from
+   either "New custom set" (generator panel, deck cleared first) or
+   "+ Add questions" (next to an existing deck) -- lets a user build a deck
+   from any question in any test, whether or not they've ever taken it, by
    picking a test from a dropdown and clicking individual questions in a
    grid (same visual language as the quiz's question-navigator dots). */
 function renderFlashLibraryPickerInnerHtml(){
@@ -1297,6 +1298,32 @@ function removeCurrentFlashcard(){
   renderFlashcard();
 }
 
+/* The one-click "build from scratch" action: clears whatever deck is
+   currently loaded and opens the hand-pick-questions panel on an empty
+   slate. Confirms first if there's anything to lose -- a saved set is safe
+   either way (it stays saved, just no longer the active study deck), but
+   an unsaved deck's cards would be gone for good. */
+function startNewCustomFlashcardSet(){
+  const startFresh = ()=>{
+    flashcards = [];
+    flashIndex = 0;
+    flashSelectedOption = null;
+    currentSetId = null;
+    currentSetName = null;
+    flashLibrarySelectedKeys = new Set();
+    flashLibraryTestIdx = null;
+    flashPickOpen = false;
+    flashLibPickOpen = true;
+    flashProgressMsg = null;
+    renderFlashcard();
+  };
+  if(!flashcards.length){ startFresh(); return; }
+  const warning = currentSetId
+    ? `Start a new custom set? This clears "${currentSetName}" from the study view — it stays saved, reload it later from My Saved Sets.`
+    : `Start a new custom set? This clears the current unsaved deck. Save it first if you want to keep it.`;
+  showConfirmDialog(warning, startFresh, 'Start New', true);
+}
+
 function bindFlashGeneratorHandlers(){
   const genFinalBtn = document.getElementById('flashGenerateFinalBtn');
   const genAllBtn = document.getElementById('flashGenerateAllBtn');
@@ -1304,20 +1331,19 @@ function bindFlashGeneratorHandlers(){
   const selAllBtn = document.getElementById('flashSelectAllBtn');
   const selNoneBtn = document.getElementById('flashSelectNoneBtn');
   const genSelectedBtn = document.getElementById('flashGenerateSelectedBtn');
+  const newCustomSetBtn = document.getElementById('flashNewCustomSetBtn');
   /* Two possible entry points for the same "pick specific questions" panel
-     -- flashLibPickToggleBtn (inside the generator, only when there's no
-     deck yet) and flashAddToggleBtn (the dedicated button next to an
-     existing deck) -- see the comment on flashLibPickOpen's declaration.
-     Only one is ever in the DOM at a time. */
-  const libPickToggleBtn = document.getElementById('flashLibPickToggleBtn');
+     -- flashNewCustomSetBtn (clears the deck first, then opens it) and
+     flashAddToggleBtn (adds to an existing deck, next to it) -- see the
+     comment on flashLibPickOpen's declaration. Only one is ever in the DOM
+     at a time. */
   const addToggleBtn = document.getElementById('flashAddToggleBtn');
   const savedSetsToggleBtn = document.getElementById('flashSavedSetsToggleBtn');
   if(genFinalBtn) genFinalBtn.onclick = ()=> generateFlashcardsFromFinalAttempts();
   if(genAllBtn) genAllBtn.onclick = ()=> generateFlashcardsFromOnlineProgress();
   if(toggleBtn) toggleBtn.onclick = ()=>{ flashPickOpen = !flashPickOpen; renderFlashcard(); };
-  const toggleLibPick = ()=>{ flashLibPickOpen = !flashLibPickOpen; renderFlashcard(); };
-  if(libPickToggleBtn) libPickToggleBtn.onclick = toggleLibPick;
-  if(addToggleBtn) addToggleBtn.onclick = toggleLibPick;
+  if(newCustomSetBtn) newCustomSetBtn.onclick = ()=> startNewCustomFlashcardSet();
+  if(addToggleBtn) addToggleBtn.onclick = ()=>{ flashLibPickOpen = !flashLibPickOpen; renderFlashcard(); };
   if(savedSetsToggleBtn) savedSetsToggleBtn.onclick = ()=>{
     flashSavedSetsOpen = !flashSavedSetsOpen;
     if(flashSavedSetsOpen && savedFlashcardSets === null) loadSavedFlashcardSets();
@@ -2370,7 +2396,12 @@ async function resumeOnlineAttempt(round, attempt, examData){
     if(r.selected_option!==null && r.selected_option!==undefined) answers[i] = r.selected_option;
     if(r.flagged) flags[i] = true;
   });
-  current = 0; submitted = false; currentAttempt = attempt.attempt_number;
+  /* Resume where they actually left off, not question 1 -- the first
+     unanswered question, or the last one if every question already has an
+     answer (reviewed everything but hadn't submitted yet). */
+  const firstUnanswered = rows.findIndex(r=>r.selected_option===null || r.selected_option===undefined);
+  current = firstUnanswered === -1 ? Math.max(0, rows.length-1) : firstUnanswered;
+  submitted = false; currentAttempt = attempt.attempt_number;
   examTitle.textContent = exam.title;
   examSub.textContent = (exam.subtitle ? exam.subtitle + " · " : "") + exam.questions.length + " questions";
   dotsPanel.style.display = '';
