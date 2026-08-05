@@ -285,6 +285,7 @@ let flashOnlineAttempts = null; // null = not yet loaded; [] | [{attemptId,examT
 let flashAttemptsLoading = false;
 let flashSelectedAttemptIds = new Set();
 let flashPickOpen = false;
+let flashAttemptExamFilter = null; // exam title currently expanded into an attempt checklist, mirrors flashLibraryTestIdx's dropdown-then-grid pattern for the question picker -- selections in flashSelectedAttemptIds persist across switching which exam is shown, same reason
 let flashLibraryTestIdx = null; // index into EXAM_LIBRARY currently expanded into a question grid, for the "build from specific questions" picker
 let flashLibrarySelectedKeys = new Set(); // `${testIdx}::${questionIdx}` -- persists across switching which test's grid is open, so a deck can span multiple tests
 let flashLibPickOpen = false; // the "pick specific questions" library picker -- own toggle, separate from the attempt picker (which only chooses among past attempts, not individual questions). Reached via "+ Add questions" (adds to the current deck) or "New custom set" (clears the deck first) -- same picker, two entry points depending on whether you're starting over or adding on
@@ -930,16 +931,62 @@ async function generateFlashcardsFromFinalAttempts(){
   renderFlashcard();
 }
 
-async function generateFlashcardsFromSelectedAttempts(attemptIds){
+/* The attempt-picker's counterpart to startNewCustomFlashcardSet + the
+   question picker's "Add" flow -- see confirmReplaceDeck for why this one
+   confirms first and addSelectedAttemptsToFlashcards (below) doesn't. */
+function newSetFromSelectedAttempts(attemptIds){
   if(!attemptIds.length){
     flashProgressMsg = { text: 'Select at least one attempt first.', ok:false };
     renderFlashcard();
     return;
   }
-  flashProgressMsg = { text: 'Generating flashcards from your progress…', ok:true };
+  confirmReplaceDeck('Start a new set from the selected attempts?', async ()=>{
+    flashProgressMsg = { text: 'Generating flashcards from your progress…', ok:true };
+    renderFlashcard();
+    try{
+      await buildFlashcardsFromAttemptIds(attemptIds, `from the ${attemptIds.length} attempt(s) selected`);
+    } catch(err){
+      flashProgressMsg = { text: err.message, ok:false };
+    }
+    renderFlashcard();
+  });
+}
+
+/* Same missed-question tally as buildFlashcardsFromAttemptIds, but adds
+   onto the current deck instead of replacing it -- the attempt-picker's
+   counterpart to addSelectedLibraryQuestionsToFlashcards. Deduped by
+   question text for the same reason as there: a question missed on two of
+   the selected attempts, or already hand-picked into the deck, shouldn't
+   appear twice. */
+async function addSelectedAttemptsToFlashcards(attemptIds){
+  if(!attemptIds.length){
+    flashProgressMsg = { text: 'Select at least one attempt first.', ok:false };
+    renderFlashcard();
+    return;
+  }
+  flashProgressMsg = { text: 'Adding from selected attempts…', ok:true };
   renderFlashcard();
   try{
-    await buildFlashcardsFromAttemptIds(attemptIds, `from the ${attemptIds.length} attempt(s) selected`);
+    const rows = await fetchAllByIn('exam_attempt_answers', 'attempt_id', attemptIds, '*');
+    const existingKeys = new Set(flashcards.map(c=>c.text.trim().toLowerCase()));
+    const picked = [];
+    rows.forEach(r=>{
+      if(r.selected_option===null || r.selected_option===undefined) return;
+      if(r.selected_option === r.correct_option) return;
+      const key = r.question_text.trim().toLowerCase();
+      if(existingKeys.has(key)) return;
+      existingKeys.add(key);
+      picked.push({ text: r.question_text, options: r.options, correct: r.correct_option });
+    });
+    if(!picked.length){
+      flashProgressMsg = { text: 'No new missed questions to add — everything from those attempts is already in this deck.', ok:false };
+    } else {
+      flashcards = flashcards.concat(picked);
+      shuffleArrayInPlace(flashcards);
+      flashIndex = 0;
+      flashSelectedOption = null;
+      flashProgressMsg = { text: `Added ${picked.length} card(s) — ${flashcards.length} total.`, ok:true };
+    }
   } catch(err){
     flashProgressMsg = { text: err.message, ok:false };
   }
@@ -965,42 +1012,52 @@ function renderOnlineFlashGeneratorHtml(){
       <button class="btn btn-primary" id="flashGenerateFinalBtn">Final Attempts Only</button>
       <button class="btn btn-primary" id="flashGenerateAllBtn">All Attempts</button>
     `;
+    /* Dropdown-then-checklist, same shape as the question picker's
+       dropdown-then-grid (renderFlashLibraryPickerInnerHtml) -- pick one
+       exam at a time instead of every exam's attempts sitting expanded on
+       screen at once. Selections persist across switching exams, same as
+       flashLibrarySelectedKeys does there. */
     const byExam = new Map();
     flashOnlineAttempts.forEach(a=>{
       if(!byExam.has(a.examTitle)) byExam.set(a.examTitle, []);
       byExam.get(a.examTitle).push(a);
     });
-    const groupsHtml = Array.from(byExam, ([examTitle, atts])=>{
-      const allChecked = atts.every(a=>flashSelectedAttemptIds.has(a.attemptId));
-      const noneChecked = atts.every(a=>!flashSelectedAttemptIds.has(a.attemptId));
-      const attemptRows = atts.map(a=>{
-        const scopeLabel = a.scope==='full' ? 'full exam' : 'missed-only retake';
-        return `
-          <label style="display:flex;align-items:center;gap:8px;padding:3px 0 3px 26px;font-family:system-ui,sans-serif;font-size:.87rem;">
-            <input type="checkbox" data-flash-attempt="${escapeHtml(a.attemptId)}" ${flashSelectedAttemptIds.has(a.attemptId)?'checked':''}>
-            Round ${escapeHtml(String(a.roundNumber))}, Attempt ${escapeHtml(String(a.attemptNumber))} (${scopeLabel}) — ${a.correctCount}/${a.totalQuestions}
-          </label>
-        `;
-      }).join('');
-      return `
-        <div style="margin-bottom:4px;">
-          <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-family:system-ui,sans-serif;font-size:.92rem;font-weight:600;">
-            <input type="checkbox" data-flash-exam-group="${escapeHtml(examTitle)}" ${allChecked?'checked':''} data-indeterminate="${!allChecked && !noneChecked}">
-            ${escapeHtml(examTitle)}
-          </label>
-          ${attemptRows}
+    const examOptions = Array.from(byExam, ([examTitle, atts])=>{
+      const selectedCount = atts.filter(a=>flashSelectedAttemptIds.has(a.attemptId)).length;
+      return `<option value="${escapeHtml(examTitle)}" ${flashAttemptExamFilter===examTitle?'selected':''}>${escapeHtml(examTitle)} (${atts.length})${selectedCount ? ` — ${selectedCount} selected` : ''}</option>`;
+    }).join('');
+    let attemptListHtml = '';
+    if(flashAttemptExamFilter && byExam.has(flashAttemptExamFilter)){
+      const atts = byExam.get(flashAttemptExamFilter);
+      attemptListHtml = `
+        <div style="margin-top:12px;">
+          ${atts.map(a=>{
+            const scopeLabel = a.scope==='full' ? 'full exam' : 'missed-only retake';
+            return `
+              <label style="display:flex;align-items:center;gap:8px;padding:3px 0;font-family:system-ui,sans-serif;font-size:.87rem;">
+                <input type="checkbox" data-flash-attempt="${escapeHtml(a.attemptId)}" ${flashSelectedAttemptIds.has(a.attemptId)?'checked':''}>
+                Round ${escapeHtml(String(a.roundNumber))}, Attempt ${escapeHtml(String(a.attemptNumber))} (${scopeLabel}) — ${a.correctCount}/${a.totalQuestions}
+              </label>
+            `;
+          }).join('')}
+        </div>
+        <div style="margin-top:8px;display:flex;gap:14px;">
+          <button class="link-btn" id="flashAttemptSelectAllBtn" type="button">Select all ${atts.length}</button>
+          <button class="link-btn" id="flashAttemptClearExamBtn" type="button">Clear this exam's picks</button>
         </div>
       `;
-    }).join('');
+    }
     attemptPickHtml = `
-      <div class="format-help">Pick specific past attempts to pull their missed questions from.</div>
-      <div style="margin:10px 0 8px;display:flex;gap:14px;">
-        <button class="link-btn" id="flashSelectAllBtn" type="button">Select all</button>
-        <button class="link-btn" id="flashSelectNoneBtn" type="button">Clear</button>
-      </div>
-      ${groupsHtml}
-      <div style="margin-top:10px;">
-        <button class="btn btn-ghost" id="flashGenerateSelectedBtn">Generate from Selected (${flashSelectedAttemptIds.size})</button>
+      <div class="format-help">Pick a test, then choose which of its past attempts to pull missed questions from.</div>
+      <select id="flashAttemptExamSelect" style="margin-top:10px;padding:8px 12px;border-radius:8px;border:1px solid var(--line);font-family:system-ui,sans-serif;font-size:.88rem;">
+        <option value="">Choose a test…</option>
+        ${examOptions}
+      </select>
+      ${attemptListHtml}
+      <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+        <button class="btn btn-primary" id="flashAttemptAddBtn" type="button" ${flashSelectedAttemptIds.size ? '' : 'disabled'}>➕ Add ${flashSelectedAttemptIds.size} Selected to Flashcards</button>
+        <button class="btn btn-ghost" id="flashAttemptNewSetBtn" type="button" ${flashSelectedAttemptIds.size ? '' : 'disabled'}>🆕 New Set from ${flashSelectedAttemptIds.size} Selected</button>
+        ${flashSelectedAttemptIds.size ? `<button class="link-btn" id="flashAttemptClearAllBtn" type="button">Clear all picks</button>` : ''}
       </div>
     `;
   } else {
@@ -1037,7 +1094,7 @@ function renderOnlineFlashGeneratorHtml(){
   return `
     <div class="panel subsection">
       <h2>Generate flashcards from your progress</h2>
-      <div class="format-help">Ways to build a set: <strong>Final Attempts Only</strong> uses just your most recent attempt in each round — what you're still missing right now. <strong>All Attempts</strong> pulls every question you've ever missed, on any attempt, across every round (most-missed first) — the same question can count more than once if you missed it on an earlier retake. <strong>Pick specific attempts</strong> lets you choose which past attempts to pull from yourself. <strong>New custom set</strong> clears the deck and lets you hand-pick individual questions from any test, whether or not you've taken it. <strong>My Saved Sets</strong> reloads a set you named and saved earlier — from any device.</div>
+      <div class="format-help">Ways to build a set: <strong>Final Attempts Only</strong> uses just your most recent attempt in each round — what you're still missing right now. <strong>All Attempts</strong> pulls every question you've ever missed, on any attempt, across every round (most-missed first) — the same question can count more than once if you missed it on an earlier retake. <strong>Pick specific attempts</strong> lets you choose which past attempts to pull from, then either add them onto your current deck or start a fresh set from them. <strong>New custom set</strong> clears the deck and lets you hand-pick individual questions from any test, whether or not you've taken it. <strong>My Saved Sets</strong> reloads a set you named and saved earlier — from any device.</div>
       ${inner}
     </div>
   `;
@@ -1298,13 +1355,24 @@ function removeCurrentFlashcard(){
   renderFlashcard();
 }
 
+/* Shared "about to replace the whole deck" guard, used by both "New custom
+   set" and "New Set from Selected" (attempts) -- skips the confirmation
+   when there's nothing to lose, otherwise warns before wiping an unsaved
+   deck (a saved set is safe either way: it stays saved server-side, just
+   no longer the active study deck). */
+function confirmReplaceDeck(question, onConfirmed){
+  if(!flashcards.length){ onConfirmed(); return; }
+  const warning = currentSetId
+    ? `${question} This clears "${currentSetName}" from the study view — it stays saved, reload it later from My Saved Sets.`
+    : `${question} This clears the current unsaved deck. Save it first if you want to keep it.`;
+  showConfirmDialog(warning, onConfirmed, 'Continue', true);
+}
+
 /* The one-click "build from scratch" action: clears whatever deck is
    currently loaded and opens the hand-pick-questions panel on an empty
-   slate. Confirms first if there's anything to lose -- a saved set is safe
-   either way (it stays saved, just no longer the active study deck), but
-   an unsaved deck's cards would be gone for good. */
+   slate. */
 function startNewCustomFlashcardSet(){
-  const startFresh = ()=>{
+  confirmReplaceDeck('Start a new custom set?', ()=>{
     flashcards = [];
     flashIndex = 0;
     flashSelectedOption = null;
@@ -1316,21 +1384,19 @@ function startNewCustomFlashcardSet(){
     flashLibPickOpen = true;
     flashProgressMsg = null;
     renderFlashcard();
-  };
-  if(!flashcards.length){ startFresh(); return; }
-  const warning = currentSetId
-    ? `Start a new custom set? This clears "${currentSetName}" from the study view — it stays saved, reload it later from My Saved Sets.`
-    : `Start a new custom set? This clears the current unsaved deck. Save it first if you want to keep it.`;
-  showConfirmDialog(warning, startFresh, 'Start New', true);
+  });
 }
 
 function bindFlashGeneratorHandlers(){
   const genFinalBtn = document.getElementById('flashGenerateFinalBtn');
   const genAllBtn = document.getElementById('flashGenerateAllBtn');
   const toggleBtn = document.getElementById('flashTogglePickBtn');
-  const selAllBtn = document.getElementById('flashSelectAllBtn');
-  const selNoneBtn = document.getElementById('flashSelectNoneBtn');
-  const genSelectedBtn = document.getElementById('flashGenerateSelectedBtn');
+  const attemptExamSelect = document.getElementById('flashAttemptExamSelect');
+  const attemptSelectAllBtn = document.getElementById('flashAttemptSelectAllBtn');
+  const attemptClearExamBtn = document.getElementById('flashAttemptClearExamBtn');
+  const attemptClearAllBtn = document.getElementById('flashAttemptClearAllBtn');
+  const attemptAddBtn = document.getElementById('flashAttemptAddBtn');
+  const attemptNewSetBtn = document.getElementById('flashAttemptNewSetBtn');
   const newCustomSetBtn = document.getElementById('flashNewCustomSetBtn');
   /* Two possible entry points for the same "pick specific questions" panel
      -- flashNewCustomSetBtn (clears the deck first, then opens it) and
@@ -1361,24 +1427,23 @@ function bindFlashGeneratorHandlers(){
       if(set) deleteSavedFlashcardSet(set);
     };
   });
-  if(selAllBtn) selAllBtn.onclick = ()=>{ flashSelectedAttemptIds = new Set((flashOnlineAttempts||[]).map(a=>a.attemptId)); renderFlashcard(); };
-  if(selNoneBtn) selNoneBtn.onclick = ()=>{ flashSelectedAttemptIds = new Set(); renderFlashcard(); };
-  if(genSelectedBtn) genSelectedBtn.onclick = ()=> generateFlashcardsFromSelectedAttempts(Array.from(flashSelectedAttemptIds));
+  if(attemptExamSelect) attemptExamSelect.onchange = ()=>{ flashAttemptExamFilter = attemptExamSelect.value || null; renderFlashcard(); };
+  if(attemptSelectAllBtn) attemptSelectAllBtn.onclick = ()=>{
+    (flashOnlineAttempts||[]).filter(a=>a.examTitle===flashAttemptExamFilter).forEach(a=>flashSelectedAttemptIds.add(a.attemptId));
+    renderFlashcard();
+  };
+  if(attemptClearExamBtn) attemptClearExamBtn.onclick = ()=>{
+    (flashOnlineAttempts||[]).filter(a=>a.examTitle===flashAttemptExamFilter).forEach(a=>flashSelectedAttemptIds.delete(a.attemptId));
+    renderFlashcard();
+  };
+  if(attemptClearAllBtn) attemptClearAllBtn.onclick = ()=>{ flashSelectedAttemptIds = new Set(); renderFlashcard(); };
+  if(attemptAddBtn) attemptAddBtn.onclick = ()=> addSelectedAttemptsToFlashcards(Array.from(flashSelectedAttemptIds));
+  if(attemptNewSetBtn) attemptNewSetBtn.onclick = ()=> newSetFromSelectedAttempts(Array.from(flashSelectedAttemptIds));
   flashPanel.querySelectorAll('[data-flash-attempt]').forEach(cb=>{
     cb.onchange = ()=>{
       const id = cb.dataset.flashAttempt;
       if(cb.checked) flashSelectedAttemptIds.add(id); else flashSelectedAttemptIds.delete(id);
-      renderFlashcard(); // re-render so the group header checkbox reflects the new state
-    };
-  });
-  flashPanel.querySelectorAll('[data-flash-exam-group]').forEach(cb=>{
-    if(cb.dataset.indeterminate === 'true') cb.indeterminate = true;
-    cb.onchange = ()=>{
-      const examTitle = cb.dataset.flashExamGroup;
-      const groupAttempts = (flashOnlineAttempts||[]).filter(a=>a.examTitle===examTitle);
-      if(cb.checked) groupAttempts.forEach(a=>flashSelectedAttemptIds.add(a.attemptId));
-      else groupAttempts.forEach(a=>flashSelectedAttemptIds.delete(a.attemptId));
-      renderFlashcard();
+      renderFlashcard(); // re-render so the exam dropdown's "N selected" label and the Add/New button counts stay current
     };
   });
 }
