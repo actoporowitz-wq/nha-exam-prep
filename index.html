@@ -1694,7 +1694,18 @@ function logClientError(message, stack){
   }catch(e){ /* logging must never break the app it's trying to observe */ }
 }
 window.addEventListener('error', (e)=>{
-  logClientError(e.message, e.error && e.error.stack);
+  /* e.error.stack is the useful case; when it's missing (a non-Error
+     thrown, or a same-origin error some browsers don't attach a stack to)
+     fall back to file:line:col from the ErrorEvent itself -- at least some
+     location info. Note the browser blanks BOTH of these the same way for
+     a genuinely cross-origin script error (message "Script error.", no
+     filename either) -- that's a browser security behavior protecting
+     third-party script internals, not something client-side logging can
+     recover from, and it's why several entries in client_errors are just
+     "Script error." with nothing else: most likely the Turnstile widget
+     script (a different origin), not this app's own code. */
+  const stack = (e.error && e.error.stack) || (e.filename ? `${e.filename}:${e.lineno}:${e.colno}` : null);
+  logClientError(e.message, stack);
 });
 window.addEventListener('unhandledrejection', (e)=>{
   const reason = e.reason;
@@ -2967,7 +2978,11 @@ async function renderAdminView(){
          things to get "worse" than before. */
       const signIns = userEvents.filter(e=>e.event_type==='sign_in' && (!deviceDismissal || e.created_at > deviceDismissal.dismissed_at));
       const distinctIpsWeek = new Set(signIns.filter(e=>e.ip_address).map(e=>e.ip_address));
-      const deviceFlag = distinctIpsWeek.size > 2;
+      /* A permanent dismissal suppresses the flag outright, regardless of
+         fresh activity -- unlike a plain dismissal, which only clears the
+         slate as of dismissed_at and re-triggers once new activity crosses
+         the threshold again (see the comment above). */
+      const deviceFlag = !(deviceDismissal && deviceDismissal.permanent) && distinctIpsWeek.size > 2;
       /* Breakdown by device_type for the admin-facing label only -- the
          flag itself still fires on total distinct IPs above, regardless
          of type mix, since two computers plus one phone is just as much
@@ -2988,12 +3003,12 @@ async function renderAdminView(){
       const perIpCount = {};
       fetches.forEach(e=>{ if(e.ip_address) perIpCount[e.ip_address] = (perIpCount[e.ip_address]||0) + 1; });
       const maxSingleIpFetches = Object.values(perIpCount).reduce((m,c)=>Math.max(m,c), 0);
-      const rateFlag = p.role !== 'admin' && (distinctIpsDay.size > 1 || maxSingleIpFetches > 15);
+      const rateFlag = !(rateDismissal && rateDismissal.permanent) && p.role !== 'admin' && (distinctIpsDay.size > 1 || maxSingleIpFetches > 15);
 
       flagsByUser[p.user_id] = {
-        deviceFlag, distinctIpCountWeek: distinctIpsWeek.size, deviceDismissed: !!deviceDismissal,
+        deviceFlag, distinctIpCountWeek: distinctIpsWeek.size, deviceDismissed: !!deviceDismissal, deviceDismissedPermanent: !!(deviceDismissal && deviceDismissal.permanent),
         phoneIpCountWeek: phoneIpsWeek.size, computerIpCountWeek: computerIpsWeek.size, otherIpCountWeek: otherIpsWeek.size,
-        rateFlag, fetchesLast24h: fetches.length, distinctIpCountDay: distinctIpsDay.size, rateDismissed: !!rateDismissal
+        rateFlag, fetchesLast24h: fetches.length, distinctIpCountDay: distinctIpsDay.size, rateDismissed: !!rateDismissal, rateDismissedPermanent: !!(rateDismissal && rateDismissal.permanent)
       };
     });
     adminData = { profiles, flagsByUser };
@@ -3078,12 +3093,16 @@ function renderAdminAccountsView(){
     const isProtected = p.email === 'ahrontoporowitz@gmail.com';
     const badges = [];
     if(flags.deviceFlag){
-      badges.push(`<span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">Shared across ${describeDeviceBreakdown(flags)}</span><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="device">Dismiss</button>`);
+      badges.push(`<span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">Shared across ${describeDeviceBreakdown(flags)}</span><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="device">Dismiss</button><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="device" data-dismiss-permanent="true">Dismiss permanently</button>`);
+    } else if(flags.deviceDismissedPermanent){
+      badges.push(`<span class="lib-badge" style="background:var(--chip);">Permanently allowed — device</span><button class="link-btn" data-undismiss-user="${p.user_id}" data-undismiss-type="device">Un-dismiss</button>`);
     } else if(flags.deviceDismissed){
       badges.push(`<span class="lib-badge" style="background:var(--chip);">Reviewed — device</span><button class="link-btn" data-undismiss-user="${p.user_id}" data-undismiss-type="device">Un-dismiss</button>`);
     }
     if(flags.rateFlag){
-      badges.push(`<span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">${flags.fetchesLast24h} library fetches/24h</span><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="rate">Dismiss</button>`);
+      badges.push(`<span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">${flags.fetchesLast24h} library fetches/24h</span><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="rate">Dismiss</button><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="rate" data-dismiss-permanent="true">Dismiss permanently</button>`);
+    } else if(flags.rateDismissedPermanent){
+      badges.push(`<span class="lib-badge" style="background:var(--chip);">Permanently allowed — rate</span><button class="link-btn" data-undismiss-user="${p.user_id}" data-undismiss-type="rate">Un-dismiss</button>`);
     } else if(flags.rateDismissed){
       badges.push(`<span class="lib-badge" style="background:var(--chip);">Reviewed — rate</span><button class="link-btn" data-undismiss-user="${p.user_id}" data-undismiss-type="rate">Un-dismiss</button>`);
     }
@@ -3171,7 +3190,11 @@ function renderAdminAccountsView(){
     btn.onclick = async ()=>{
       btn.disabled = true;
       try{
-        const { error } = await supabaseClient.rpc('admin_dismiss_flag', { target_user_id: btn.dataset.dismissUser, flag_type: btn.dataset.dismissType });
+        const { error } = await supabaseClient.rpc('admin_dismiss_flag', {
+          target_user_id: btn.dataset.dismissUser,
+          flag_type: btn.dataset.dismissType,
+          permanent: btn.dataset.dismissPermanent === 'true'
+        });
         if(error) throw error;
         await renderAdminView();
       } catch(err){
