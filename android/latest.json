@@ -1,0 +1,6 @@
+{
+  "versionCode": 1,
+  "versionName": "1.0.0",
+  "apkUrl": "https://nha-exam-prep.pages.dev/android/NHA-Exam-Prep.apk",
+  "releaseNotes": "Initial release: exam library, exam-taking, flashcards, progress tracking, and admin tools."
+}
