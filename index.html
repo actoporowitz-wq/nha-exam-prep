@@ -3098,13 +3098,14 @@ function renderAdminAccountsView(){
     } else if(flags.rateDismissed){
       badges.push(`<span class="lib-badge" style="background:var(--chip);">Reviewed — rate</span><button class="link-btn" data-undismiss-user="${p.user_id}" data-undismiss-type="rate">Un-dismiss</button>`);
     }
-    /* "Dismiss all" only earns its place in the UI when there are two
-       separate flags to clear in one click -- with just one active, it'd
-       be a redundant twin of the per-type Dismiss button above. Same
-       non-blanket semantics as a single Dismiss: clears the slate now,
-       can re-trigger later on genuinely new evidence. */
-    if(flags.deviceFlag && flags.rateFlag){
-      badges.push(`<button class="link-btn" data-dismiss-all-user="${p.user_id}">Dismiss all flags</button>`);
+    /* "Dismiss permanently" clears every flag currently active for this
+       account (device + rate together, whichever are flagged -- calling
+       dismiss on a type that isn't flagged is harmless) in one click. Same
+       non-blanket semantics as a single Dismiss: clears the slate now, can
+       re-trigger later on genuinely new evidence -- "permanently" describes
+       clearing everything showing right now, not future immunity. */
+    if(flags.deviceFlag || flags.rateFlag){
+      badges.push(`<button class="link-btn" data-dismiss-all-user="${p.user_id}">Dismiss permanently</button>`);
     }
     return `
       <div class="lib-row">
