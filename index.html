@@ -2978,11 +2978,7 @@ async function renderAdminView(){
          things to get "worse" than before. */
       const signIns = userEvents.filter(e=>e.event_type==='sign_in' && (!deviceDismissal || e.created_at > deviceDismissal.dismissed_at));
       const distinctIpsWeek = new Set(signIns.filter(e=>e.ip_address).map(e=>e.ip_address));
-      /* A permanent dismissal suppresses the flag outright, regardless of
-         fresh activity -- unlike a plain dismissal, which only clears the
-         slate as of dismissed_at and re-triggers once new activity crosses
-         the threshold again (see the comment above). */
-      const deviceFlag = !(deviceDismissal && deviceDismissal.permanent) && distinctIpsWeek.size > 2;
+      const deviceFlag = distinctIpsWeek.size > 2;
       /* Breakdown by device_type for the admin-facing label only -- the
          flag itself still fires on total distinct IPs above, regardless
          of type mix, since two computers plus one phone is just as much
@@ -3003,12 +2999,12 @@ async function renderAdminView(){
       const perIpCount = {};
       fetches.forEach(e=>{ if(e.ip_address) perIpCount[e.ip_address] = (perIpCount[e.ip_address]||0) + 1; });
       const maxSingleIpFetches = Object.values(perIpCount).reduce((m,c)=>Math.max(m,c), 0);
-      const rateFlag = !(rateDismissal && rateDismissal.permanent) && p.role !== 'admin' && (distinctIpsDay.size > 1 || maxSingleIpFetches > 15);
+      const rateFlag = p.role !== 'admin' && (distinctIpsDay.size > 1 || maxSingleIpFetches > 15);
 
       flagsByUser[p.user_id] = {
-        deviceFlag, distinctIpCountWeek: distinctIpsWeek.size, deviceDismissed: !!deviceDismissal, deviceDismissedPermanent: !!(deviceDismissal && deviceDismissal.permanent),
+        deviceFlag, distinctIpCountWeek: distinctIpsWeek.size, deviceDismissed: !!deviceDismissal,
         phoneIpCountWeek: phoneIpsWeek.size, computerIpCountWeek: computerIpsWeek.size, otherIpCountWeek: otherIpsWeek.size,
-        rateFlag, fetchesLast24h: fetches.length, distinctIpCountDay: distinctIpsDay.size, rateDismissed: !!rateDismissal, rateDismissedPermanent: !!(rateDismissal && rateDismissal.permanent)
+        rateFlag, fetchesLast24h: fetches.length, distinctIpCountDay: distinctIpsDay.size, rateDismissed: !!rateDismissal
       };
     });
     adminData = { profiles, flagsByUser };
@@ -3093,18 +3089,22 @@ function renderAdminAccountsView(){
     const isProtected = p.email === 'ahrontoporowitz@gmail.com';
     const badges = [];
     if(flags.deviceFlag){
-      badges.push(`<span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">Shared across ${describeDeviceBreakdown(flags)}</span><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="device">Dismiss</button><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="device" data-dismiss-permanent="true">Dismiss permanently</button>`);
-    } else if(flags.deviceDismissedPermanent){
-      badges.push(`<span class="lib-badge" style="background:var(--chip);">Permanently allowed — device</span><button class="link-btn" data-undismiss-user="${p.user_id}" data-undismiss-type="device" data-undismiss-permanent="true" data-undismiss-email="${escapeHtml(p.email)}">Remove exemption</button>`);
+      badges.push(`<span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">Shared across ${describeDeviceBreakdown(flags)}</span><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="device">Dismiss</button>`);
     } else if(flags.deviceDismissed){
       badges.push(`<span class="lib-badge" style="background:var(--chip);">Reviewed — device</span><button class="link-btn" data-undismiss-user="${p.user_id}" data-undismiss-type="device">Un-dismiss</button>`);
     }
     if(flags.rateFlag){
-      badges.push(`<span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">${flags.fetchesLast24h} library fetches/24h</span><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="rate">Dismiss</button><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="rate" data-dismiss-permanent="true">Dismiss permanently</button>`);
-    } else if(flags.rateDismissedPermanent){
-      badges.push(`<span class="lib-badge" style="background:var(--chip);">Permanently allowed — rate</span><button class="link-btn" data-undismiss-user="${p.user_id}" data-undismiss-type="rate" data-undismiss-permanent="true" data-undismiss-email="${escapeHtml(p.email)}">Remove exemption</button>`);
+      badges.push(`<span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">${flags.fetchesLast24h} library fetches/24h</span><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="rate">Dismiss</button>`);
     } else if(flags.rateDismissed){
       badges.push(`<span class="lib-badge" style="background:var(--chip);">Reviewed — rate</span><button class="link-btn" data-undismiss-user="${p.user_id}" data-undismiss-type="rate">Un-dismiss</button>`);
+    }
+    /* "Dismiss all" only earns its place in the UI when there are two
+       separate flags to clear in one click -- with just one active, it'd
+       be a redundant twin of the per-type Dismiss button above. Same
+       non-blanket semantics as a single Dismiss: clears the slate now,
+       can re-trigger later on genuinely new evidence. */
+    if(flags.deviceFlag && flags.rateFlag){
+      badges.push(`<button class="link-btn" data-dismiss-all-user="${p.user_id}">Dismiss all flags</button>`);
     }
     return `
       <div class="lib-row">
@@ -3192,8 +3192,7 @@ function renderAdminAccountsView(){
       try{
         const { error } = await supabaseClient.rpc('admin_dismiss_flag', {
           target_user_id: btn.dataset.dismissUser,
-          flag_type: btn.dataset.dismissType,
-          permanent: btn.dataset.dismissPermanent === 'true'
+          flag_type: btn.dataset.dismissType
         });
         if(error) throw error;
         await renderAdminView();
@@ -3203,15 +3202,24 @@ function renderAdminAccountsView(){
       }
     };
   });
+  sub.querySelectorAll('button[data-dismiss-all-user]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      btn.disabled = true;
+      try{
+        const uid = btn.dataset.dismissAllUser;
+        const { error: deviceErr } = await supabaseClient.rpc('admin_dismiss_flag', { target_user_id: uid, flag_type: 'device' });
+        if(deviceErr) throw deviceErr;
+        const { error: rateErr } = await supabaseClient.rpc('admin_dismiss_flag', { target_user_id: uid, flag_type: 'rate' });
+        if(rateErr) throw rateErr;
+        await renderAdminView();
+      } catch(err){
+        alert('Could not dismiss: ' + err.message);
+        btn.disabled = false;
+      }
+    };
+  });
   sub.querySelectorAll('button[data-undismiss-user]').forEach(btn=>{
     btn.onclick = async ()=>{
-      /* A permanent exemption is a deliberate "never flag this again" call —
-         unlike a plain dismiss's one-click undo, removing it needs an
-         explicit confirmation so it isn't reversed by an accidental click. */
-      if(btn.dataset.undismissPermanent === 'true'){
-        const ok = confirm(`Remove the permanent exemption for ${btn.dataset.undismissEmail}? This account can be flagged again in the future.`);
-        if(!ok) return;
-      }
       btn.disabled = true;
       try{
         const { error } = await supabaseClient.rpc('admin_undismiss_flag', { target_user_id: btn.dataset.undismissUser, flag_type: btn.dataset.undismissType });
