@@ -711,7 +711,7 @@ function renderResults(){
   const today = new Date().toLocaleDateString();
 
   resultsPanel.innerHTML = `
-    <h2>Results</h2>
+    <h2>Results — ${escapeHtml(exam.title)}${exam.subtitle ? ` <span class="score-sub" style="font-weight:normal;">(${escapeHtml(exam.subtitle)})</span>` : ''}</h2>
     <div class="score-big">${pct}%</div>
     <div class="score-sub">${masteredSoFar} of ${originalTotal} mastered${isRetake ? ` · ${correctCount}/${total} correct this attempt` : ''} · ${today} · Attempt #${currentAttempt}</div>
     <div class="result-actions">
@@ -3095,14 +3095,14 @@ function renderAdminAccountsView(){
     if(flags.deviceFlag){
       badges.push(`<span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">Shared across ${describeDeviceBreakdown(flags)}</span><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="device">Dismiss</button><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="device" data-dismiss-permanent="true">Dismiss permanently</button>`);
     } else if(flags.deviceDismissedPermanent){
-      badges.push(`<span class="lib-badge" style="background:var(--chip);">Permanently allowed — device</span><button class="link-btn" data-undismiss-user="${p.user_id}" data-undismiss-type="device">Un-dismiss</button>`);
+      badges.push(`<span class="lib-badge" style="background:var(--chip);">Permanently allowed — device</span><button class="link-btn" data-undismiss-user="${p.user_id}" data-undismiss-type="device" data-undismiss-permanent="true" data-undismiss-email="${escapeHtml(p.email)}">Remove exemption</button>`);
     } else if(flags.deviceDismissed){
       badges.push(`<span class="lib-badge" style="background:var(--chip);">Reviewed — device</span><button class="link-btn" data-undismiss-user="${p.user_id}" data-undismiss-type="device">Un-dismiss</button>`);
     }
     if(flags.rateFlag){
       badges.push(`<span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">${flags.fetchesLast24h} library fetches/24h</span><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="rate">Dismiss</button><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="rate" data-dismiss-permanent="true">Dismiss permanently</button>`);
     } else if(flags.rateDismissedPermanent){
-      badges.push(`<span class="lib-badge" style="background:var(--chip);">Permanently allowed — rate</span><button class="link-btn" data-undismiss-user="${p.user_id}" data-undismiss-type="rate">Un-dismiss</button>`);
+      badges.push(`<span class="lib-badge" style="background:var(--chip);">Permanently allowed — rate</span><button class="link-btn" data-undismiss-user="${p.user_id}" data-undismiss-type="rate" data-undismiss-permanent="true" data-undismiss-email="${escapeHtml(p.email)}">Remove exemption</button>`);
     } else if(flags.rateDismissed){
       badges.push(`<span class="lib-badge" style="background:var(--chip);">Reviewed — rate</span><button class="link-btn" data-undismiss-user="${p.user_id}" data-undismiss-type="rate">Un-dismiss</button>`);
     }
@@ -3205,6 +3205,13 @@ function renderAdminAccountsView(){
   });
   sub.querySelectorAll('button[data-undismiss-user]').forEach(btn=>{
     btn.onclick = async ()=>{
+      /* A permanent exemption is a deliberate "never flag this again" call —
+         unlike a plain dismiss's one-click undo, removing it needs an
+         explicit confirmation so it isn't reversed by an accidental click. */
+      if(btn.dataset.undismissPermanent === 'true'){
+        const ok = confirm(`Remove the permanent exemption for ${btn.dataset.undismissEmail}? This account can be flagged again in the future.`);
+        if(!ok) return;
+      }
       btn.disabled = true;
       try{
         const { error } = await supabaseClient.rpc('admin_undismiss_flag', { target_user_id: btn.dataset.undismissUser, flag_type: btn.dataset.undismissType });
