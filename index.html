@@ -3002,9 +3002,15 @@ async function renderAdminView(){
       const rateFlag = p.role !== 'admin' && (distinctIpsDay.size > 1 || maxSingleIpFetches > 15);
 
       flagsByUser[p.user_id] = {
-        deviceFlag, distinctIpCountWeek: distinctIpsWeek.size, deviceDismissed: !!deviceDismissal,
+        /* `permanent` never gates deviceFlag/rateFlag above -- it only
+           controls whether the dismissed-state UI shows a "Reviewed" badge
+           with an Un-dismiss link (plain Dismiss) or nothing at all
+           (Dismiss permanently -- no lingering control to accidentally
+           reverse). Re-triggering on fresh evidence works identically
+           either way. */
+        deviceFlag, distinctIpCountWeek: distinctIpsWeek.size, deviceDismissed: !!deviceDismissal, deviceDismissedPermanent: !!(deviceDismissal && deviceDismissal.permanent),
         phoneIpCountWeek: phoneIpsWeek.size, computerIpCountWeek: computerIpsWeek.size, otherIpCountWeek: otherIpsWeek.size,
-        rateFlag, fetchesLast24h: fetches.length, distinctIpCountDay: distinctIpsDay.size, rateDismissed: !!rateDismissal
+        rateFlag, fetchesLast24h: fetches.length, distinctIpCountDay: distinctIpsDay.size, rateDismissed: !!rateDismissal, rateDismissedPermanent: !!(rateDismissal && rateDismissal.permanent)
       };
     });
     adminData = { profiles, flagsByUser };
@@ -3090,22 +3096,23 @@ function renderAdminAccountsView(){
     const badges = [];
     if(flags.deviceFlag){
       badges.push(`<span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">Shared across ${describeDeviceBreakdown(flags)}</span><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="device">Dismiss</button>`);
-    } else if(flags.deviceDismissed){
+    } else if(flags.deviceDismissed && !flags.deviceDismissedPermanent){
       badges.push(`<span class="lib-badge" style="background:var(--chip);">Reviewed — device</span><button class="link-btn" data-undismiss-user="${p.user_id}" data-undismiss-type="device">Un-dismiss</button>`);
     }
     if(flags.rateFlag){
       badges.push(`<span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">${flags.fetchesLast24h} library fetches/24h</span><button class="link-btn" data-dismiss-user="${p.user_id}" data-dismiss-type="rate">Dismiss</button>`);
-    } else if(flags.rateDismissed){
+    } else if(flags.rateDismissed && !flags.rateDismissedPermanent){
       badges.push(`<span class="lib-badge" style="background:var(--chip);">Reviewed — rate</span><button class="link-btn" data-undismiss-user="${p.user_id}" data-undismiss-type="rate">Un-dismiss</button>`);
     }
-    /* "Dismiss permanently" clears every flag currently active for this
-       account (device + rate together, whichever are flagged -- calling
-       dismiss on a type that isn't flagged is harmless) in one click. Same
-       non-blanket semantics as a single Dismiss: clears the slate now, can
-       re-trigger later on genuinely new evidence -- "permanently" describes
-       clearing everything showing right now, not future immunity. */
+    /* "Dismiss permanently" only targets whichever flags are *currently*
+       active (not a type that isn't flagged) and marks them permanent --
+       once dismissed this way, no "Reviewed" badge or Un-dismiss control
+       shows at all (see the branches above), so there's no casual way to
+       reverse it from the UI. It still doesn't change the underlying
+       detection logic: if the account genuinely triggers fresh evidence
+       later, the flag comes back exactly like a plain Dismiss would allow. */
     if(flags.deviceFlag || flags.rateFlag){
-      badges.push(`<button class="link-btn" data-dismiss-all-user="${p.user_id}">Dismiss permanently</button>`);
+      badges.push(`<button class="link-btn" data-dismiss-all-user="${p.user_id}" data-dismiss-all-device="${flags.deviceFlag}" data-dismiss-all-rate="${flags.rateFlag}">Dismiss permanently</button>`);
     }
     return `
       <div class="lib-row">
@@ -3208,10 +3215,14 @@ function renderAdminAccountsView(){
       btn.disabled = true;
       try{
         const uid = btn.dataset.dismissAllUser;
-        const { error: deviceErr } = await supabaseClient.rpc('admin_dismiss_flag', { target_user_id: uid, flag_type: 'device' });
-        if(deviceErr) throw deviceErr;
-        const { error: rateErr } = await supabaseClient.rpc('admin_dismiss_flag', { target_user_id: uid, flag_type: 'rate' });
-        if(rateErr) throw rateErr;
+        if(btn.dataset.dismissAllDevice === 'true'){
+          const { error } = await supabaseClient.rpc('admin_dismiss_flag', { target_user_id: uid, flag_type: 'device', permanent: true });
+          if(error) throw error;
+        }
+        if(btn.dataset.dismissAllRate === 'true'){
+          const { error } = await supabaseClient.rpc('admin_dismiss_flag', { target_user_id: uid, flag_type: 'rate', permanent: true });
+          if(error) throw error;
+        }
         await renderAdminView();
       } catch(err){
         alert('Could not dismiss: ' + err.message);
