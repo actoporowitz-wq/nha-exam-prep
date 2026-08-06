@@ -1,5 +1,5 @@
 {
-  "versionCode": 2002,
+  "versionCode": 2004,
   "versionName": "1.0.1",
   "apkUrl": "https://nha-exam-prep.pages.dev/android/NHA-Exam-Prep.apk",
   "releaseNotes": "Less intrusive CAPTCHA on sign-in, exam name shown on Results, and a redesigned flag-review workflow in Admin."
