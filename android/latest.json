@@ -1,6 +1,6 @@
 {
-  "versionCode": 2007,
-  "versionName": "1.0.4",
+  "versionCode": 2008,
+  "versionName": "1.0.5",
   "apkUrl": "https://nha-exam-prep.pages.dev/android/NHA-Exam-Prep.apk",
-  "releaseNotes": "New brand mark on the sign-in screen, dark-mode-ready colors across the core screens, and a branded splash screen instead of a blank white flash on launch."
+  "releaseNotes": "Dark mode now follows your system setting throughout the whole app, including Admin."
 }
