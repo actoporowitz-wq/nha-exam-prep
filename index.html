@@ -11,6 +11,30 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="NHA Exam Prep">
+<script>
+/* Sets data-theme before ANYTHING else runs or paints -- specifically
+   before the two network-fetched scripts right below this, which can
+   take a real, visible moment on a slow connection. Without this, the
+   boot-loading screen (#bootLoading, shown until applyAccessGate()
+   resolves) painted using whatever --bg the CSS's own default/
+   prefers-color-scheme rules gave it, then flipped to the user's actual
+   saved Day/Night/Auto choice once the full script at the bottom of the
+   body finally got around to calling initThemeMode() -- a real, visible
+   flash of the wrong background color on every single load, worse on a
+   slow mobile connection (the exact "load view" complaint this fixes).
+   Same technique most sites use to avoid a dark-mode flash: a tiny
+   synchronous inline script as early as possible in <head>, before any
+   external script or body content, doing only the one thing that has to
+   happen before first paint. The full initThemeMode() further down still
+   runs later to wire up the Day/Night/Auto buttons themselves (they
+   don't exist in the DOM yet at this point) -- this only sets the
+   attribute so CSS resolves the right colors from frame one. */
+(function(){
+  try{
+    document.documentElement.dataset.theme = localStorage.getItem('nha_theme_mode') || 'auto';
+  }catch(e){ /* localStorage unavailable -- falls through to the CSS's own default, no worse than before this fix existed */ }
+})();
+</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 <script>
@@ -446,6 +470,38 @@ if('serviceWorker' in navigator){
      in here means it's simply another child of the same fixed-position
      element, no separate positioning logic needed. */
   .nav-row-mid{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center;}
+  /* Real fix for buttons that don't fit side by side, not a breakpoint
+     patch. Plain flex-wrap's default behavior is: a button that doesn't
+     fit drops to its own new line at its OWN natural content width,
+     independently centered/left-aligned from whatever else is on that
+     line -- confirmed live at 320px, two flashcard nav buttons each
+     landed on separate lines at two different x-offsets, reading as
+     unrelated debris rather than a deliberate layout, exactly the
+     "buttons end up one on top of another" complaint. flex:1 1 auto +
+     min-width:0 on each child changes nothing when a button fits (stays
+     its natural size, side by side as before) -- but when a button
+     wraps alone onto a line with nothing else competing for space on
+     that line, flex-grow expands it to the FULL line width instead.
+     Clean, full-width stacked buttons with no viewport breakpoint
+     needed at all -- self-adapting to any width, any button count, any
+     label length. Same pattern .set-menu already used deliberately,
+     generalized here across every genuine multi-button action row. */
+  .nav-row-mid > *, .result-actions > *, .round-card-actions > *,
+  .flash-extra-actions > *, .recall-rate-row > *{
+    flex:1 1 auto;min-width:0;
+  }
+  .nav-row-mid > .link-btn, .flash-extra-actions > .link-btn,
+  .recall-rate-row > .recall-rate-btn{
+    justify-content:center;
+  }
+  /* General-purpose version of the same fix, for the many one-off inline-
+     style action rows scattered through render functions (attempt/
+     library picker "Add N Selected" rows, etc.) rather than adding a new
+     dedicated selector every time one is found. Drop class="btn-row" on
+     any container of 2+ buttons that might not all fit. */
+  .btn-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+  .btn-row > *{flex:1 1 auto;min-width:0;}
+  .btn-row > .link-btn{justify-content:center;}
   .btn{font-family:system-ui,sans-serif;border:none;border-radius:8px;padding:10px 18px;font-size:.92rem;font-weight:600;cursor:pointer;}
   .btn-primary{background:var(--accent);color:var(--accent-ink);}
   .btn-primary:disabled{background:#c7cfca;cursor:not-allowed;}
@@ -670,8 +726,18 @@ if('serviceWorker' in navigator){
      .mode-switch above but themed off the design tokens instead of fixed
      dark colors, since this one lives in the theme-adaptive main canvas
      (flashcards), not the always-dark sidebar/settings chrome. */
-  .study-mode-switch{display:inline-flex;background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:3px;margin-bottom:14px;}
-  .study-mode-switch button{background:none;border:none;color:var(--muted);font-family:var(--font-display);font-size:.78rem;font-weight:600;padding:7px 14px;border-radius:6px;cursor:pointer;}
+  /* flex:none keeps the whole pill from being squeezed narrower than its
+     content by its flex-row siblings (Flashcards home / Manage this set)
+     -- without it, a tight row lets the pill shrink until its own
+     buttons' text has nowhere to go but wrap mid-phrase ("Multiple" /
+     "Choice" on two lines), which a segmented control should never do:
+     the label is either fully visible or the whole control moves to its
+     own line, never breaks internally. white-space:nowrap on the button
+     labels is the other half -- guarantees that if the pill doesn't fit
+     it wraps as one whole unit (normal flex-wrap on its flex-row parent)
+     instead of surviving by breaking its own text apart. */
+  .study-mode-switch{display:inline-flex;flex:none;background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:3px;margin-bottom:14px;}
+  .study-mode-switch button{background:none;border:none;color:var(--muted);font-family:var(--font-display);font-size:.78rem;font-weight:600;padding:7px 14px;border-radius:6px;cursor:pointer;white-space:nowrap;}
   .study-mode-switch button.active{background:var(--accent);color:var(--accent-ink);}
 
   /* Recall-mode card content: question on the front (via the shared .qtext
@@ -861,6 +927,21 @@ if('serviceWorker' in navigator){
   .dialog-overlay{position:fixed;inset:0;background:rgba(6,8,12,.55);display:flex;align-items:center;justify-content:center;z-index:95;}
   .dialog-overlay[hidden]{display:none;}
   .dialog-card{background:var(--surface);border-radius:14px;padding:26px 28px;max-width:360px;width:90%;}
+  /* Dialog action rows (Cancel/Confirm, Start Fresh/Continue, etc.) --
+     unlike nav-row-mid/.btn-row above, these are deliberately compact and
+     right-aligned on desktop, not filling their container, so the same
+     flex-grow trick would visually stretch two small buttons across an
+     entire wide dialog card, an unwanted side effect here. Scoped to a
+     mobile-only breakpoint instead: stays exactly as before until the
+     buttons would genuinely stop fitting side by side on a narrow phone,
+     then becomes a full-width vertical stack in the same DOM order
+     rather than the default flex-wrap behavior (one button dropping to
+     its own line at its own width, off-center from the other). */
+  .dialog-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;}
+  @media (max-width:480px){
+    .dialog-actions{flex-direction:column;}
+    .dialog-actions > *{width:100%;box-sizing:border-box;}
+  }
 </style>
 </head>
 <body>
@@ -1753,12 +1834,18 @@ function renderQuestion(){
   document.getElementById('flagBtn').onclick = ()=>{ flags[current]=!flags[current]; syncOnlineAnswer(current); renderQuestion(); renderDots(); };
   /* Not destructive, no confirm needed -- every answer already syncs to
      Supabase as it's picked (syncOnlineAnswer), so there's nothing extra
-     to save here. This just leaves cleanly instead of relying on someone
-     to know that navigating away mid-exam is already safe; the "unfinished
-     attempt" dialog (Test Library) and Progress's "Continue" pick this
-     exact attempt back up later. */
+     to save here. Lands on Progress, not Library -- Library is a static
+     exam catalog (renderLibrary() just maps over EXAM_LIBRARY, it has no
+     idea an attempt is in progress), so landing there after "Pause & Save"
+     gave zero visible confirmation that anything happened; it looked
+     identical whether or not the pause "worked," and only a full page
+     reload later (which happens to re-fetch everything fresh) would
+     eventually surface the resumable round. Progress always refetches on
+     entry (see showView()) and now has a "Resume" banner right at the
+     top, so this is the one destination that actually shows "yes, this
+     was saved, here's how to pick it back up" without needing a reload. */
   const pauseBtn = document.getElementById('pauseExamBtn');
-  if(pauseBtn) pauseBtn.onclick = ()=> showView('library');
+  if(pauseBtn) pauseBtn.onclick = ()=> showView('progress');
   const submitBtn = document.getElementById('submitBtn');
   if(submitBtn) submitBtn.onclick = doSubmit;
   const endEarlyBtn = document.getElementById('endEarlyBtn');
@@ -1832,7 +1919,7 @@ function showConfirmDialog(message, onConfirm, confirmLabel, danger){
   overlay.innerHTML = `
     <div role="alertdialog" aria-modal="true" aria-label="${escapeHtml(confirmLabel || 'End Exam')}" aria-describedby="confirmDialogMsg" style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;max-width:360px;box-shadow:0 8px 30px rgba(0,0,0,.25);">
       <div id="confirmDialogMsg" style="font-size:.95rem;line-height:1.5;margin-bottom:18px;color:var(--ink);">${escapeHtml(message)}</div>
-      <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <div class="dialog-actions">
         <button id="confirmCancelBtn" class="dialog-btn" style="font-family:system-ui,sans-serif;border:1px solid var(--line);color:var(--ink);background:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:.88rem;">Cancel</button>
         <button id="confirmOkBtn" class="dialog-btn" style="font-family:system-ui,sans-serif;border:none;background:${okColor};color:var(--accent-ink);border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;font-size:.88rem;">${escapeHtml(confirmLabel || 'End Exam')}</button>
       </div>
@@ -2416,7 +2503,7 @@ function renderFlashAttemptPickerHtml(){
     <div class="format-help">Pick a test, then choose which of its past attempts to pull missed questions from.</div>
     <div style="margin-top:10px;">${renderDropdown({ id:'flashAttemptExam', ariaLabel:'Choose a test', fullWidth:true, selected: flashAttemptExamFilter||'', options: examOptions })}</div>
     ${attemptListHtml}
-    <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+    <div class="btn-row" style="margin-top:14px;">
       <button class="btn btn-primary" id="flashAttemptAddBtn" type="button" ${flashSelectedAttemptIds.size ? '' : 'disabled'}>${icon('plus')}Add ${flashSelectedAttemptIds.size} Selected to Flashcards</button>
       <button class="btn btn-ghost" id="flashAttemptNewSetBtn" type="button" ${flashSelectedAttemptIds.size ? '' : 'disabled'}>${icon('duplicate')}New Set from ${flashSelectedAttemptIds.size} Selected</button>
       ${flashSelectedAttemptIds.size ? `<button class="link-btn" id="flashAttemptClearAllBtn" type="button">Clear all picks</button>` : ''}
@@ -2552,9 +2639,9 @@ function renderFlashLibraryPickerInnerHtml(){
   return `
     ${renderDropdown({ id:'flashLibraryTest', ariaLabel:'Choose a test to pick questions from', fullWidth:true, selected: flashLibraryTestIdx===null?'':String(flashLibraryTestIdx), options: testOptions })}
     ${gridHtml}
-    <div style="margin-top:14px;">
+    <div class="btn-row" style="margin-top:14px;">
       <button class="btn btn-primary" id="flashLibAddBtn" ${flashLibrarySelectedKeys.size ? '' : 'disabled'}>Add ${flashLibrarySelectedKeys.size} Selected to Flashcards</button>
-      ${flashLibrarySelectedKeys.size ? `<button class="link-btn" id="flashLibClearAllBtn" type="button" style="margin-left:10px;">Clear all picks</button>` : ''}
+      ${flashLibrarySelectedKeys.size ? `<button class="link-btn" id="flashLibClearAllBtn" type="button">Clear all picks</button>` : ''}
     </div>
   `;
 }
@@ -3878,7 +3965,7 @@ function askDeleteAccountConfirmation(targetEmail, buttonLabel){
         <div id="deleteDialogMsg" style="font-size:.95rem;line-height:1.5;margin-bottom:14px;color:var(--ink);">${message}</div>
         <label for="deleteConfirmInput" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;">Type DELETE to confirm</label>
         <input type="text" id="deleteConfirmInput" style="width:100%;padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-family:system-ui,sans-serif;margin-bottom:14px;box-sizing:border-box;">
-        <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <div class="dialog-actions">
           <button id="deleteCancelBtn" class="dialog-btn" style="font-family:system-ui,sans-serif;border:1px solid var(--line);color:var(--ink);background:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:.88rem;">Cancel</button>
           <button id="deleteConfirmBtn" class="dialog-btn" style="font-family:system-ui,sans-serif;border:none;background:var(--bad);color:var(--accent-ink);border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;font-size:.88rem;" disabled>${buttonLabel}</button>
         </div>
@@ -4397,7 +4484,7 @@ function askContinueOrFresh(examTitleText){
     overlay.innerHTML = `
       <div role="alertdialog" aria-modal="true" aria-label="Unfinished attempt" aria-describedby="continueDialogMsg" style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;max-width:380px;box-shadow:0 8px 30px rgba(0,0,0,.25);">
         <div id="continueDialogMsg" style="font-size:.95rem;line-height:1.5;margin-bottom:18px;color:var(--ink);">You have an unfinished attempt on "${escapeHtml(examTitleText)}". Continue where you left off, or start fresh?</div>
-        <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;">
+        <div class="dialog-actions">
           <button id="startFreshBtn" class="dialog-btn" style="font-family:system-ui,sans-serif;border:1px solid var(--line);color:var(--ink);background:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:.88rem;">Start Fresh</button>
           <button id="continueBtn" class="dialog-btn" style="font-family:system-ui,sans-serif;border:none;background:var(--accent);color:var(--accent-ink);border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;font-size:.88rem;">Continue</button>
         </div>
