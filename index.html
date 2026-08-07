@@ -469,7 +469,7 @@ if('serviceWorker' in navigator){
        rows before you ever reach the card. Icon-only lets the setup
        trigger actually share a row with the mode switch. */
     #flashSetupMenuToggleBtn .nav-label, #flashFullscreenBtn .nav-label{display:none;}
-    #flashSetupMenuToggleBtn, #flashFullscreenBtn{padding:8px 10px;}
+    #flashSetupMenuToggleBtn, #flashFullscreenBtn{padding:8px 10px;min-width:44px;justify-content:center;}
     #flashSetupMenuToggleBtn .icon, #flashFullscreenBtn .icon{margin-right:0;}
     .dot{width:38px;height:38px;}
     .dots-toggle{display:inline-block;margin-bottom:10px;}
@@ -600,6 +600,35 @@ if('serviceWorker' in navigator){
     .bottom-bar{display:flex;position:fixed;left:0;right:0;bottom:0;background:var(--nav-bg);border-top:1px solid var(--nav-line);padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px));z-index:40;}
     .bottom-bar[hidden]{display:none;}
     .main-content .wrap{padding-bottom:max(96px,var(--extra-bottom-pad,0px));}
+
+    /* Touch-target floor, site-wide. A deep-dive mobile pass found nearly
+       every small/compact button class in the app sitting at 23-36px tall
+       -- well under the 44px WCAG AAA target -- everywhere except the one
+       row (.nav-row .nav-row-mid .link-btn, above) that got a scoped fix
+       earlier. That fix was correct but too narrow: it solved Shuffle/
+       Remove specifically without addressing the same underlying problem
+       on "Full Screen", "Manage this set", the mode switches, Flag,
+       Settings/More sheet menu items, or any other .link-btn/.icon-btn
+       usage -- all the same base classes, just outside that one row.
+       One rule here instead of another one-off fix per instance found. */
+    .link-btn, .toplinks button, .flag-btn, .mode-switch button,
+    .study-mode-switch button, .settings-menu-btn, .more-sheet button{
+      min-height:44px;
+    }
+    .icon-btn{min-width:44px;min-height:44px;justify-content:center;}
+    /* Same floor for the landing page's own button classes (.ld-*, not
+       covered by the shared classes above -- the landing page deliberately
+       has its own bolder component set) and the password show/hide toggle.
+       .ld-ghost was the worst offender found in this pass: padding:0 on a
+       plain underlined text link, 18px tall end to end. */
+    .ld-signin{min-height:44px;}
+    .ld-ghost{display:inline-block;padding:12px 0;min-height:44px;box-sizing:border-box;}
+    /* The 3 JS-constructed confirm dialogs (showConfirmDialog,
+       askDeleteAccountConfirmation, askContinueOrFresh) build their action
+       buttons with an inline style="..." attribute, not a class -- inline
+       styles beat any class-selector rule regardless of source order or
+       specificity, so this needs !important to actually win. */
+    .dialog-btn{min-height:44px !important;padding:11px 16px !important;}
   }
 
   /* ===== landing page (pre-auth, deliberately bolder than the app) =====
@@ -687,6 +716,12 @@ if('serviceWorker' in navigator){
   .pw-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted);padding:6px;display:flex;align-items:center;border-radius:6px;}
   .pw-toggle:hover{color:var(--ink);background:var(--surface-2);}
   .pw-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+  /* Placed right after the base rule (not in the shared mobile-breakpoint
+     block up above) deliberately -- equal-specificity CSS rules resolve by
+     source order, and putting a same-specificity override earlier in the
+     file than the rule it's meant to beat is a real, easy-to-miss trap
+     (hit exactly this while fixing this same button). */
+  @media (max-width:900px){ .pw-toggle{min-width:44px;min-height:44px;justify-content:center;right:0;} }
 
   /* Small standalone icon-only button (info/help triggers etc) -- unlike
      .pw-toggle above, not positioned relative to a text-field container. */
@@ -1644,8 +1679,8 @@ function showConfirmDialog(message, onConfirm, confirmLabel, danger){
     <div role="alertdialog" aria-modal="true" aria-label="${escapeHtml(confirmLabel || 'End Exam')}" aria-describedby="confirmDialogMsg" style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;max-width:360px;box-shadow:0 8px 30px rgba(0,0,0,.25);">
       <div id="confirmDialogMsg" style="font-size:.95rem;line-height:1.5;margin-bottom:18px;color:var(--ink);">${escapeHtml(message)}</div>
       <div style="display:flex;gap:10px;justify-content:flex-end;">
-        <button id="confirmCancelBtn" style="font-family:system-ui,sans-serif;border:1px solid var(--line);color:var(--ink);background:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:.88rem;">Cancel</button>
-        <button id="confirmOkBtn" style="font-family:system-ui,sans-serif;border:none;background:${okColor};color:var(--accent-ink);border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;font-size:.88rem;">${escapeHtml(confirmLabel || 'End Exam')}</button>
+        <button id="confirmCancelBtn" class="dialog-btn" style="font-family:system-ui,sans-serif;border:1px solid var(--line);color:var(--ink);background:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:.88rem;">Cancel</button>
+        <button id="confirmOkBtn" class="dialog-btn" style="font-family:system-ui,sans-serif;border:none;background:${okColor};color:var(--accent-ink);border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;font-size:.88rem;">${escapeHtml(confirmLabel || 'End Exam')}</button>
       </div>
     </div>
   `;
@@ -3687,8 +3722,8 @@ function askDeleteAccountConfirmation(targetEmail, buttonLabel){
         <label for="deleteConfirmInput" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;">Type DELETE to confirm</label>
         <input type="text" id="deleteConfirmInput" style="width:100%;padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-family:system-ui,sans-serif;margin-bottom:14px;box-sizing:border-box;">
         <div style="display:flex;gap:10px;justify-content:flex-end;">
-          <button id="deleteCancelBtn" style="font-family:system-ui,sans-serif;border:1px solid var(--line);color:var(--ink);background:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:.88rem;">Cancel</button>
-          <button id="deleteConfirmBtn" style="font-family:system-ui,sans-serif;border:none;background:var(--bad);color:var(--accent-ink);border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;font-size:.88rem;" disabled>${buttonLabel}</button>
+          <button id="deleteCancelBtn" class="dialog-btn" style="font-family:system-ui,sans-serif;border:1px solid var(--line);color:var(--ink);background:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:.88rem;">Cancel</button>
+          <button id="deleteConfirmBtn" class="dialog-btn" style="font-family:system-ui,sans-serif;border:none;background:var(--bad);color:var(--accent-ink);border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;font-size:.88rem;" disabled>${buttonLabel}</button>
         </div>
       </div>
     `;
@@ -4206,8 +4241,8 @@ function askContinueOrFresh(examTitleText){
       <div role="alertdialog" aria-modal="true" aria-label="Unfinished attempt" aria-describedby="continueDialogMsg" style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;max-width:380px;box-shadow:0 8px 30px rgba(0,0,0,.25);">
         <div id="continueDialogMsg" style="font-size:.95rem;line-height:1.5;margin-bottom:18px;color:var(--ink);">You have an unfinished attempt on "${escapeHtml(examTitleText)}". Continue where you left off, or start fresh?</div>
         <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;">
-          <button id="startFreshBtn" style="font-family:system-ui,sans-serif;border:1px solid var(--line);color:var(--ink);background:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:.88rem;">Start Fresh</button>
-          <button id="continueBtn" style="font-family:system-ui,sans-serif;border:none;background:var(--accent);color:var(--accent-ink);border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;font-size:.88rem;">Continue</button>
+          <button id="startFreshBtn" class="dialog-btn" style="font-family:system-ui,sans-serif;border:1px solid var(--line);color:var(--ink);background:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:.88rem;">Start Fresh</button>
+          <button id="continueBtn" class="dialog-btn" style="font-family:system-ui,sans-serif;border:none;background:var(--accent);color:var(--accent-ink);border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;font-size:.88rem;">Continue</button>
         </div>
       </div>
     `;
