@@ -352,7 +352,7 @@ if('serviceWorker' in navigator){
   .dot{width:30px;height:30px;border-radius:7px;display:flex;align-items:center;justify-content:center;margin:0;font-family:system-ui,sans-serif;font-size:.72rem;font-weight:600;border:1px solid var(--line);cursor:pointer;background:var(--panel);color:var(--muted);}
   .dot.current{border-color:var(--accent);color:var(--accent);}
   .dot.answered{background:var(--line);border-color:var(--muted);color:var(--ink);}
-  .dot.flagged{box-shadow:inset 0 -3px 0 #d8ae4e;}
+  .dot.flagged{box-shadow:inset 0 -3px 0 var(--flag);}
   .dot.selected{background:var(--accent);border-color:var(--accent);color:#fff;}
 
   .score-big{font-size:2.6rem;font-weight:700;text-align:center;margin:6px 0;}
@@ -811,7 +811,7 @@ if('serviceWorker' in navigator){
     <div class="settings-label" style="padding:10px 10px 2px;">Account</div>
     <div class="settings-account-email" style="padding:0 10px 4px;"></div>
     <button class="account-signout-btn" type="button">Sign Out</button>
-    <button class="account-delete-btn" type="button" style="color:#D93B2B;">Delete Account</button>
+    <button class="account-delete-btn" type="button" style="color:#FB7185;">Delete Account</button>
   </div>
 
   <main class="main-content">
@@ -1785,8 +1785,8 @@ function renderReviewPanel(missed, total){
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:4px;">
       <h2 style="margin:0;font-size:1.3rem;">${heading}</h2>
       <div class="toplinks" style="margin:0;">
-        <button id="reviewMissedBtn" class="${reviewFilter==='missed'?'active':''}">Review Missed Only</button>
-        <button id="reviewAllBtn" class="${reviewFilter==='all'?'active':''}">Review All</button>
+        <button id="reviewMissedBtn" class="${reviewFilter==='missed'?'active':''}" aria-pressed="${reviewFilter==='missed'}">Review Missed Only</button>
+        <button id="reviewAllBtn" class="${reviewFilter==='all'?'active':''}" aria-pressed="${reviewFilter==='all'}">Review All</button>
       </div>
     </div>
     ${renderReviewList(indices)}
@@ -4937,7 +4937,7 @@ function renderAdminAccountsView(){
 
   sub.innerHTML = `
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px;font-family:system-ui,sans-serif;">
-      <input type="text" id="adminSearchInput" placeholder="Search by email…" value="${escapeHtml(adminSearch)}" style="flex:1;min-width:160px;padding:8px 12px;border-radius:8px;border:1px solid var(--line);">
+      <input type="text" id="adminSearchInput" aria-label="Search accounts by email" placeholder="Search by email…" value="${escapeHtml(adminSearch)}" style="flex:1;min-width:160px;padding:8px 12px;border-radius:8px;border:1px solid var(--line);">
       ${renderDropdown({ id:'adminFilter', ariaLabel:'Filter accounts', selected: adminFilter, options:[
         {value:'all', label:'All'},
         {value:'pending', label:'Pending'},
