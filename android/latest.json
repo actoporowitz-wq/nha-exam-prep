@@ -1,6 +1,6 @@
 {
-  "versionCode": 2004,
-  "versionName": "1.0.1",
+  "versionCode": 2005,
+  "versionName": "1.0.2",
   "apkUrl": "https://nha-exam-prep.pages.dev/android/NHA-Exam-Prep.apk",
-  "releaseNotes": "Less intrusive CAPTCHA on sign-in, exam name shown on Results, and a redesigned flag-review workflow in Admin."
+  "releaseNotes": "Truly silent CAPTCHA on the common case (no more flash before it decides interaction is needed), new app icon, and a fix for idle sessions incorrectly landing on the pending-approval screen."
 }
