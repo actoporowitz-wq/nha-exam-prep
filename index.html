@@ -62,6 +62,23 @@ if('serviceWorker' in navigator){
   }
   *{box-sizing:border-box;}
   body{margin:0;font-family:var(--font-display);background:var(--bg);color:var(--ink);}
+  /* Covers the real gap between "HTML has parsed" and "JS has figured out
+     whether to show the landing page, sign-in, or the signed-in app shell"
+     -- Supabase session restore is a real async network call, not instant,
+     and on a slow mobile connection that gap is long enough to be visibly
+     jarring. Before this, whatever was left visible during that gap was
+     just the bare page furniture (a plain "Exam Practice Tool" / "Loading…"
+     heading with zero styling, no card, no brand) sitting on the page
+     background -- looked broken, not "loading". Visible by default in the
+     raw HTML (not toggled on by JS) since JS hasn't run yet during exactly
+     the gap this covers; hidden by setShellChromeVisible() the first time
+     it runs, which fires on every real resolution path (signed out,
+     pending approval, granted) so this can't get stuck showing. */
+  #bootLoading{position:fixed;inset:0;z-index:200;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;}
+  #bootLoading .mark{width:44px;height:44px;border-radius:13px;background:linear-gradient(135deg,#8FA6FF,#5B6BFF);display:flex;align-items:center;justify-content:center;animation:bootPulse 1.4s ease-in-out infinite;}
+  #bootLoading .mark svg{width:72%;height:72%;}
+  @keyframes bootPulse{0%,100%{opacity:1;}50%{opacity:.55;}}
+  @media (prefers-reduced-motion:reduce){ #bootLoading .mark{animation:none;} }
   .wrap{max-width:760px;margin:0 auto;padding:28px max(20px,env(safe-area-inset-right)) max(80px,env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left));}
   h1{font-size:1.5rem;letter-spacing:.02em;margin:0 0 4px;font-weight:600;}
   .sub{color:var(--muted);font-size:.92rem;margin-bottom:22px;}
@@ -690,6 +707,8 @@ if('serviceWorker' in navigator){
 </style>
 </head>
 <body>
+
+<div id="bootLoading" role="status"><span class="mark"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><g transform="translate(8.6,12.8) rotate(-16)"><rect x="-6.4" y="-8.1" width="12.8" height="16.2" rx="2.2" fill="#fff" fill-opacity="0.75"/></g><g transform="translate(15.4,11.6) rotate(10)"><rect x="-6.4" y="-8.1" width="12.8" height="16.2" rx="2.2" fill="#fff"/></g></svg></span><span class="sr-only">Loading NHA Exam Prep…</span></div>
 
 <!-- ================= LANDING (pre-auth, deliberately bolder) ================= -->
 <div id="landingView" hidden>
@@ -3633,6 +3652,13 @@ function setShellChromeVisible(visible){
   const bb = document.getElementById('bottomBar');
   if(sb) sb.hidden = !visible;
   if(bb) bb.hidden = !visible;
+  /* Called on every real resolution path through applyAccessGate (signed
+     out, pending approval, granted) -- the first call means the app now
+     knows what to show, so the boot screen's job is done regardless of
+     which branch got here. Idempotent (hiding an already-hidden element
+     is a no-op) so it's safe on every subsequent call too. */
+  const boot = document.getElementById('bootLoading');
+  if(boot) boot.style.display = 'none';
 }
 
 /* Hardened confirmation for an irreversible action — requires typing DELETE,
