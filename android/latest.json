@@ -1,6 +1,6 @@
 {
-  "versionCode": 2008,
-  "versionName": "1.0.5",
+  "versionCode": 2009,
+  "versionName": "1.1.0",
   "apkUrl": "https://nha-exam-prep.pages.dev/android/NHA-Exam-Prep.apk",
-  "releaseNotes": "Dark mode now follows your system setting throughout the whole app, including Admin."
+  "releaseNotes": "New: True Recall flashcard mode, with progress synced to your account. Also a visual touch-up to the bottom navigation bar."
 }
