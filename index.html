@@ -437,7 +437,14 @@ if('serviceWorker' in navigator){
      on top of that. */
   @media (max-width: 480px){
     .nav-row{flex-wrap:wrap;row-gap:10px;}
-    .nav-row .nav-row-mid{order:3;flex:1 0 100%;}
+    .nav-row .nav-row-mid{order:3;flex:1 0 100%;gap:14px;}
+    /* Shuffle/Remove were 33px tall with only an 11px gap between them at
+       this width -- .link-btn's base padding (7px 12px) is tuned for the
+       dense desktop rows it lives in elsewhere (Settings popover, Admin
+       rows), not a touch target sitting right next to a destructive action.
+       44px meets the WCAG AAA target size; the wider gap above cuts the
+       mis-tap risk between "Shuffle" and "Remove this card". */
+    .nav-row .nav-row-mid .link-btn{min-height:44px;padding:11px 14px;}
     /* "Manage this set" / "Full Screen" text labels collapse to icon-only
        here -- at this width the two full labels plus the Multiple Choice/
        True Recall mode switch don't fit on one line no matter how they're
@@ -638,6 +645,13 @@ if('serviceWorker' in navigator){
   /* ===== auth (full-bleed centered card, replaces the old cramped-column look) ===== */
   .auth-outer{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:40px;background:var(--bg);}
   .auth-card{width:100%;max-width:380px;}
+  /* Defensive containment for the Cloudflare Turnstile widget -- its
+     iframe is sized by Cloudflare's own script, not by our CSS, and
+     doesn't shrink to fit a narrow container on its own. Centers it and
+     hard-clips anything that would otherwise visually spill past the
+     card edge on a phone. */
+  #turnstileWidget{max-width:100%;overflow:hidden;display:flex;justify-content:center;}
+  #turnstileWidget iframe{max-width:100%!important;}
   .auth-brand{display:flex;align-items:center;gap:10px;font-family:var(--font-display);font-weight:800;font-size:1.2rem;letter-spacing:-.02em;margin-bottom:26px;color:var(--ink);}
   .auth-brand .mark{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,#8FA6FF,#5B6BFF);display:flex;align-items:center;justify-content:center;}
 
@@ -681,7 +695,7 @@ if('serviceWorker' in navigator){
 <div id="landingView" hidden>
   <div class="landing">
     <nav class="ld-nav">
-      <div class="ld-brand"><span class="mark"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><g transform="translate(7.8,12.8) rotate(-16)"><rect x="-6.4" y="-8.1" width="12.8" height="16.2" rx="2.2" fill="#fff" fill-opacity="0.75"/></g><g transform="translate(14.6,11.6) rotate(10)"><rect x="-6.4" y="-8.1" width="12.8" height="16.2" rx="2.2" fill="#fff"/></g></svg></span>NHA Exam Prep</div>
+      <div class="ld-brand"><span class="mark"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><g transform="translate(8.6,12.8) rotate(-16)"><rect x="-6.4" y="-8.1" width="12.8" height="16.2" rx="2.2" fill="#fff" fill-opacity="0.75"/></g><g transform="translate(15.4,11.6) rotate(10)"><rect x="-6.4" y="-8.1" width="12.8" height="16.2" rx="2.2" fill="#fff"/></g></svg></span>NHA Exam Prep</div>
       <button class="ld-signin ld-cta-to-auth" type="button">Sign In</button>
     </nav>
     <section class="ld-hero">
@@ -727,7 +741,7 @@ if('serviceWorker' in navigator){
   <!-- ================= SIDEBAR (desktop) ================= -->
   <nav class="sidebar" id="sidebarNav" hidden>
     <div class="sidebar-top-row">
-      <div class="sidebar-brand"><span class="mark"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><g transform="translate(7.8,12.8) rotate(-16)"><rect x="-6.4" y="-8.1" width="12.8" height="16.2" rx="2.2" fill="#fff" fill-opacity="0.75"/></g><g transform="translate(14.6,11.6) rotate(10)"><rect x="-6.4" y="-8.1" width="12.8" height="16.2" rx="2.2" fill="#fff"/></g></svg></span><span class="sidebar-brand-text">NHA</span></div>
+      <div class="sidebar-brand"><span class="mark"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><g transform="translate(8.6,12.8) rotate(-16)"><rect x="-6.4" y="-8.1" width="12.8" height="16.2" rx="2.2" fill="#fff" fill-opacity="0.75"/></g><g transform="translate(15.4,11.6) rotate(10)"><rect x="-6.4" y="-8.1" width="12.8" height="16.2" rx="2.2" fill="#fff"/></g></svg></span><span class="sidebar-brand-text">NHA</span></div>
       <button class="icon-btn sidebar-collapse-btn" id="sidebarCollapseBtn" type="button" aria-label="Collapse sidebar" title="Collapse sidebar"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><polyline points="15,18 9,12 15,6"/></svg></button>
     </div>
     <button class="menu-trigger nav-hamburger" id="mainNavTrigger" aria-label="Open navigation menu" aria-haspopup="true" aria-expanded="false" aria-controls="mainNavDrawer">☰</button>
@@ -793,7 +807,7 @@ if('serviceWorker' in navigator){
 
     <div id="authView" style="display:none">
       <div class="auth-outer"><div class="auth-card">
-        <div class="auth-brand"><span class="mark"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><g transform="translate(7.8,12.8) rotate(-16)"><rect x="-6.4" y="-8.1" width="12.8" height="16.2" rx="2.2" fill="#fff" fill-opacity="0.75"/></g><g transform="translate(14.6,11.6) rotate(10)"><rect x="-6.4" y="-8.1" width="12.8" height="16.2" rx="2.2" fill="#fff"/></g></svg></span>NHA Exam Prep</div>
+        <div class="auth-brand"><span class="mark"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><g transform="translate(8.6,12.8) rotate(-16)"><rect x="-6.4" y="-8.1" width="12.8" height="16.2" rx="2.2" fill="#fff" fill-opacity="0.75"/></g><g transform="translate(15.4,11.6) rotate(10)"><rect x="-6.4" y="-8.1" width="12.8" height="16.2" rx="2.2" fill="#fff"/></g></svg></span>NHA Exam Prep</div>
         <div class="panel" id="authPanel"></div>
       </div></div>
     </div>
@@ -928,6 +942,42 @@ let flashSaveNameDraft = '';
 let flashSaveMsg = null; // { text, ok } | null -- transient status line under the inline save row
 let currentSetId = null; // id of the saved flashcard_sets row the in-progress deck was loaded from, if any -- lets "Update" overwrite that row instead of always inserting a new one
 let currentSetName = null; // paired with currentSetId, for the "Update "<name>"" button label
+
+/* ---- flashcard session persistence across a reload -- unlike quiz answers
+   (synced to Supabase per-question via syncOnlineAnswer), the loaded deck
+   itself lived only in JS memory: refreshing the tab silently dropped back
+   to the flashcards homescreen mid-study. sessionStorage (not localStorage)
+   deliberately -- survives a reload, clears on tab close, matches "reload"
+   specifically without indefinitely hoarding a potentially large card array.
+   Only the deck/index/mode/set-identity are persisted; True Recall's own
+   queue/round state is NOT -- ensureRecallQueue already rebuilds it from
+   scratch whenever flashRecallSourceRef!==flashcards (a reference check),
+   which a JSON round-trip always trips, so it self-heals (and re-fetches
+   server-side mastered progress) for free instead of risking stale round
+   state surviving a hard reload. */
+const FLASH_SESSION_KEY = 'nha_flash_session';
+function saveFlashSessionState(){
+  try{
+    if(!flashcards.length){ sessionStorage.removeItem(FLASH_SESSION_KEY); return; }
+    sessionStorage.setItem(FLASH_SESSION_KEY, JSON.stringify({
+      flashcards, flashIndex, flashMode, currentSetId, currentSetName
+    }));
+  }catch(e){ /* storage full/unavailable -- session just won't survive a reload, not fatal */ }
+}
+(function restoreFlashSessionState(){
+  try{
+    const raw = sessionStorage.getItem(FLASH_SESSION_KEY);
+    if(!raw) return;
+    const s = JSON.parse(raw);
+    if(!Array.isArray(s.flashcards) || !s.flashcards.length) return;
+    flashcards = s.flashcards;
+    flashIndex = Number.isInteger(s.flashIndex) && s.flashIndex < flashcards.length ? s.flashIndex : 0;
+    if(s.flashMode === 'mc' || s.flashMode === 'recall') flashMode = s.flashMode;
+    currentSetId = s.currentSetId ?? null;
+    currentSetName = s.currentSetName ?? null;
+    flashGeneratorOpen = false;
+  }catch(e){ /* corrupted/incompatible saved state -- ignore, falls back to the empty-deck homescreen */ }
+})();
 /* Purely a rendering overlay on the live quiz screen -- toggling it never
    touches answers/scoring/navigation, only whether renderQuestion() paints
    correct/incorrect on top of the option you've already picked. Persisted
@@ -1166,10 +1216,40 @@ function closeAccountMenus(){
   document.getElementById('moreSheet').hidden = true;
 }
 
+/* ---- modal dialogs consume the Back button instead of it navigating the
+   page underneath them. Previously Back on an open dialog silently routed
+   the whole app to a different view while the dialog itself stayed open,
+   now stranded over the wrong screen -- a real reproducible bug, not just
+   a nicety. Scoped to true modal dialogs only (shortcuts, feedback, the
+   confirm-style overlays below) -- the Settings popover/More sheet/custom
+   dropdowns already close via outside-click+Escape and are a much higher
+   call-site count for a pattern users don't reach for Back the same way.
+   askContinueOrFresh is deliberately NOT wired in: it has no "dismissed"
+   resolution today (forces Start Fresh vs Continue), and Back-closing a
+   promise-based dialog with no cancel state would leave the caller's
+   await hanging forever. ---- */
+let modalCloseStack = [];
+function pushModalClose(closeFn){
+  history.pushState({modal:true}, '', location.pathname + location.search);
+  modalCloseStack.push(closeFn);
+}
+function dismissModal(closeFn){
+  /* Called from a dialog's own Cancel/X/outside-click -- runs the real
+     close, then unwinds the history entry pushModalClose added so a later
+     Back doesn't hit a dead no-op step. */
+  const idx = modalCloseStack.lastIndexOf(closeFn);
+  if(idx !== -1){ modalCloseStack.splice(idx,1); closeFn(); history.back(); }
+  else closeFn();
+}
+
 /* ---- keyboard shortcuts overlay ---- */
 const shortcutsOverlayEl = document.getElementById('shortcutsOverlay');
-function toggleShortcutsOverlay(){ shortcutsOverlayEl.hidden = !shortcutsOverlayEl.hidden; }
-document.getElementById('closeShortcuts').onclick = ()=>{ shortcutsOverlayEl.hidden = true; };
+function closeShortcutsOverlay(){ shortcutsOverlayEl.hidden = true; }
+function toggleShortcutsOverlay(){
+  if(shortcutsOverlayEl.hidden){ shortcutsOverlayEl.hidden = false; pushModalClose(closeShortcutsOverlay); }
+  else dismissModal(closeShortcutsOverlay);
+}
+document.getElementById('closeShortcuts').onclick = ()=> dismissModal(closeShortcutsOverlay);
 
 /* ---- feedback panel -- real insert into public.user_feedback (see
    supabase/migrations/0020_user_feedback.sql). Fails gracefully with a
@@ -1193,10 +1273,11 @@ function openFeedbackPanel(){
   feedbackOverlayEl.hidden = false;
   renderFbCategoryDropdown();
   fbMessageEl.focus();
+  pushModalClose(closeFeedbackPanel);
 }
 function closeFeedbackPanel(){ feedbackOverlayEl.hidden = true; }
 document.querySelectorAll('.open-feedback-btn').forEach(b=> b.onclick = openFeedbackPanel);
-document.getElementById('closeFeedback').onclick = closeFeedbackPanel;
+document.getElementById('closeFeedback').onclick = ()=> dismissModal(closeFeedbackPanel);
 document.getElementById('submitFeedbackBtn').onclick = async ()=>{
   const message = fbMessageEl.value.trim();
   if(!message){ fbMessageEl.focus(); return; }
@@ -1208,7 +1289,7 @@ document.getElementById('submitFeedbackBtn').onclick = async ()=>{
     });
     if(error) throw error;
     fbMessageEl.value = '';
-    closeFeedbackPanel();
+    dismissModal(closeFeedbackPanel);
   }catch(err){
     fbMsgEl.className = 'msg err';
     fbMsgEl.textContent = 'Could not send feedback: ' + err.message;
@@ -1220,8 +1301,8 @@ document.addEventListener('keydown', (e)=>{
   const typing = ['INPUT','TEXTAREA'].includes(document.activeElement.tagName);
   if(e.key === '?' && !typing){ e.preventDefault(); toggleShortcutsOverlay(); }
   else if(e.key === 'Escape'){
-    if(!shortcutsOverlayEl.hidden) shortcutsOverlayEl.hidden = true;
-    else if(!feedbackOverlayEl.hidden) closeFeedbackPanel();
+    if(!shortcutsOverlayEl.hidden) dismissModal(closeShortcutsOverlay);
+    else if(!feedbackOverlayEl.hidden) dismissModal(closeFeedbackPanel);
     else if(!document.getElementById('moreSheet').hidden) document.getElementById('moreSheet').hidden = true;
   }
 });
@@ -1295,8 +1376,13 @@ function showView(v, opts){
 
 /* Back/forward: map the URL back to a view and re-show it without pushing
    a new entry. Ignored while signed out/ungated (appShell hidden) -- there's
-   nothing routable to show yet, and applyAccessGate owns that screen. */
+   nothing routable to show yet, and applyAccessGate owns that screen.
+   A modal dialog open at the time of Back takes priority over view routing
+   entirely -- it consumes this popstate to close itself (see pushModalClose/
+   dismissModal above) instead of the underlying view changing out from under
+   a dialog that's still on screen. */
 window.addEventListener('popstate', ()=>{
+  if(modalCloseStack.length){ modalCloseStack.pop()(); return; }
   if(appShell.style.display === 'none') return;
   let v = VIEW_FOR_PATH[location.pathname] || 'quiz';
   if(v === 'admin' && !(profile && profile.role === 'admin')) v = 'quiz';
@@ -1351,10 +1437,28 @@ function loadExam(examData, attemptNumber){
    question starting mid-scroll -- e.g. Next after being scrolled down to
    reach the old sticky nav lands on the new question already showing its
    options instead of its text. Plain jump (no smooth animation) so rapid
-   arrow-key navigation doesn't queue up a stack of in-flight scrolls. */
-function scrollQuestionIntoView(){
-  quizPanel.scrollIntoView({ block: 'start' });
+   arrow-key navigation doesn't queue up a stack of in-flight scrolls.
+
+   Manual scroll-position math (getBoundingClientRect + window.scrollY),
+   driven through plain window.scrollTo, rather than el.scrollIntoView() --
+   scrollIntoView also asks the browser to figure out and scroll every
+   scrollable ancestor it thinks is relevant, which on mobile can include
+   ancestors we don't actually want it touching (this app has no nested
+   scroll containers by design, but scrollIntoView's ancestor-walk isn't
+   something we control or can rely on staying that way). Computing the
+   target ourselves and issuing one direct window.scrollTo is simpler and
+   fully predictable. Verified NOT to use requestAnimationFrame here after
+   testing showed it can fail to fire at all in an embedded/backgrounded
+   context -- this needs to run synchronously and unconditionally, not
+   depend on a deferred callback that isn't guaranteed to happen. */
+function scrollElementIntoView(el){
+  if(!el) return;
+  const rect = el.getBoundingClientRect();
+  const target = window.scrollY + rect.top - 12; // 12px breathing room instead of flush-to-edge
+  window.scrollTo({ top: Math.max(0, target), behavior: 'auto' });
 }
+function scrollQuestionIntoView(){ scrollElementIntoView(quizPanel); }
+function scrollFlashcardIntoView(){ scrollElementIntoView(flashPanel); }
 
 /* ================= quiz rendering ================= */
 function renderQuestion(){
@@ -1527,9 +1631,11 @@ function showConfirmDialog(message, onConfirm, confirmLabel, danger){
     </div>
   `;
   document.body.appendChild(overlay);
-  overlay.querySelector('#confirmCancelBtn').onclick = ()=> overlay.remove();
-  overlay.querySelector('#confirmOkBtn').onclick = ()=>{ overlay.remove(); onConfirm(); };
-  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) overlay.remove(); });
+  const closeFn = ()=> overlay.remove();
+  pushModalClose(closeFn);
+  overlay.querySelector('#confirmCancelBtn').onclick = ()=> dismissModal(closeFn);
+  overlay.querySelector('#confirmOkBtn').onclick = ()=>{ dismissModal(closeFn); onConfirm(); };
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) dismissModal(closeFn); });
   overlay.querySelector('#confirmCancelBtn').focus();
 }
 
@@ -2706,6 +2812,7 @@ function setFlashMode(mode){
 function revealRecallCard(){
   flashRecallRevealed = true;
   renderFlashcard();
+  scrollFlashcardIntoView();
 }
 
 function rateRecallCard(knewIt){
@@ -2724,6 +2831,7 @@ function rateRecallCard(knewIt){
     flashRecallRound++;
   }
   renderFlashcard();
+  scrollFlashcardIntoView();
 }
 
 /* Deliberately ignores persisted mastery -- "Study again" means a full,
@@ -2743,6 +2851,7 @@ function restartRecallSession(){
 }
 
 function renderFlashcard(){
+  saveFlashSessionState();
   /* Same focus-loss problem as renderQuestion()/renderDots() -- flashPanel
      gets fully rebuilt on every interaction. Picking an answer is the one
      case where there's no equivalent element to restore focus to
@@ -2994,8 +3103,8 @@ function renderFlashcard(){
   if(recallInfoBtn) recallInfoBtn.onclick = showRecallIntroDialog;
   if(flashMode === 'mc'){
     const answered = flashSelectedOption !== null;
-    document.getElementById('flashPrevBtn').onclick = ()=>{ if(flashIndex>0){ flashIndex--; flashSelectedOption=null; renderFlashcard(); } };
-    document.getElementById('flashNextBtn').onclick = ()=>{ if(flashIndex<flashcards.length-1){ flashIndex++; flashSelectedOption=null; renderFlashcard(); } };
+    document.getElementById('flashPrevBtn').onclick = ()=>{ if(flashIndex>0){ flashIndex--; flashSelectedOption=null; renderFlashcard(); scrollFlashcardIntoView(); } };
+    document.getElementById('flashNextBtn').onclick = ()=>{ if(flashIndex<flashcards.length-1){ flashIndex++; flashSelectedOption=null; renderFlashcard(); scrollFlashcardIntoView(); } };
     if(!answered){
       flashPanel.querySelectorAll('[data-flash-opt]').forEach(el=>{
         el.onclick = ()=>{ flashSelectedOption = parseInt(el.dataset.flashOpt,10); renderFlashcard(); };
@@ -3123,9 +3232,9 @@ document.addEventListener('keydown', (e)=>{
       renderFlashcard();
     }
   } else if(e.key === 'ArrowRight' && flashIndex < flashcards.length-1){
-    e.preventDefault(); flashIndex++; flashSelectedOption = null; renderFlashcard();
+    e.preventDefault(); flashIndex++; flashSelectedOption = null; renderFlashcard(); scrollFlashcardIntoView();
   } else if(e.key === 'ArrowLeft' && flashIndex > 0){
-    e.preventDefault(); flashIndex--; flashSelectedOption = null; renderFlashcard();
+    e.preventDefault(); flashIndex--; flashSelectedOption = null; renderFlashcard(); scrollFlashcardIntoView();
   }
 });
 
@@ -3279,7 +3388,15 @@ function renderTurnstileWidget(){
   const container = document.getElementById('turnstileWidget');
   if(!container) return;
   if(window.turnstile){
-    turnstileWidgetId = window.turnstile.render(container, { sitekey: TURNSTILE_SITE_KEY });
+    /* size:'compact' (150x140, narrower/taller) instead of the 300px-wide
+       default -- the default doesn't fit inside the auth card's usable
+       width on a phone once the card's own padding is subtracted, and
+       Cloudflare's iframe doesn't shrink to its container on its own,
+       so it was visually breaking out past the card edge. Compact fits
+       comfortably at any real phone width; the CSS below is a second,
+       defensive layer of containment in case a future/rare challenge
+       state ever renders wider than that. */
+    turnstileWidgetId = window.turnstile.render(container, { sitekey: TURNSTILE_SITE_KEY, size: 'compact' });
   } else {
     setTimeout(renderTurnstileWidget, 200);
   }
@@ -3550,12 +3667,25 @@ function askDeleteAccountConfirmation(targetEmail, buttonLabel){
       </div>
     `;
     document.body.appendChild(overlay);
+    /* settled guards against a double-resolve: dismissModal (user-initiated
+       close) and closeFn (Back-initiated close, via the popstate handler
+       popping modalCloseStack directly) can each reach the "resolve" step --
+       whichever gets there first wins, the other is a no-op. */
+    let settled = false;
+    function finish(result){
+      if(settled) return;
+      settled = true;
+      dismissModal(closeFn);
+      resolve(result);
+    }
+    const closeFn = ()=>{ overlay.remove(); if(!settled){ settled = true; resolve(false); } };
+    pushModalClose(closeFn);
     const input = overlay.querySelector('#deleteConfirmInput');
     const confirmBtn = overlay.querySelector('#deleteConfirmBtn');
     input.oninput = ()=>{ confirmBtn.disabled = input.value.trim() !== 'DELETE'; };
-    overlay.querySelector('#deleteCancelBtn').onclick = ()=>{ overlay.remove(); resolve(false); };
-    confirmBtn.onclick = ()=>{ if(input.value.trim()==='DELETE'){ overlay.remove(); resolve(true); } };
-    overlay.addEventListener('click', (e)=>{ if(e.target===overlay){ overlay.remove(); resolve(false); } });
+    overlay.querySelector('#deleteCancelBtn').onclick = ()=> finish(false);
+    confirmBtn.onclick = ()=>{ if(input.value.trim()==='DELETE') finish(true); };
+    overlay.addEventListener('click', (e)=>{ if(e.target===overlay) finish(false); });
     overlay.querySelector('#deleteCancelBtn').focus();
   });
 }
