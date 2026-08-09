@@ -631,6 +631,12 @@ if('serviceWorker' in navigator){
   .qnum-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
   .qnum-row .qnum{margin-bottom:0;}
   .instant-toggle[aria-pressed="true"]{color:var(--accent);background:var(--accent-soft);}
+  /* Desktop keeps the text label (restored per explicit request -- the icon
+     alone was only ever meant to save vertical space on mobile, see the
+     comment above); mobile reverts to the icon-only square via the
+     <=900px override below, unchanged from before this. */
+  .instant-toggle{padding:7px 12px;border-radius:8px;}
+  .instant-toggle .nav-label{font-family:system-ui,sans-serif;font-weight:600;font-size:.82rem;}
 
   /* One standard shape for every nav-row, quiz and flashcards alike, in
      full-screen and in the regular view: .nav-row holds ONLY primary
@@ -1195,6 +1201,13 @@ if('serviceWorker' in navigator){
        styles beat any class-selector rule regardless of source order or
        specificity, so this needs !important to actually win. */
     .dialog-btn{min-height:44px !important;padding:11px 16px !important;}
+    /* Instant-feedback eye toggle stays icon-only here -- the desktop text
+       label (see .instant-toggle above) was only ever meant for desktop,
+       same "eats vertical space above the fold on mobile" reasoning that
+       compacted it in the first place. */
+    .instant-toggle{padding:5px;}
+    .instant-toggle .nav-label{display:none;}
+    .instant-toggle .icon{margin-right:0;}
   }
 
   /* ===== landing page (pre-auth, deliberately bolder than the app) =====
@@ -2518,7 +2531,7 @@ function renderQuestion(){
     <div class="quiz-question-block">
     <div class="qnum-row" id="qnumAnchor">
       <div class="qnum">Question ${qNum}</div>
-      <button type="button" class="icon-btn instant-toggle" id="instantFeedbackToggle" aria-pressed="${instantFeedback}" aria-label="Show correct answer instantly" title="Show correct answer instantly">${icon(instantFeedback?'eye':'eyeOff')}</button>
+      <button type="button" class="icon-btn instant-toggle" id="instantFeedbackToggle" aria-pressed="${instantFeedback}" aria-label="Show answers instantly" title="Show answers instantly">${icon(instantFeedback?'eye':'eyeOff')}<span class="nav-label" aria-hidden="true">Show answers instantly</span></button>
     </div>
     <div class="qtext">${escapeHtml(q.text)}</div>
   `;
