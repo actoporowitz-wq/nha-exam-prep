@@ -466,14 +466,25 @@ if('serviceWorker' in navigator){
        .quiz-question-block, so scrolling qnumAnchor toward the top still
        had to travel past its height too (confirmed live: ~30-40px of the
        measured shortfall was this row alone). Taking it out of flow
-       entirely (absolute, pinned to quizView's own top-right corner --
-       quizView is already the fixed positioning context in fullscreen, see
-       above) means qnumAnchor's natural position no longer depends on it
+       entirely means qnumAnchor's natural position no longer depends on it
        at all, shrinking the fixed chrome height every question has to
        scroll past to just .progress-row + .bar, which is small and truly
-       constant regardless of question length. */
+       constant regardless of question length.
+       REAL BUG, found via direct measurement after a user report that this
+       made things worse: this was first shipped as position:absolute,
+       which is relative to quizView's PADDING BOX, not the viewport --
+       since quizView is also the scrolling element, an absolutely
+       positioned descendant still scrolls out with the rest of the content
+       (confirmed live: the button's rect.top shifted by exactly the scroll
+       delta). That means the moment you scrolled down at all, the only way
+       to exit full-screen disappeared entirely. position:fixed is what was
+       actually needed -- same treatment .nav-row already uses below, which
+       measurably does stay put across scroll (confirmed: identical rect
+       regardless of scrollTop). quizView being position:fixed itself does
+       NOT make its descendants fixed too; each element's own position
+       property is independent. */
     #quizView.quiz-fullscreen .fullscreen-toggle-row{
-      position:absolute;top:max(14px,env(safe-area-inset-top));
+      position:fixed;top:max(14px,env(safe-area-inset-top));
       right:max(16px,env(safe-area-inset-right));margin:0;z-index:16;
     }
     /* Clearance for the now-floating toggle button lives on quizView's own
@@ -486,6 +497,17 @@ if('serviceWorker' in navigator){
        rather than compounding with every row that would otherwise need its
        own clearance. */
     #quizView.quiz-fullscreen{
+      padding-top:max(60px, calc(env(safe-area-inset-top) + 44px));
+    }
+    /* Flashcards' own "Exit Full Screen" toggle never got this treatment at
+       all until now -- it was still plain in-flow content inside topRowHtml
+       (see renderFlashcard()), same bug class quiz had before the fix
+       above. Same fixed-pinned treatment, same clearance mechanism. */
+    #flashPanel.flash-fullscreen .fullscreen-toggle-row{
+      position:fixed;top:max(14px,env(safe-area-inset-top));
+      right:max(16px,env(safe-area-inset-right));margin:0;z-index:16;
+    }
+    #flashPanel.flash-fullscreen{
       padding-top:max(60px, calc(env(safe-area-inset-top) + 44px));
     }
   }
@@ -3411,15 +3433,28 @@ function renderFlashcard(){
       ${flashMode==='recall' ? `<button type="button" class="icon-btn" id="recallInfoBtn" aria-label="How True Recall works">${icon('info')}</button>` : ''}
     </div>
   `;
-  const topRowHtml = `
+  /* In full-screen, this is just the exit button on its own -- no go-home/
+     manage-set/mode-switch to share a row with (all conditioned out above).
+     Given its own .fullscreen-toggle-row wrapper (pinned via CSS, see the
+     #flashPanel.flash-fullscreen .fullscreen-toggle-row rule) instead of
+     living in-flow inside the space-between header row the non-fullscreen
+     case still uses -- same treatment quiz's toggle already gets, and for
+     the same reason (stay reachable regardless of scroll position, instead
+     of scrolling away with the rest of the header). */
+  const topRowHtml = flashFullScreen ? `
+    <h1 class="sr-only">Flashcards</h1>
+    <div class="fullscreen-toggle-row">
+      <button class="link-btn" id="flashFullscreenBtn" type="button" aria-label="Exit Full Screen">${icon('close')}<span class="nav-label" aria-hidden="true">Exit Full Screen</span></button>
+    </div>
+  ` : `
     <h1 class="sr-only">Flashcards</h1>
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:6px;">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        ${currentUser && !flashFullScreen ? `<button class="link-btn" id="flashGoHomeBtn" type="button">← Flashcards home</button>` : ''}
-        ${currentUser && !flashFullScreen ? `<button class="link-btn" id="flashSetupMenuToggleBtn" type="button" aria-label="${flashSetupMenuOpen ? 'Hide set options' : 'Manage this set'}">${flashSetupMenuOpen ? icon('close') : icon('settings')}<span class="nav-label" aria-hidden="true">${flashSetupMenuOpen ? 'Hide set options' : 'Manage this set'}</span></button>` : ''}
+        ${currentUser ? `<button class="link-btn" id="flashGoHomeBtn" type="button">← Flashcards home</button>` : ''}
+        ${currentUser ? `<button class="link-btn" id="flashSetupMenuToggleBtn" type="button" aria-label="${flashSetupMenuOpen ? 'Hide set options' : 'Manage this set'}">${flashSetupMenuOpen ? icon('close') : icon('settings')}<span class="nav-label" aria-hidden="true">${flashSetupMenuOpen ? 'Hide set options' : 'Manage this set'}</span></button>` : ''}
         ${modeSwitchHtml}
       </div>
-      <button class="link-btn" id="flashFullscreenBtn" type="button" aria-label="${flashFullScreen ? 'Exit Full Screen' : 'Full Screen'}">${flashFullScreen ? icon('close') : icon('expand')}<span class="nav-label" aria-hidden="true">${flashFullScreen ? 'Exit Full Screen' : 'Full Screen'}</span></button>
+      <button class="link-btn" id="flashFullscreenBtn" type="button" aria-label="Full Screen">${icon('expand')}<span class="nav-label" aria-hidden="true">Full Screen</span></button>
     </div>
   `;
   /* Used at the bottom of this function for focus-restore across modes --
