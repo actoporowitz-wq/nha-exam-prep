@@ -415,15 +415,20 @@ if('serviceWorker' in navigator){
   /* One standard shape for every nav-row, quiz and flashcards alike, in
      full-screen and in the regular view: .nav-row holds ONLY primary
      paging (Previous/Next, plus Flag for quiz specifically, sitting
-     directly between them) -- nothing else ever lives here. Every
-     secondary action (Pause & Save, End Exam Now, Shuffle, Remove) lives
-     in .extra-actions instead, a plain normal-flow row rendered
-     immediately BEFORE nav-row. Since nav-row is fixed (full-screen and
-     phone width) or sticky (desktop) at the bottom of the view either
-     way, .extra-actions sits physically behind/above it -- reachable by
-     scrolling down, not permanently competing with Previous/Next for the
-     same strip of screen. This replaces an earlier version of this file
-     where quiz used a collapsible overflow-menu trigger for its
+     directly between them) -- nothing else ever lives here. Flashcards'
+     secondary actions (Shuffle/Remove) live in .extra-actions instead, a
+     plain normal-flow row rendered immediately BEFORE nav-row. Quiz's own
+     secondary action (Pause & Save -- "End Exam Now" was removed outright
+     as redundant with Submit Exam, not relocated) moved out of this row
+     entirely and lives next to the question-list toggle in .dotsPanel
+     instead (see renderDots()), since with only one button left it made
+     more sense grouped there than floating alone. Since nav-row is fixed
+     (full-screen and phone width) or sticky (desktop) at the bottom of
+     the view either way, .extra-actions sits physically behind/above it
+     -- reachable by scrolling down, not permanently competing with
+     Previous/Next for the same strip of screen. This replaces an earlier
+     version of this file where quiz used a collapsible overflow-menu
+     trigger for its
      secondary actions while flashcards used this scroll-to-reveal
      pattern -- two different mechanisms solving the same problem was
      itself part of the "no consistent system" complaint that led here;
@@ -500,7 +505,16 @@ if('serviceWorker' in navigator){
   .flag-btn{font-family:system-ui,sans-serif;font-size:.78rem;background:none;border:1px solid var(--line);color:var(--muted);padding:5px 10px;border-radius:20px;cursor:pointer;display:inline-flex;align-items:center;}
   .flag-btn.on{background:var(--flag-bg);border-color:var(--flag);color:var(--flag);}
 
-  .dotgrid{display:flex;flex-wrap:wrap;gap:6px;margin-top:18px;}
+  /* justify-content:center, not the flex default (flex-start) -- with a
+     left-aligned grid, a question count that doesn't divide evenly into
+     a full row (the overwhelmingly common case: 53, 40, most real exam
+     sizes) leaves the last row hanging flush-left with a chunk of empty
+     space on the right, and since flex-wrap centers/aligns each LINE
+     independently, that reads as the whole grid's visual weight leaning
+     left/"off center" rather than one intentionally short last row.
+     Centering each row (including the full ones, mobile-width dot rows
+     rarely have room to spare either way) fixes both at once. */
+  .dotgrid{display:flex;flex-wrap:wrap;gap:6px;margin-top:18px;justify-content:center;}
   .dot{width:30px;height:30px;border-radius:7px;display:flex;align-items:center;justify-content:center;margin:0;font-family:system-ui,sans-serif;font-size:.72rem;font-weight:600;border:1px solid var(--line);cursor:pointer;background:var(--panel);color:var(--muted);}
   .dot.current{border-color:var(--accent);color:var(--accent);}
   .dot.answered{background:var(--line);border-color:var(--muted);color:var(--ink);}
@@ -623,7 +637,14 @@ if('serviceWorker' in navigator){
     #flashSetupMenuToggleBtn, #flashFullscreenBtn{padding:8px 10px;min-width:44px;justify-content:center;}
     #flashSetupMenuToggleBtn .icon, #flashFullscreenBtn .icon{margin-right:0;}
     .dot{width:38px;height:38px;}
-    .dots-toggle{display:inline-block;margin-bottom:10px;}
+    /* display:inline-block here is vestigial now that .dots-toggle is a
+       flex child of the .btn-row wrapper around it and pauseExamBtn (see
+       renderDots()) -- flex items compute to block-level regardless of
+       their own declared display, so this only still matters for the
+       display:none -> visible toggle itself. margin-bottom moved to the
+       wrapper div to avoid double-spacing now that there are two buttons
+       sharing one row instead of dots-toggle standing alone. */
+    .dots-toggle{display:inline-block;}
     .dotgrid.collapsed{display:none;}
 
     /* The fixed nav-row above needs the same bottom clearance inside
@@ -1785,16 +1806,15 @@ function renderQuestion(){
     </button>`;
   });
 
-  /* Pause & Save / End Exam Now render in .extra-actions, in normal
-     document flow immediately BEFORE .nav-row -- see the .extra-actions
-     comment (CSS) for why this is the one standard pattern used for
-     every secondary action now, quiz and flashcards alike, instead of
-     quiz's own previous collapsible-overflow-menu mechanism. */
+  /* "End Exam Now" removed entirely (redundant with "Submit Exam" on the
+     last question -- ending an exam only ever needed one path, not two).
+     Pause & Save moved out of here to sit next to "Show question list"
+     in .dotsPanel instead (see renderDots()) -- with End Exam Now gone,
+     Pause was the only thing left in .extra-actions, and it makes more
+     sense grouped with the question-navigator toggle than floating alone
+     above the nav-row. .nav-row is back to just the three core paging
+     controls. */
   html += `
-    <div class="extra-actions">
-      <button class="link-btn" id="pauseExamBtn" type="button">${icon('save')}Pause & Save for Later</button>
-      ${current !== total-1 ? `<button class="link-btn danger" id="endEarlyBtn">End Exam Now</button>` : ''}
-    </div>
     <div class="nav-row">
       <button class="btn btn-ghost" id="prevBtn" ${current===0?'disabled':''}>← Previous</button>
       <button class="flag-btn ${flags[current]?'on':''}" id="flagBtn">${icon('flag',{filled:flags[current]})}${flags[current]?'Flagged':'Flag for review'}</button>
@@ -1819,24 +1839,8 @@ function renderQuestion(){
   const nextBtn = document.getElementById('nextBtn');
   if(nextBtn) nextBtn.onclick = ()=>{ current=Math.min(total-1,current+1); renderQuestion(); renderDots(); scrollQuestionIntoView(); };
   document.getElementById('flagBtn').onclick = ()=>{ flags[current]=!flags[current]; syncOnlineAnswer(current); renderQuestion(); renderDots(); };
-  /* Not destructive, no confirm needed -- every answer already syncs to
-     Supabase as it's picked (syncOnlineAnswer), so there's nothing extra
-     to save here. Lands on Progress, not Library -- Library is a static
-     exam catalog (renderLibrary() just maps over EXAM_LIBRARY, it has no
-     idea an attempt is in progress), so landing there after "Pause & Save"
-     gave zero visible confirmation that anything happened; it looked
-     identical whether or not the pause "worked," and only a full page
-     reload later (which happens to re-fetch everything fresh) would
-     eventually surface the resumable round. Progress always refetches on
-     entry (see showView()) and now has a "Resume" banner right at the
-     top, so this is the one destination that actually shows "yes, this
-     was saved, here's how to pick it back up" without needing a reload. */
-  const pauseBtn = document.getElementById('pauseExamBtn');
-  if(pauseBtn) pauseBtn.onclick = ()=> showView('progress');
   const submitBtn = document.getElementById('submitBtn');
   if(submitBtn) submitBtn.onclick = doSubmit;
-  const endEarlyBtn = document.getElementById('endEarlyBtn');
-  if(endEarlyBtn) endEarlyBtn.onclick = doSubmit;
   /* Entering/exiting full-screen used to leave the scroll position exactly
      where it was -- fine on desktop (nothing moves), but on mobile the
      fixed full-screen nav-row's height differs from the normal view's,
@@ -1858,7 +1862,24 @@ function renderDots(){
   const restoreDotI = (activeEl && dotsPanel.contains(activeEl) && activeEl.classList.contains('dot')) ? activeEl.dataset.i : null;
 
   const total = exam.questions.length;
-  let html = `<button class="link-btn dots-toggle" id="dotsToggleBtn" type="button">${dotsExpanded ? 'Hide question list' : 'Show question list'}</button>`;
+  /* Pause & Save lives here now, next to "Show question list" -- moved
+     out of the nav-row area (see renderQuestion()) since "End Exam Now"
+     being removed left it as the only thing in that row, and it reads
+     more naturally grouped with the question-navigator toggle than
+     floating alone above Previous/Flag/Next. Not destructive, no confirm
+     needed -- every answer already syncs to Supabase as it's picked
+     (syncOnlineAnswer). Lands on Progress, not Library -- Library is a
+     static exam catalog with no idea an attempt is in progress, so
+     landing there after "Pause & Save" gave zero visible confirmation
+     anything happened. Progress always refetches on entry and has a
+     "Resume" banner right at the top, so it's the one destination that
+     actually confirms the save without needing a reload. */
+  let html = `
+    <div class="btn-row" style="margin-bottom:10px;">
+      <button class="link-btn dots-toggle" id="dotsToggleBtn" type="button">${dotsExpanded ? 'Hide question list' : 'Show question list'}</button>
+      <button class="link-btn" id="pauseExamBtn" type="button">${icon('save')}Pause & Save for Later</button>
+    </div>
+  `;
   html += `<div class="dotgrid${dotsExpanded ? '' : ' collapsed'}">`;
   for(let i=0;i<total;i++){
     let cls = 'dot';
@@ -1873,6 +1894,7 @@ function renderDots(){
     el.onclick = ()=>{ current = parseInt(el.dataset.i); renderQuestion(); renderDots(); scrollQuestionIntoView(); };
   });
   document.getElementById('dotsToggleBtn').onclick = ()=>{ dotsExpanded = !dotsExpanded; renderDots(); };
+  document.getElementById('pauseExamBtn').onclick = ()=> showView('progress');
 
   if(restoreDotI !== null){ dotsPanel.querySelector(`.dot[data-i="${restoreDotI}"]`)?.focus(); }
 }
