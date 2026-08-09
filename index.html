@@ -2522,6 +2522,7 @@ function renderQuestion(){
     <div class="fullscreen-toggle-row" style="text-align:right;margin-bottom:6px;">
       <button class="link-btn" id="quizFullscreenBtn" type="button">${quizFullScreen ? icon('close')+'Exit Full Screen' : icon('expand')+'Full Screen'}</button>
     </div>
+    <div class="quiz-test-label">${escapeHtml(exam.title)}</div>
     <div class="progress-row">
       <span>Question ${current+1} of ${total}</span>
       <span>${answeredCount} answered</span>
