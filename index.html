@@ -400,50 +400,23 @@ if('serviceWorker' in navigator){
   .qnum-row .qnum{margin-bottom:0;}
   .instant-toggle[aria-pressed="true"]{color:var(--accent);background:var(--accent-soft);}
 
-  /* Overflow menu for Pause/End Exam -- collapses two always-visible
-     buttons into one icon trigger on phone width (where nav-row real
-     estate is tight and these are reached far less often than Flag/Next),
-     while staying exactly as before -- plain inline buttons, no popover --
-     on desktop where there's room. Reuses the .dd/openDropdownId outside-
-     click+Escape machinery (see that section) for the open/close state;
-     the menu itself is a dedicated component, not .dd-menu, so it doesn't
-     have to fight that class's option-list-tuned specificity. */
-  .nav-more{position:relative;}
-  /* .icon-btn (defined later in this file) sets its own display:inline-flex
-     at equal (0,1,0) specificity, so a plain .nav-more-trigger{display:none}
-     loses to it purely on source order -- .nav-more-trigger.icon-btn (0,2,0)
-     wins regardless of where either rule sits in the file. */
-  .nav-more-trigger.icon-btn{display:none;}
-  /* [hidden] (0,1,0 via attribute + implicit element) needs to keep beating
-     a plain .nav-more-menu{display:flex} at every width -- an *unscoped*
-     display:flex on the base class would out-origin the UA [hidden] rule
-     regardless of specificity (author beats UA always), which is exactly
-     the bug this shape avoids: display:flex only ever applies inside a
-     width-scoped block below, so an unopened [hidden] menu has no
-     unconditional rule left to override it back open. */
-  @media (min-width:901px){
-    .nav-more-menu{display:flex;gap:10px;}
-    .nav-more-menu[hidden]{display:flex;}
-  }
-  @media (max-width:900px){
-    .nav-more-trigger.icon-btn{display:inline-flex;}
-    .nav-more-menu{
-      display:flex;
-      position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);
-      flex-direction:column;align-items:stretch;gap:0;
-      background:var(--surface);border:1px solid var(--line);border-radius:10px;
-      box-shadow:0 8px 24px rgba(0,0,0,.18);z-index:30;padding:6px;min-width:220px;
-    }
-    .nav-more-menu[hidden]{display:none;}
-    .nav-more-menu .link-btn{justify-content:flex-start;border:none;background:none;border-radius:8px;min-height:44px;}
-    .nav-more-menu .link-btn:hover{background:var(--surface-2);}
-  }
-
-  /* Flashcard Shuffle/Remove in full-screen: pulled out of the fixed
-     nav-row into normal document flow just above it, so they sit physically
-     behind the fixed bar until scrolled to, instead of permanently
-     occupying nav-row real estate right next to Previous/Next. */
-  .flash-extra-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:18px;font-family:system-ui,sans-serif;}
+  /* One standard shape for every nav-row, quiz and flashcards alike, in
+     full-screen and in the regular view: .nav-row holds ONLY primary
+     paging (Previous/Next, plus Flag for quiz specifically, sitting
+     directly between them) -- nothing else ever lives here. Every
+     secondary action (Pause & Save, End Exam Now, Shuffle, Remove) lives
+     in .extra-actions instead, a plain normal-flow row rendered
+     immediately BEFORE nav-row. Since nav-row is fixed (full-screen and
+     phone width) or sticky (desktop) at the bottom of the view either
+     way, .extra-actions sits physically behind/above it -- reachable by
+     scrolling down, not permanently competing with Previous/Next for the
+     same strip of screen. This replaces an earlier version of this file
+     where quiz used a collapsible overflow-menu trigger for its
+     secondary actions while flashcards used this scroll-to-reveal
+     pattern -- two different mechanisms solving the same problem was
+     itself part of the "no consistent system" complaint that led here;
+     now there is exactly one pattern, used everywhere. */
+  .extra-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:18px;font-family:system-ui,sans-serif;}
 
   /* Mode switch (Multiple Choice/True Recall) and the recall-info button
      are deliberately absent from fullHTML entirely while in full-screen
@@ -462,14 +435,15 @@ if('serviceWorker' in navigator){
   .opt.incorrect{border-color:var(--bad);background:var(--bad-bg);}
   .opt.incorrect .letter{color:var(--bad);}
 
+  /* Previous | Flag | Next, three direct flex children, nothing else --
+     Flag (quiz only; flashcards has no third item and just gets a plain
+     two-button row) sits genuinely between Previous/Next rather than in
+     a wrapper that can end up pushed to its own line. Pause & Save/End
+     Exam Now no longer live here at all (see .extra-actions above) --
+     removing them is most of what keeps this row flat regardless of
+     width, there's simply much less content competing for the same
+     line now. */
   .nav-row{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:22px;font-family:system-ui,sans-serif;}
-  /* Groups Flag + End Exam Now as one unit between Previous/Next -- End
-     Exam Now used to be a separate element entirely below .nav-row, so it
-     scrolled away and wasn't part of the same "always reachable, locked in
-     place during full-screen/phone" treatment Flag already got. Folding it
-     in here means it's simply another child of the same fixed-position
-     element, no separate positioning logic needed. */
-  .nav-row-mid{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center;}
   /* Real fix for buttons that don't fit side by side, not a breakpoint
      patch. Plain flex-wrap's default behavior is: a button that doesn't
      fit drops to its own new line at its OWN natural content width,
@@ -485,12 +459,15 @@ if('serviceWorker' in navigator){
      Clean, full-width stacked buttons with no viewport breakpoint
      needed at all -- self-adapting to any width, any button count, any
      label length. Same pattern .set-menu already used deliberately,
-     generalized here across every genuine multi-button action row. */
-  .nav-row-mid > *, .result-actions > *, .round-card-actions > *,
-  .flash-extra-actions > *, .recall-rate-row > *{
+     generalized here across every genuine multi-button action row,
+     including .nav-row itself now that it only ever holds 2-3 items --
+     an even Previous/Flag/Next split reads as a deliberate, symmetric
+     bar instead of two edge-anchored buttons with dead space between. */
+  .nav-row > *, .result-actions > *, .round-card-actions > *,
+  .extra-actions > *, .recall-rate-row > *{
     flex:1 1 auto;min-width:0;
   }
-  .nav-row-mid > .link-btn, .flash-extra-actions > .link-btn,
+  .nav-row > .flag-btn, .nav-row > .link-btn, .extra-actions > .link-btn,
   .recall-rate-row > .recall-rate-btn{
     justify-content:center;
   }
@@ -609,22 +586,21 @@ if('serviceWorker' in navigator){
   }
 
   /* Phone-width fixes. Everything else already reflows via flex-wrap;
-     .nav-row is the one place three unwrapped buttons (Previous / Flag /
-     Next) don't fit and were breaking mid-word. Stack Previous+Next as a
-     two-corner row (order pushes Flag below, full-width) instead. Position/
-     background/padding-bottom for .nav-row and .wrap are already owned by
-     the <=900px block above; this block only adds the wrap-specific layout
-     on top of that. */
+     .nav-row itself doesn't need a dedicated wrap rule anymore -- it's
+     down to 2-3 plain buttons (Previous/[Flag]/Next) since Pause & Save/
+     End Exam/Shuffle/Remove all moved to .extra-actions, and the shared
+     flex:1 1 auto rule above already handles the rare case where even
+     that doesn't fit at this width (wraps to full-width stacked rows,
+     same as everywhere else). .extra-actions gets the same 44px touch-
+     target floor its buttons had before, at this width specifically --
+     content is now longer-form full-width buttons rather than a tight
+     side-by-side pair, so the wider gap that used to cut mis-tap risk
+     between two adjacent buttons isn't needed the same way, but the
+     height floor still is. Position/background/padding-bottom for
+     .nav-row and .wrap are already owned by the <=900px block above. */
   @media (max-width: 480px){
-    .nav-row{flex-wrap:wrap;row-gap:10px;}
-    .nav-row .nav-row-mid{order:3;flex:1 0 100%;gap:14px;}
-    /* Shuffle/Remove were 33px tall with only an 11px gap between them at
-       this width -- .link-btn's base padding (7px 12px) is tuned for the
-       dense desktop rows it lives in elsewhere (Settings popover, Admin
-       rows), not a touch target sitting right next to a destructive action.
-       44px meets the WCAG AAA target size; the wider gap above cuts the
-       mis-tap risk between "Shuffle" and "Remove this card". */
-    .nav-row .nav-row-mid .link-btn{min-height:44px;padding:11px 14px;}
+    .extra-actions{gap:10px;}
+    .extra-actions .link-btn{min-height:44px;padding:11px 14px;}
     /* "Manage this set" / "Full Screen" text labels collapse to icon-only
        here -- at this width the two full labels plus the Multiple Choice/
        True Recall mode switch don't fit on one line no matter how they're
@@ -791,11 +767,11 @@ if('serviceWorker' in navigator){
 
     /* Touch-target floor, site-wide. A deep-dive mobile pass found nearly
        every small/compact button class in the app sitting at 23-36px tall
-       -- well under the 44px WCAG AAA target -- everywhere except the one
-       row (.nav-row .nav-row-mid .link-btn, above) that got a scoped fix
-       earlier. That fix was correct but too narrow: it solved Shuffle/
-       Remove specifically without addressing the same underlying problem
-       on "Full Screen", "Manage this set", the mode switches, Flag,
+       -- well under the 44px WCAG AAA target -- everywhere except one row
+       (.extra-actions .link-btn, above) that got a scoped fix earlier.
+       That fix was correct but too narrow: it solved Shuffle/Remove
+       specifically without addressing the same underlying problem on
+       "Full Screen", "Manage this set", the mode switches, Flag,
        Settings/More sheet menu items, or any other .link-btn/.icon-btn
        usage -- all the same base classes, just outside that one row.
        One rule here instead of another one-off fix per instance found. */
@@ -928,8 +904,8 @@ if('serviceWorker' in navigator){
   .dialog-overlay[hidden]{display:none;}
   .dialog-card{background:var(--surface);border-radius:14px;padding:26px 28px;max-width:360px;width:90%;}
   /* Dialog action rows (Cancel/Confirm, Start Fresh/Continue, etc.) --
-     unlike nav-row-mid/.btn-row above, these are deliberately compact and
-     right-aligned on desktop, not filling their container, so the same
+     unlike .nav-row/.extra-actions/.btn-row above, these are deliberately
+     compact and right-aligned on desktop, not filling their container, so the same
      flex-grow trick would visually stretch two small buttons across an
      entire wide dialog card, an unwanted side effect here. Scoped to a
      mobile-only breakpoint instead: stays exactly as before until the
@@ -1797,20 +1773,19 @@ function renderQuestion(){
     </button>`;
   });
 
-  const navMoreOpen = openDropdownId === 'quizNavMore';
+  /* Pause & Save / End Exam Now render in .extra-actions, in normal
+     document flow immediately BEFORE .nav-row -- see the .extra-actions
+     comment (CSS) for why this is the one standard pattern used for
+     every secondary action now, quiz and flashcards alike, instead of
+     quiz's own previous collapsible-overflow-menu mechanism. */
   html += `
+    <div class="extra-actions">
+      <button class="link-btn" id="pauseExamBtn" type="button">${icon('save')}Pause & Save for Later</button>
+      ${current !== total-1 ? `<button class="link-btn danger" id="endEarlyBtn">End Exam Now</button>` : ''}
+    </div>
     <div class="nav-row">
       <button class="btn btn-ghost" id="prevBtn" ${current===0?'disabled':''}>← Previous</button>
-      <div class="nav-row-mid">
-        <button class="flag-btn ${flags[current]?'on':''}" id="flagBtn">${icon('flag',{filled:flags[current]})}${flags[current]?'Flagged':'Flag for review'}</button>
-        <div class="dd nav-more">
-          <button type="button" class="icon-btn nav-more-trigger" id="navMoreBtn" aria-haspopup="true" aria-expanded="${navMoreOpen}" aria-controls="navMoreMenu" aria-label="More exam actions">${icon('more')}</button>
-          <div class="nav-more-menu" id="navMoreMenu" ${navMoreOpen?'':'hidden'}>
-            <button class="link-btn" id="pauseExamBtn" type="button">${icon('save')}Pause & Save for Later</button>
-            ${current !== total-1 ? `<button class="link-btn danger" id="endEarlyBtn">End Exam Now</button>` : ''}
-          </div>
-        </div>
-      </div>
+      <button class="flag-btn ${flags[current]?'on':''}" id="flagBtn">${icon('flag',{filled:flags[current]})}${flags[current]?'Flagged':'Flag for review'}</button>
       ${current===total-1
         ? `<button class="btn btn-primary" id="submitBtn">Submit Exam</button>`
         : `<button class="btn btn-primary" id="nextBtn">Next →</button>`}
@@ -1850,14 +1825,16 @@ function renderQuestion(){
   if(submitBtn) submitBtn.onclick = doSubmit;
   const endEarlyBtn = document.getElementById('endEarlyBtn');
   if(endEarlyBtn) endEarlyBtn.onclick = doSubmit;
-  const navMoreBtn = document.getElementById('navMoreBtn');
-  if(navMoreBtn) navMoreBtn.onclick = (e)=>{
-    e.stopPropagation();
-    if(openDropdownId === 'quizNavMore'){ openDropdownId = null; openDropdownRerender = null; }
-    else { openDropdownId = 'quizNavMore'; openDropdownRerender = renderQuestion; }
-    renderQuestion();
-  };
-  document.getElementById('quizFullscreenBtn').onclick = ()=>{ quizFullScreen = !quizFullScreen; renderQuestion(); };
+  /* Entering/exiting full-screen used to leave the scroll position exactly
+     where it was -- fine on desktop (nothing moves), but on mobile the
+     fixed full-screen nav-row's height differs from the normal view's,
+     so landing mid-scroll on whatever the page happened to be scrolled to
+     before toggling could leave the question itself out of view, the
+     same "have to manually scroll to see the question" gap the Next/
+     Previous fix (scrollQuestionIntoView, see above) closed for
+     navigation but never applied here since toggling full-screen isn't
+     technically "navigating" to a different question. */
+  document.getElementById('quizFullscreenBtn').onclick = ()=>{ quizFullScreen = !quizFullScreen; renderQuestion(); scrollQuestionIntoView(); };
 
   if(restoreId){ document.getElementById(restoreId)?.focus(); }
   else if(restoreOptI !== null){ quizPanel.querySelector(`.opt[data-i="${restoreOptI}"]`)?.focus(); }
@@ -3300,13 +3277,12 @@ function renderFlashcard(){
          them takes a deliberate scroll rather than them permanently eating
          space right under the card. Outside full-screen they keep the
          sticky nav-row treatment every other nav-row gets. */
-      const recallActionsHtml = `
-        ${total>1 ? `<button class="link-btn" id="flashShuffleBtn" type="button">${icon('shuffle')}Shuffle remaining</button>` : ''}
-        <button class="link-btn danger" id="flashRemoveCardBtn" type="button">${icon('trash')}Remove this card</button>
+      html += `
+        <div class="extra-actions">
+          ${total>1 ? `<button class="link-btn" id="flashShuffleBtn" type="button">${icon('shuffle')}Shuffle remaining</button>` : ''}
+          <button class="link-btn danger" id="flashRemoveCardBtn" type="button">${icon('trash')}Remove this card</button>
+        </div>
       `;
-      html += flashFullScreen
-        ? `<div class="flash-extra-actions">${recallActionsHtml}</div>`
-        : `<div class="nav-row" style="justify-content:center;"><div class="nav-row-mid">${recallActionsHtml}</div></div>`;
     }
   } else {
     const letters = ['1','2','3','4','5','6'];
@@ -3349,35 +3325,21 @@ function renderFlashcard(){
         </div>
       </div>
     `;
-    /* Shuffle/Remove: sticky-nav-row treatment outside full-screen (same
-       nav-row-mid grouping quiz's Flag/overflow-menu use -- keeping them as
-       independent elements was both why the second one visually clipped
-       under the sticky nav-row and why paging felt like it was "bouncing",
-       see git history). In full-screen they instead render as a plain
-       in-flow row just above the fixed Previous/Next bar -- physically
-       covered by it until scrolled to, rather than permanently competing
-       with Previous/Next for the same fixed strip of screen. */
-    const shuffleRemoveHtml = `
-      ${flashcards.length>1 ? `<button class="link-btn" id="flashShuffleBtn" type="button">${icon('shuffle')}Shuffle order</button>` : ''}
-      <button class="link-btn danger" id="flashRemoveCardBtn" type="button">${icon('trash')}Remove this card</button>
+    /* Shuffle/Remove live in .extra-actions, same as everywhere else now
+       (see the CSS comment on that class) -- a plain in-flow row just
+       above the fixed/sticky Previous/Next bar, physically covered by it
+       on mobile until scrolled to. No longer conditional on full-screen
+       state; both views use the exact same markup shape. */
+    html += `
+      <div class="extra-actions">
+        ${flashcards.length>1 ? `<button class="link-btn" id="flashShuffleBtn" type="button">${icon('shuffle')}Shuffle order</button>` : ''}
+        <button class="link-btn danger" id="flashRemoveCardBtn" type="button">${icon('trash')}Remove this card</button>
+      </div>
+      <div class="nav-row">
+        <button class="btn btn-ghost" id="flashPrevBtn" ${flashIndex===0?'disabled':''}>← Previous</button>
+        <button class="btn btn-ghost" id="flashNextBtn" ${flashIndex===flashcards.length-1?'disabled':''}>Next →</button>
+      </div>
     `;
-    if(flashFullScreen){
-      html += `
-        <div class="flash-extra-actions">${shuffleRemoveHtml}</div>
-        <div class="nav-row">
-          <button class="btn btn-ghost" id="flashPrevBtn" ${flashIndex===0?'disabled':''}>← Previous</button>
-          <button class="btn btn-ghost" id="flashNextBtn" ${flashIndex===flashcards.length-1?'disabled':''}>Next →</button>
-        </div>
-      `;
-    } else {
-      html += `
-        <div class="nav-row">
-          <button class="btn btn-ghost" id="flashPrevBtn" ${flashIndex===0?'disabled':''}>← Previous</button>
-          <div class="nav-row-mid">${shuffleRemoveHtml}</div>
-          <button class="btn btn-ghost" id="flashNextBtn" ${flashIndex===flashcards.length-1?'disabled':''}>Next →</button>
-        </div>
-      `;
-    }
   }
   flashPanel.innerHTML = topHtml + genToggleHtml + html;
   /* .flash-face-back is position:absolute (needed so both faces occupy the
@@ -3445,7 +3407,11 @@ function renderFlashcard(){
   }
   const updateSetBtn = document.getElementById('flashUpdateSetBtn');
   if(updateSetBtn) updateSetBtn.onclick = updateSavedFlashcardSet;
-  document.getElementById('flashFullscreenBtn').onclick = ()=>{ flashFullScreen = !flashFullScreen; renderFlashcard(); };
+  /* Same "auto load view" gap as quiz's full-screen toggle (see that
+     comment) -- entering/exiting full-screen never re-anchored scroll
+     position to the card, so a full-screen flashcard could open mid-
+     scroll instead of showing the question from the top. */
+  document.getElementById('flashFullscreenBtn').onclick = ()=>{ flashFullScreen = !flashFullScreen; renderFlashcard(); scrollFlashcardIntoView(); };
   const goHomeBtn = document.getElementById('flashGoHomeBtn');
   if(goHomeBtn) goHomeBtn.onclick = ()=>{ flashGeneratorOpen = true; renderFlashcard(); };
   const setupMenuToggleBtn = document.getElementById('flashSetupMenuToggleBtn');
