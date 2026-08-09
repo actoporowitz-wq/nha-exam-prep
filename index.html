@@ -482,7 +482,7 @@ if('serviceWorker' in navigator){
      actually has. */
   @media (max-width:900px){
     #quizView.quiz-fullscreen .quiz-question-block{
-      justify-content:flex-start;min-height:0;padding-top:clamp(8px,6vh,56px);
+      justify-content:flex-start;min-height:calc(100vh - 40px);padding-top:clamp(8px,6vh,56px);
     }
     /* Second half of the same fix: the "Exit Full Screen" link row was
        still plain in-flow content sitting above .progress-row/.bar/
@@ -1925,11 +1925,13 @@ function scrollElementIntoView(el){
        : null)
     : null;
   const rect = el.getBoundingClientRect();
+  const toggleRow = container ? container.querySelector('.fullscreen-toggle-row') : null;
+  const topOffset = toggleRow ? (toggleRow.getBoundingClientRect().height + 26) : 12;
   if(container){
-    const target = container.scrollTop + rect.top - 12;
+    const target = container.scrollTop + rect.top - topOffset;
     container.scrollTo({ top: Math.max(0, target), behavior: 'auto' });
   } else {
-    const target = window.scrollY + rect.top - 12; // 12px breathing room instead of flush-to-edge
+    const target = window.scrollY + rect.top - topOffset; // clears the fixed toggle when present, else the usual 12px breathing room
     window.scrollTo({ top: Math.max(0, target), behavior: 'auto' });
   }
 }
