@@ -2409,7 +2409,7 @@ function renderAiChatMessages(){
     // than the option just disappearing, with a placeholder for a real
     // upgrade path once one exists (subscription tiers, per-account admin
     // overrides) rather than a dead end.
-    turnsEl.innerHTML = `You've used your follow-ups for this question. <span class="ai-chat-upgrade-badge">Upgrade for more (coming soon)</span>`;
+    turnsEl.innerHTML = `You've used your follow-ups for this question for now -- more open up again within 24 hours. <span class="ai-chat-upgrade-badge">Upgrade for more (coming soon)</span>`;
     inputBar.classList.add('capped');
     input.disabled = true;
     sendBtn.disabled = true;
@@ -4135,8 +4135,10 @@ function renderFlashcard(){
     <h1 class="sr-only">Flashcards</h1>
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
         ${currentUser ? `<button class="link-btn" id="flashGoHomeBtn" type="button" aria-label="Flashcards home"><span class="back-arrow" aria-hidden="true">←</span><span class="nav-label" aria-hidden="true">Flashcards home</span></button>` : '<span></span>'}
-        ${currentUser ? `<button class="link-btn" id="flashSaveToggleBtn" type="button">${flashSaveOpen ? icon('close')+'Cancel save' : icon('save')+(currentSetId ? 'Save as new set' : 'Save this set')}</button>` : ''}
-        ${currentUser ? `<button class="link-btn" id="flashSetupMenuToggleBtn" type="button" aria-label="${flashSetupMenuOpen ? 'Hide options' : 'Options'}">${flashSetupMenuOpen ? icon('close') : icon('settings')}<span class="nav-label" aria-hidden="true">${flashSetupMenuOpen ? 'Hide options' : 'Options'}</span></button>` : ''}
+        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;">
+          ${currentUser ? `<button class="link-btn" id="flashSaveToggleBtn" type="button">${flashSaveOpen ? icon('close')+'Cancel save' : icon('save')+(currentSetId ? 'Save as new set' : 'Save this set')}</button>` : ''}
+          ${currentUser ? `<button class="link-btn" id="flashSetupMenuToggleBtn" type="button" aria-label="${flashSetupMenuOpen ? 'Hide options' : 'Options'}">${flashSetupMenuOpen ? icon('close') : icon('settings')}<span class="nav-label" aria-hidden="true">${flashSetupMenuOpen ? 'Hide options' : 'Options'}</span></button>` : ''}
+        </div>
     </div>
     <div style="display:flex;align-items:stretch;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
       ${modeSwitchHtml}
@@ -6153,7 +6155,7 @@ function openAiAccountOverrideDialog(userId, email){
       <div style="display:flex;flex-direction:column;gap:14px;font-family:system-ui,sans-serif;margin-top:4px;">
         <label>AI explanations ${boolField('ovExplainEnabled', existing.explain_enabled)}</label>
         <label>Follow-up chat ${boolField('ovChatEnabled', existing.chat_enabled)}</label>
-        <label>Follow-ups allowed per question
+        <label>Follow-ups allowed per question, per 24h
           <input type="number" id="ovTurnLimit" min="1" max="50" placeholder="Site default" value="${existing.chat_turn_limit ?? ''}">
         </label>
         <label>Follow-ups allowed per ${periodDays}-day period
@@ -6573,7 +6575,7 @@ async function renderAiFeatureConfigSection(){
           Review follow-up chat enabled
         </label>
         <label style="display:flex;align-items:center;gap:10px;">
-          Follow-up questions allowed per exam question
+          Follow-up questions allowed per exam question, per 24h
           <input type="number" id="aiChatTurnLimitInput" min="1" max="50" value="${cfg.chat_turn_limit}" style="width:64px;">
         </label>
         <label style="display:flex;align-items:center;gap:10px;">
