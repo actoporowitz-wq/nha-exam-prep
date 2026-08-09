@@ -2522,7 +2522,6 @@ function renderQuestion(){
     <div class="fullscreen-toggle-row" style="text-align:right;margin-bottom:6px;">
       <button class="link-btn" id="quizFullscreenBtn" type="button">${quizFullScreen ? icon('close')+'Exit Full Screen' : icon('expand')+'Full Screen'}</button>
     </div>
-    <div class="quiz-test-label">${escapeHtml(exam.title)}</div>
     <div class="progress-row">
       <span>Question ${current+1} of ${total}</span>
       <span>${answeredCount} answered</span>
@@ -5495,13 +5494,6 @@ let progressExpandedRoundId = null;
 let progressAttemptView = null; // { questions, answersMap } while drilled into one attempt's review
 let progressSortMode = 'name'; // 'name' | 'last' | 'first'
 let progressViewMode = localStorage.getItem('nha_progress_view_mode') === 'stacked' ? 'stacked' : 'grid'; // 'grid' (card + ring per round, default) | 'stacked' (compact list, more efficient for many rounds)
-// AI usage sub-view (Feature 3 of the original AI roadmap) -- boolean
-// gate like progressAttemptView above, not a data object, since its own
-// render function owns fetching+caching progressAiUsageData itself (network
-// calls, unlike the attempt view which reuses data the main list already
-// has in memory).
-let progressAiUsageView = false;
-let progressAiUsageData = null; // { flags, questions } once loaded, cleared on every fresh entry so it can't show stale numbers from a previous visit
 
 function sortProgressExams(exams, mode){
   const sorted = exams.slice();
@@ -5516,7 +5508,6 @@ function sortProgressExams(exams, mode){
 
 async function renderProgressView(){
   progressAttemptView = null;
-  progressAiUsageView = false;
   progressExpandedRoundId = null;
   progressPanel.innerHTML = `<h1>Progress</h1>${renderProgressSkeleton()}`;
   try{
@@ -5660,7 +5651,6 @@ function findMostRecentResumableRound(d){
 
 function renderProgressPanel(){
   if(progressAttemptView){ renderProgressAttemptDetail(); return; }
-  if(progressAiUsageView){ renderProgressAiUsageView(); return; }
   const d = progressData;
   const resumable = d.exams.length ? findMostRecentResumableRound(d) : null;
   let html = `
@@ -5669,7 +5659,6 @@ function renderProgressPanel(){
       <div class="stat-pill">${icon('library')}<strong>${d.exams.length}</strong><span class="stat-label">exam${d.exams.length===1?'':'s'} started</span></div>
       <div class="stat-pill">${icon('check')}<strong>${d.masteredRounds} of ${d.totalRounds}</strong><span class="stat-label">round${d.totalRounds===1?'':'s'} mastered</span></div>
     </div>
-    ${aiFeatureFlags.chat_enabled ? `<button type="button" class="link-btn" id="progressAiUsageBtn">${icon('feedback')}AI Usage</button>` : ''}
     <div class="msg" id="progressMsg"></div>
   `;
   if(resumable){
@@ -5775,8 +5764,6 @@ function renderProgressPanel(){
     html += `</div>`;
   });
   progressPanel.innerHTML = html;
-  const aiUsageBtn = document.getElementById('progressAiUsageBtn');
-  if(aiUsageBtn) aiUsageBtn.onclick = ()=>{ progressAiUsageView = true; progressAiUsageData = null; renderProgressPanel(); };
   wireDropdown('progressSort', (value)=>{ progressSortMode = value; renderProgressPanel(); }, renderProgressPanel);
   progressPanel.querySelectorAll('[data-progress-view]').forEach(btn=>{
     btn.onclick = ()=>{
@@ -5982,71 +5969,6 @@ function renderProgressAttemptDetail(){
   document.getElementById('progressReviewMissedBtn').onclick = ()=>{ progressReviewFilter='missed'; renderProgressAttemptDetail(); };
   document.getElementById('progressReviewAllBtn').onclick = ()=>{ progressReviewFilter='all'; renderProgressAttemptDetail(); };
   wireReviewList(progressPanel, questions);
-}
-
-/* AI Usage sub-view (Feature 3 of the original AI roadmap) -- shows the
-   student their own rolling-period follow-up chat usage and which
-   questions they've been asking about. Explanation (Layer 1) view counts
-   are deliberately NOT shown here -- see migration 0030's own header
-   comment for why that number doesn't actually exist anywhere (cache hits,
-   the overwhelming majority of views, are never logged per-viewer).
-   Network calls happen here rather than being pre-fetched with the rest
-   of progressData, since most visits to Progress never open this
-   sub-view -- no reason to pay two extra round-trips on every load. */
-async function renderProgressAiUsageView(){
-  const header = `
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
-      <h1 style="margin:0;font-size:1.3rem;">AI Usage</h1>
-      <button class="btn btn-ghost" id="backToProgressFromAiUsageBtn">← Back to Progress</button>
-    </div>
-  `;
-  if(!progressAiUsageData){
-    progressPanel.innerHTML = header + `<div class="format-help">Loading…</div>`;
-    document.getElementById('backToProgressFromAiUsageBtn').onclick = ()=>{ progressAiUsageView = false; renderProgressPanel(); };
-    try{
-      const [{ data: flagsRows, error: flagsErr }, { data: questions, error: qErr }] = await Promise.all([
-        supabaseClient.rpc('get_ai_feature_flags'),
-        supabaseClient.rpc('get_my_recent_ai_chat_questions', { limit_count: 20 }),
-      ]);
-      if(flagsErr) throw flagsErr;
-      if(qErr) throw qErr;
-      progressAiUsageData = { flags: (flagsRows && flagsRows[0]) || aiFeatureFlags, questions: questions || [] };
-    } catch(err){
-      progressPanel.innerHTML = header + `<div class="msg err">Couldn't load AI usage: ${escapeHtml(err.message)}</div>`;
-      document.getElementById('backToProgressFromAiUsageBtn').onclick = ()=>{ progressAiUsageView = false; renderProgressPanel(); };
-      return;
-    }
-  }
-  const { flags, questions } = progressAiUsageData;
-  const periodPct = flags.chat_period_limit ? Math.min(100, (flags.chat_period_used / flags.chat_period_limit) * 100) : 0;
-  let html = header;
-  html += `
-    <div class="subsection">
-      <h2>Follow-up chat, last ${flags.chat_period_days} days</h2>
-      <div class="format-help">${flags.chat_period_used} of ${flags.chat_period_limit} follow-up messages used across all questions. This is a rolling window, not a fixed monthly reset -- it eases as your older messages age out, rather than jumping back to zero on a set date.</div>
-      <div class="bar"><div class="bar-fill" style="width:${periodPct.toFixed(1)}%"></div></div>
-      <div class="format-help">Each question also has its own limit: ${flags.chat_turn_limit} follow-ups per question, refreshing every 24 hours.</div>
-    </div>
-  `;
-  html += `<div class="subsection"><h2>Questions you've asked about</h2>`;
-  if(!questions.length){
-    html += `<div class="format-help">No follow-up questions yet — look for "Ask a follow-up" under an AI Explanation while reviewing a completed exam.</div>`;
-  } else {
-    html += questions.map(q=>{
-      const label = q.question_key.charAt(0).toUpperCase() + q.question_key.slice(1);
-      return `
-        <div class="lib-row">
-          <div class="lib-info">
-            <div class="lib-title">${escapeHtml(label)}</div>
-            <div class="lib-meta">${q.messages_count} message${q.messages_count===1?'':'s'} · last asked ${new Date(q.last_activity).toLocaleString()}</div>
-          </div>
-        </div>
-      `;
-    }).join('');
-  }
-  html += `</div>`;
-  progressPanel.innerHTML = html;
-  document.getElementById('backToProgressFromAiUsageBtn').onclick = ()=>{ progressAiUsageView = false; renderProgressPanel(); };
 }
 
 /* ================= ADMIN TAB (role==='admin' only) ================= */
