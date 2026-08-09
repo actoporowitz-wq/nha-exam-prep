@@ -3448,13 +3448,11 @@ function renderFlashcard(){
     </div>
   ` : `
     <h1 class="sr-only">Flashcards</h1>
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:6px;">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:6px;">
         ${currentUser ? `<button class="link-btn" id="flashGoHomeBtn" type="button">← Flashcards home</button>` : ''}
         ${currentUser ? `<button class="link-btn" id="flashSetupMenuToggleBtn" type="button" aria-label="${flashSetupMenuOpen ? 'Hide set options' : 'Manage this set'}">${flashSetupMenuOpen ? icon('close') : icon('settings')}<span class="nav-label" aria-hidden="true">${flashSetupMenuOpen ? 'Hide set options' : 'Manage this set'}</span></button>` : ''}
         ${modeSwitchHtml}
-      </div>
-      <button class="link-btn" id="flashFullscreenBtn" type="button" aria-label="Full Screen">${icon('expand')}<span class="nav-label" aria-hidden="true">Full Screen</span></button>
+      <button class="link-btn" id="flashFullscreenBtn" type="button" aria-label="Full Screen" style="margin-left:auto;">${icon('expand')}<span class="nav-label" aria-hidden="true">Full Screen</span></button>
     </div>
   `;
   /* Used at the bottom of this function for focus-restore across modes --
