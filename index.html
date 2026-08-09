@@ -808,6 +808,8 @@ if('serviceWorker' in navigator){
   }
   .ai-chat-header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line);}
   .ai-chat-header h3{margin:0;font-size:1rem;}
+  .ai-chat-header-actions{display:flex;gap:2px;flex:none;}
+  .ai-chat-pin-btn.on{color:var(--accent);background:var(--surface-2);}
   .ai-chat-qtext{font-size:.8rem;color:var(--muted);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
   .ai-chat-messages{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px;}
   .ai-chat-bubble{max-width:85%;padding:10px 13px;border-radius:12px;font-size:.92rem;line-height:1.45;white-space:pre-wrap;}
@@ -953,20 +955,13 @@ if('serviceWorker' in navigator){
   @media (max-width: 480px){
     .extra-actions{gap:10px;}
     .extra-actions .link-btn{min-height:44px;padding:11px 14px;}
-    /* "Manage this set" / "Full Screen" text labels collapse to icon-only
-       here -- at this width the two full labels plus the Multiple Choice/
-       True Recall mode switch don't fit on one line no matter how they're
-       grouped, which was stacking the flashcards toolbar into 3 separate
-       rows before you ever reach the card. Icon-only lets the setup
-       trigger actually share a row with the mode switch.
-       #flashFullscreenBtn specifically is scoped to :not(.flash-fullscreen)
-       -- flashGoHomeBtn/flashSetupMenuToggleBtn/the mode switch are all
-       ALREADY absent entirely once full-screen is on (see topRowHtml),
-       so #flashFullscreenBtn has nothing left to share a row with there
-       and collapsing it to icon-only serves no space-saving purpose --
-       it just leaves a single unlabeled "X" sitting alone with no
-       context, real user complaint ("floating in the middle of
-       nowhere"). Full-screen keeps its real "Exit Full Screen" label,
+    /* "Options" / "Full Screen" text labels collapse to icon-only here --
+       Options shares row 1 with Back + Save, Full Screen shares row 2 with
+       the Multiple Choice/True Recall mode switch, and neither full label
+       is needed to fit at this width once its row-mate is already text.
+       #flashFullscreenBtn is scoped to :not(.flash-fullscreen) -- in
+       full-screen it's alone on its own row (see topRowHtml) with nothing
+       to make space for, so it keeps its real "Exit Full Screen" label,
        same treatment quiz's equivalent toggle already had. */
     #flashSetupMenuToggleBtn .nav-label,
     #flashGoHomeBtn .nav-label,
@@ -1083,8 +1078,8 @@ if('serviceWorker' in navigator){
      dark colors, since this one lives in the theme-adaptive main canvas
      (flashcards), not the always-dark sidebar/settings chrome. */
   /* flex:none keeps the whole pill from being squeezed narrower than its
-     content by its flex-row siblings (Flashcards home / Manage this set)
-     -- without it, a tight row lets the pill shrink until its own
+     content by flex-row siblings (e.g. Progress's view-mode row) -- without
+     it, a tight row lets the pill shrink until its own
      buttons' text has nowhere to go but wrap mid-phrase ("Multiple" /
      "Choice" on two lines), which a segmented control should never do:
      the label is either fully visible or the whole control moves to its
@@ -1092,16 +1087,24 @@ if('serviceWorker' in navigator){
      labels is the other half -- guarantees that if the pill doesn't fit
      it wraps as one whole unit (normal flex-wrap on its flex-row parent)
      instead of surviving by breaking its own text apart. */
-  /* height:44px + box-sizing:border-box pins this to the same real height
-     as the plain icon buttons (Manage/Save/Full Screen etc, all 44px) it
-     shares a row with -- without an explicit height, the pill's total came
-     from its own padding + button padding + this font's line-height
-     stacking up to ~51px, a real (not just visual) mismatch against its
-     row-mates that read as buttons randomly sized differently. Buttons
-     inside get align-items:center (default stretch from the parent
-     already makes them fill the 44px) instead of their own vertical
-     padding, so the text centers within whatever height they're given
-     rather than the padding dictating the height. */
+  /* REAL BUG, twice: two earlier attempts here both tried to force this
+     pill down to exactly 44px total (to match the plain 44px icon buttons
+     it used to share a row with) and both caused the active button's
+     solid-color background to visibly overflow past the pill's rounded
+     corners -- confirmed from a real-device screenshot. Root cause found
+     on the second pass: a separate, pre-existing, deliberate accessibility
+     rule (search "min-height:44px" a bit further down, the touch-target
+     floor applied to .link-btn/.study-mode-switch button/etc site-wide)
+     sets a 44px MINIMUM on the button itself, and min-height always wins
+     over a smaller explicit height per spec -- no height value assigned
+     here could ever bring the button under 44px, so a 44px OUTER pill
+     (which needs to fit that 44px button PLUS its own padding/border
+     around it) was never actually achievable; forcing it anyway just
+     clipped/overflowed instead of shrinking. This pill now has its own
+     dedicated row (see topRowHtml) rather than sharing one with a 44px
+     icon button, so matching that exact height isn't needed anymore --
+     letting it size naturally (auto height, driven by the button's own
+     44px floor plus this padding/border) is both simpler and correct. */
   .study-mode-switch{display:inline-flex;flex:none;background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:3px;margin-bottom:14px;}
   .study-mode-switch.full-width{display:flex;flex:1;}
   .study-mode-switch.full-width button{flex:1;justify-content:center;}
@@ -2262,13 +2265,18 @@ function fetchAiExplanation(q){
 const aiChatThreads = new Map(); // question_key -> { messages, turnsRemaining, capped }
 let aiChatCurrentQuestion = null;
 let aiChatEl = null;
+// When true, the outside-click backdrop no longer closes the panel --
+// resets to false on every real close (X button) so a pin from a previous
+// session doesn't silently carry over and confuse "click elsewhere did
+// nothing" into looking like a bug next time the panel opens.
+let aiChatPinned = false;
 
 function ensureAiChatPanel(){
   if(aiChatEl) return aiChatEl;
   const backdrop = document.createElement('div');
   backdrop.className = 'ai-chat-backdrop';
   backdrop.hidden = true;
-  backdrop.onclick = closeAiChat;
+  backdrop.onclick = ()=>{ if(!aiChatPinned) closeAiChat(); };
   const panel = document.createElement('div');
   panel.className = 'ai-chat-panel';
   panel.hidden = true;
@@ -2278,7 +2286,10 @@ function ensureAiChatPanel(){
         <h3>Ask about this question</h3>
         <div class="ai-chat-qtext" id="aiChatQtext"></div>
       </div>
-      <button type="button" class="icon-btn" id="aiChatCloseBtn" aria-label="Close chat">${icon('close')}</button>
+      <div class="ai-chat-header-actions">
+        <button type="button" class="icon-btn ai-chat-pin-btn" id="aiChatPinBtn" aria-label="Pin chat open" aria-pressed="false" title="Keep chat open when clicking elsewhere">${icon('pin')}</button>
+        <button type="button" class="icon-btn" id="aiChatCloseBtn" aria-label="Close chat">${icon('close')}</button>
+      </div>
     </div>
     <div class="ai-chat-messages" id="aiChatMessages"></div>
     <div class="ai-chat-footer">
@@ -2292,6 +2303,7 @@ function ensureAiChatPanel(){
   document.body.appendChild(backdrop);
   document.body.appendChild(panel);
   panel.querySelector('#aiChatCloseBtn').onclick = closeAiChat;
+  panel.querySelector('#aiChatPinBtn').onclick = toggleAiChatPin;
   panel.querySelector('#aiChatSendBtn').onclick = sendAiChatMessage;
   panel.querySelector('#aiChatInput').addEventListener('keydown', (e)=>{
     if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendAiChatMessage(); }
@@ -2345,6 +2357,21 @@ function closeAiChat(){
   document.body.classList.remove('ai-chat-open');
   document.body.style.overflow = '';
   aiChatCurrentQuestion = null;
+  aiChatPinned = false;
+  updateAiChatPinUI();
+}
+
+function toggleAiChatPin(){
+  aiChatPinned = !aiChatPinned;
+  updateAiChatPinUI();
+}
+
+function updateAiChatPinUI(){
+  if(!aiChatEl) return;
+  const btn = aiChatEl.panel.querySelector('#aiChatPinBtn');
+  btn.classList.toggle('on', aiChatPinned);
+  btn.setAttribute('aria-pressed', String(aiChatPinned));
+  btn.title = aiChatPinned ? 'Pinned -- click elsewhere won\'t close this' : 'Keep chat open when clicking elsewhere';
 }
 
 function renderAiChatMessages(){
@@ -2952,7 +2979,8 @@ const ICONS = {
   shield: '<path d="M12 3l7 3v6c0 5-3.5 8-7 9-3.5-1-7-4-7-9V6z"/>',
   chevronLeft: '<polyline points="15,18 9,12 15,6"/>',
   chevronDown: '<polyline points="6,9 12,15 18,9"/>',
-  send: '<line x1="4" y1="20" x2="20" y2="4"/><polyline points="9,4 20,4 20,15"/>'
+  send: '<line x1="4" y1="20" x2="20" y2="4"/><polyline points="9,4 20,4 20,15"/>',
+  pin: '<path d="M12 22s7-7.58 7-12A7 7 0 0 0 5 10c0 4.42 7 12 7 12z"/><circle cx="12" cy="10" r="2.7"/>'
 };
 function icon(name, opts){
   opts = opts || {};
@@ -4071,20 +4099,15 @@ function renderFlashcard(){
     `
     : '';
   /* Absent entirely in full-screen (not just visually hidden) -- switching
-     study mode mid-session isn't a full-screen action, and one less row of
-     chrome above the card matters more there than at any other width. */
+     study mode mid-session isn't a full-screen action. Wrapper gets flex:1
+     so it shares row 2 with the Full Screen toggle (see topRowHtml) instead
+     of owning a whole row to itself; min-width:0 lets the pill actually
+     shrink instead of forcing the row to overflow. margin-bottom:0 on the
+     pill overrides its standalone-use default (see .study-mode-switch) --
+     without it, the extra margin inflates this flex row's cross-axis
+     height and throws off vertical centering against the toggle button. */
   const modeSwitchHtml = flashFullScreen ? '' : `
-    <div style="display:flex;align-items:center;gap:6px;">
-      <!-- margin-bottom:0 override -- .study-mode-switch's default 14px
-           bottom margin was designed for standalone use (own line, spacing
-           to whatever follows), same as the Progress-tab view-switch already
-           overrides it (search view-mode-switch). Here it's a flex ITEM
-           sharing a wrapping row with flashFullscreenBtn (see topRowHtml) --
-           an item's own margin inflates its contribution to the row's
-           cross-axis height for align-items:center, so the 14px was making
-           this pill's *alignment box* ~51px tall against its ~37px visible
-           height, throwing off centering against the 44px toggle button
-           next to it (measured: toggle sat 7px lower than true-centered). -->
+    <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;">
       <div class="study-mode-switch full-width" role="group" aria-label="Study mode" style="margin-bottom:0;">
         <button type="button" data-flash-mode="mc" class="${flashMode==='mc'?'active':''}">Multiple Choice</button>
         <button type="button" data-flash-mode="recall" class="${flashMode==='recall'?'active':''}">True Recall</button>
@@ -4092,38 +4115,17 @@ function renderFlashcard(){
       ${flashMode==='recall' ? `<button type="button" class="icon-btn" id="recallInfoBtn" aria-label="How True Recall works">${icon('info')}</button>` : ''}
     </div>
   `;
-  /* In full-screen, this is just the exit button on its own -- no go-home/
-     manage-set/mode-switch to share a row with (all conditioned out above).
-     Given its own .fullscreen-toggle-row wrapper (pinned via CSS, see the
-     #flashPanel.flash-fullscreen .fullscreen-toggle-row rule) instead of
-     living in-flow inside the space-between header row the non-fullscreen
-     case still uses -- same treatment quiz's toggle already gets, and for
-     the same reason (stay reachable regardless of scroll position, instead
-     of scrolling away with the rest of the header).
+  /* In full-screen, this is just the exit button on its own, pinned via
+     .fullscreen-toggle-row (same treatment quiz's toggle gets) so it stays
+     reachable regardless of scroll position.
 
-     Non-fullscreen is two deliberate rows, not one long flex-wrap cascade --
-     a single wrapping row put "Save this set" wherever cumulative width
-     happened to push it (its own third line on phone width, not filling
-     the real gap). That gap was specifically at the end of the goHome/
-     Manage row (mode-switch + Full-Screen already form a clean second row
-     below it) -- explicit rows put Save exactly there, deterministically.
-     Save itself is promoted out of the "Manage this set" menu to a direct,
-     always-visible action -- it used to be one of five items buried behind
-     that toggle, and this is the one worth one tap instead of two (open
-     menu, then tap Save).
-
-     REAL BUG hit while building this: an HTML-style angle-bracket-bang
-     comment placed directly in this template literal's rendered output
-     (not a JS block comment like this one, an actual angle-bracket comment
-     in the markup itself) containing this project's usual " -- " dash
-     separator silently broke HTML parsing -- the two buttons right after
-     it (goHome, Manage) stopped appearing in the DOM entirely despite
-     showing up fine in the innerHTML string, because "--" inside that kind
-     of comment is invalid per spec and real browsers close it early. Same
-     bug class CLAUDE.md already documents for XML comments in the Android
-     project. Never put an explanatory comment directly in HTML template
-     output here -- JS comments above the template (like this one) don't
-     have this problem since they're stripped before the string is built. */
+     Non-fullscreen is two rows: row 1 is Back / Save / Options (Save sits
+     between the other two as a direct, always-visible action rather than
+     buried in the Options menu); row 2 is the mode switch beside the Full
+     Screen toggle, stretched to equal height via align-items:stretch so
+     the two controls read as one functional row instead of mismatched
+     heights. flex-wrap:wrap on row 2 is a safety net for narrow widths --
+     falls back to stacking rather than clipping if it ever doesn't fit. */
   const topRowHtml = flashFullScreen ? `
     <h1 class="sr-only">Flashcards</h1>
     <div class="fullscreen-toggle-row">
@@ -4131,15 +4133,13 @@ function renderFlashcard(){
     </div>
   ` : `
     <h1 class="sr-only">Flashcards</h1>
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
         ${currentUser ? `<button class="link-btn" id="flashGoHomeBtn" type="button" aria-label="Flashcards home"><span class="back-arrow" aria-hidden="true">←</span><span class="nav-label" aria-hidden="true">Flashcards home</span></button>` : '<span></span>'}
-        ${currentUser ? `<button class="link-btn" id="flashSetupMenuToggleBtn" type="button" aria-label="${flashSetupMenuOpen ? 'Hide set options' : 'Manage this set'}">${flashSetupMenuOpen ? icon('close') : icon('settings')}<span class="nav-label" aria-hidden="true">${flashSetupMenuOpen ? 'Hide set options' : 'Manage this set'}</span></button>` : ''}
+        ${currentUser ? `<button class="link-btn" id="flashSaveToggleBtn" type="button">${flashSaveOpen ? icon('close')+'Cancel save' : icon('save')+(currentSetId ? 'Save as new set' : 'Save this set')}</button>` : ''}
+        ${currentUser ? `<button class="link-btn" id="flashSetupMenuToggleBtn" type="button" aria-label="${flashSetupMenuOpen ? 'Hide options' : 'Options'}">${flashSetupMenuOpen ? icon('close') : icon('settings')}<span class="nav-label" aria-hidden="true">${flashSetupMenuOpen ? 'Hide options' : 'Options'}</span></button>` : ''}
     </div>
-    <div style="margin-bottom:8px;">
+    <div style="display:flex;align-items:stretch;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
       ${modeSwitchHtml}
-    </div>
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;">
-        ${currentUser ? `<button class="link-btn" id="flashSaveToggleBtn" type="button">${flashSaveOpen ? icon('close')+'Cancel save' : icon('save')+(currentSetId ? 'Save as new set' : 'Save this set')}</button>` : '<span></span>'}
       <button class="link-btn" id="flashFullscreenBtn" type="button" aria-label="Full Screen">${icon('expand')}<span class="nav-label" aria-hidden="true">Full Screen</span></button>
     </div>
   `;
@@ -6559,7 +6559,7 @@ async function renderAiFeatureConfigSection(){
   try{
     const { data, error } = await supabaseClient.rpc('get_ai_feature_flags');
     if(error) throw error;
-    const cfg = (data && data[0]) || { explain_enabled: true, chat_enabled: true, chat_turn_limit: 5 };
+    const cfg = (data && data[0]) || { explain_enabled: true, chat_enabled: true, chat_turn_limit: 5, chat_period_limit: 40, chat_period_days: 30 };
     section.innerHTML = `
       <h2>AI Features</h2>
       <div class="format-help">Controls both AI layers app-wide — the base explanation shown during exam-taking and review, and the review-only follow-up chat.</div>
@@ -6576,6 +6576,12 @@ async function renderAiFeatureConfigSection(){
           Follow-up questions allowed per exam question
           <input type="number" id="aiChatTurnLimitInput" min="1" max="50" value="${cfg.chat_turn_limit}" style="width:64px;">
         </label>
+        <label style="display:flex;align-items:center;gap:10px;">
+          Total follow-ups allowed, across all questions, per
+          <input type="number" id="aiChatPeriodDaysInput" min="1" max="365" value="${cfg.chat_period_days ?? 30}" style="width:64px;">
+          days:
+          <input type="number" id="aiChatPeriodLimitInput" min="1" max="2000" value="${cfg.chat_period_limit ?? 40}" style="width:80px;">
+        </label>
         <button class="btn btn-primary" id="saveAiFeatureConfigBtn" style="align-self:flex-start;">Save</button>
         <div class="msg" id="aiFeatureConfigResult"></div>
       </div>
@@ -6587,9 +6593,16 @@ async function renderAiFeatureConfigSection(){
       const explainEnabled = document.getElementById('aiExplainEnabledInput').checked;
       const chatEnabled = document.getElementById('aiChatEnabledInput').checked;
       const turnLimit = parseInt(document.getElementById('aiChatTurnLimitInput').value, 10);
+      const periodDays = parseInt(document.getElementById('aiChatPeriodDaysInput').value, 10);
+      const periodLimit = parseInt(document.getElementById('aiChatPeriodLimitInput').value, 10);
       if(!Number.isInteger(turnLimit) || turnLimit <= 0){
         resultEl.className = 'msg err';
         resultEl.textContent = 'Follow-up limit must be a positive whole number.';
+        return;
+      }
+      if(!Number.isInteger(periodDays) || periodDays <= 0 || !Number.isInteger(periodLimit) || periodLimit <= 0){
+        resultEl.className = 'msg err';
+        resultEl.textContent = 'Rolling period and its message limit must be positive whole numbers.';
         return;
       }
       try{
@@ -6597,6 +6610,8 @@ async function renderAiFeatureConfigSection(){
           new_explain_enabled: explainEnabled,
           new_chat_enabled: chatEnabled,
           new_chat_turn_limit: turnLimit,
+          new_chat_period_limit: periodLimit,
+          new_chat_period_days: periodDays,
         });
         if(saveErr) throw saveErr;
         // Updates this admin's own session immediately -- their review
@@ -6605,7 +6620,11 @@ async function renderAiFeatureConfigSection(){
         // until their own next sign-in/reload (loadAiFeatureFlags() is only
         // called once per session, not polled) -- an accepted tradeoff at
         // this traffic level, same as this app's other in-memory caches.
-        aiFeatureFlags = { explain_enabled: explainEnabled, chat_enabled: chatEnabled, chat_turn_limit: turnLimit };
+        // Spread over the existing flags rather than replacing wholesale --
+        // this save doesn't touch chat_period_used, and clobbering it to
+        // undefined made isChatPeriodCapped() silently stop enforcing the
+        // period cap for the rest of this admin's own session.
+        aiFeatureFlags = { ...aiFeatureFlags, explain_enabled: explainEnabled, chat_enabled: chatEnabled, chat_turn_limit: turnLimit, chat_period_limit: periodLimit, chat_period_days: periodDays };
         resultEl.className = 'msg ok';
         resultEl.textContent = 'Saved.';
       } catch(err){
