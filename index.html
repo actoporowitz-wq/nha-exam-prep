@@ -2223,7 +2223,8 @@ function scrollFlashcardIntoView(){
    state doesn't need a reload to appear once actually hit this session. */
 let aiFeatureFlags = {
   explain_enabled: true, chat_enabled: true, chat_turn_limit: 5,
-  chat_period_limit: 40, chat_period_days: 30, chat_period_used: 0,
+  chat_period_limit: 750, chat_period_days: 30, chat_period_used: 0,
+  progress_feedback_enabled: true,
 };
 async function loadAiFeatureFlags(){
   try{
@@ -5495,6 +5496,14 @@ let progressExpandedRoundId = null;
 let progressAttemptView = null; // { questions, answersMap } while drilled into one attempt's review
 let progressSortMode = 'name'; // 'name' | 'last' | 'first'
 let progressViewMode = localStorage.getItem('nha_progress_view_mode') === 'stacked' ? 'stacked' : 'grid'; // 'grid' (card + ring per round, default) | 'stacked' (compact list, more efficient for many rounds)
+// AI progress feedback (Feature 3 of the original AI roadmap, corrected
+// scope) -- on-demand, inline in the main Progress screen, not a separate
+// sub-view. No persistence across visits: renderProgressView() clears it
+// below so a fresh visit to Progress always starts at the "Get AI
+// Feedback" button, never showing a stale result from a prior session.
+let progressAiFeedback = null; // the returned feedback text, once loaded
+let progressAiFeedbackLoading = false;
+let progressAiFeedbackError = null;
 
 function sortProgressExams(exams, mode){
   const sorted = exams.slice();
@@ -5509,6 +5518,9 @@ function sortProgressExams(exams, mode){
 
 async function renderProgressView(){
   progressAttemptView = null;
+  progressAiFeedback = null;
+  progressAiFeedbackLoading = false;
+  progressAiFeedbackError = null;
   progressExpandedRoundId = null;
   progressPanel.innerHTML = `<h1>Progress</h1>${renderProgressSkeleton()}`;
   try{
@@ -5650,6 +5662,51 @@ function findMostRecentResumableRound(d){
   return best;
 }
 
+/* AI progress feedback (Feature 3 of the original AI roadmap, corrected
+   scope) -- on-demand button + inline result, not a separate screen.
+   Hidden entirely when the admin kill switch is off, same convention as
+   the AI Explanation / Ask-a-follow-up buttons elsewhere. */
+function renderProgressAiFeedbackBlock(){
+  if(!aiFeatureFlags.progress_feedback_enabled) return '';
+  if(progressAiFeedbackLoading){
+    return `<div class="review-explanation" style="margin-bottom:10px;"><em>Analyzing your progress…</em></div>`;
+  }
+  if(progressAiFeedbackError){
+    return `
+      <div class="msg err" style="margin-bottom:10px;">${escapeHtml(progressAiFeedbackError)}</div>
+      <button type="button" class="link-btn" id="progressAiFeedbackBtn">${icon('feedback')}Get AI Feedback</button>
+    `;
+  }
+  if(progressAiFeedback){
+    return `
+      <div class="review-explanation" style="margin-bottom:10px;">${escapeHtml(progressAiFeedback)}</div>
+      <button type="button" class="link-btn" id="progressAiFeedbackBtn">${icon('feedback')}Refresh Feedback</button>
+    `;
+  }
+  return `<button type="button" class="link-btn" id="progressAiFeedbackBtn">${icon('feedback')}Get AI Feedback</button>`;
+}
+
+function wireProgressAiFeedbackBlock(){
+  const btn = document.getElementById('progressAiFeedbackBtn');
+  if(!btn) return;
+  btn.onclick = async ()=>{
+    progressAiFeedbackLoading = true;
+    progressAiFeedbackError = null;
+    renderProgressPanel();
+    try{
+      const { data, error } = await supabaseClient.functions.invoke('ai-progress-feedback', { body: {} });
+      if(error) throw error;
+      if(data && data.error) throw new Error(data.error);
+      progressAiFeedback = data.feedback;
+    } catch(err){
+      progressAiFeedbackError = err.message || "Couldn't load feedback right now.";
+    } finally{
+      progressAiFeedbackLoading = false;
+      renderProgressPanel();
+    }
+  };
+}
+
 function renderProgressPanel(){
   if(progressAttemptView){ renderProgressAttemptDetail(); return; }
   const d = progressData;
@@ -5660,6 +5717,7 @@ function renderProgressPanel(){
       <div class="stat-pill">${icon('library')}<strong>${d.exams.length}</strong><span class="stat-label">exam${d.exams.length===1?'':'s'} started</span></div>
       <div class="stat-pill">${icon('check')}<strong>${d.masteredRounds} of ${d.totalRounds}</strong><span class="stat-label">round${d.totalRounds===1?'':'s'} mastered</span></div>
     </div>
+    ${renderProgressAiFeedbackBlock()}
     <div class="msg" id="progressMsg"></div>
   `;
   if(resumable){
@@ -5765,6 +5823,7 @@ function renderProgressPanel(){
     html += `</div>`;
   });
   progressPanel.innerHTML = html;
+  wireProgressAiFeedbackBlock();
   wireDropdown('progressSort', (value)=>{ progressSortMode = value; renderProgressPanel(); }, renderProgressPanel);
   progressPanel.querySelectorAll('[data-progress-view]').forEach(btn=>{
     btn.onclick = ()=>{
@@ -6575,10 +6634,10 @@ async function renderAiFeatureConfigSection(){
   try{
     const { data, error } = await supabaseClient.rpc('get_ai_feature_flags');
     if(error) throw error;
-    const cfg = (data && data[0]) || { explain_enabled: true, chat_enabled: true, chat_turn_limit: 5, chat_period_limit: 40, chat_period_days: 30 };
+    const cfg = (data && data[0]) || { explain_enabled: true, chat_enabled: true, chat_turn_limit: 5, chat_period_limit: 40, chat_period_days: 30, progress_feedback_enabled: true };
     section.innerHTML = `
       <h2>AI Features</h2>
-      <div class="format-help">Controls both AI layers app-wide — the base explanation shown during exam-taking and review, and the review-only follow-up chat.</div>
+      <div class="format-help">Controls all three AI features app-wide — the base explanation shown during exam-taking and review, the review-only follow-up chat, and on-demand progress feedback.</div>
       <div style="display:flex;flex-direction:column;gap:14px;max-width:420px;font-family:system-ui,sans-serif;margin-top:10px;">
         <label style="display:flex;align-items:center;gap:10px;">
           <input type="checkbox" id="aiExplainEnabledInput" ${cfg.explain_enabled ? 'checked' : ''}>
@@ -6587,6 +6646,10 @@ async function renderAiFeatureConfigSection(){
         <label style="display:flex;align-items:center;gap:10px;">
           <input type="checkbox" id="aiChatEnabledInput" ${cfg.chat_enabled ? 'checked' : ''}>
           Review follow-up chat enabled
+        </label>
+        <label style="display:flex;align-items:center;gap:10px;">
+          <input type="checkbox" id="aiProgressFeedbackEnabledInput" ${cfg.progress_feedback_enabled ? 'checked' : ''}>
+          AI progress feedback enabled (Progress tab, "Get AI Feedback")
         </label>
         <label style="display:flex;align-items:center;gap:10px;">
           Follow-up questions allowed per exam question, per 24h
@@ -6608,6 +6671,7 @@ async function renderAiFeatureConfigSection(){
       resultEl.textContent = '';
       const explainEnabled = document.getElementById('aiExplainEnabledInput').checked;
       const chatEnabled = document.getElementById('aiChatEnabledInput').checked;
+      const progressFeedbackEnabled = document.getElementById('aiProgressFeedbackEnabledInput').checked;
       const turnLimit = parseInt(document.getElementById('aiChatTurnLimitInput').value, 10);
       const periodDays = parseInt(document.getElementById('aiChatPeriodDaysInput').value, 10);
       const periodLimit = parseInt(document.getElementById('aiChatPeriodLimitInput').value, 10);
@@ -6628,6 +6692,7 @@ async function renderAiFeatureConfigSection(){
           new_chat_turn_limit: turnLimit,
           new_chat_period_limit: periodLimit,
           new_chat_period_days: periodDays,
+          new_progress_feedback_enabled: progressFeedbackEnabled,
         });
         if(saveErr) throw saveErr;
         // Updates this admin's own session immediately -- their review
@@ -6640,7 +6705,7 @@ async function renderAiFeatureConfigSection(){
         // this save doesn't touch chat_period_used, and clobbering it to
         // undefined made isChatPeriodCapped() silently stop enforcing the
         // period cap for the rest of this admin's own session.
-        aiFeatureFlags = { ...aiFeatureFlags, explain_enabled: explainEnabled, chat_enabled: chatEnabled, chat_turn_limit: turnLimit, chat_period_limit: periodLimit, chat_period_days: periodDays };
+        aiFeatureFlags = { ...aiFeatureFlags, explain_enabled: explainEnabled, chat_enabled: chatEnabled, chat_turn_limit: turnLimit, chat_period_limit: periodLimit, chat_period_days: periodDays, progress_feedback_enabled: progressFeedbackEnabled };
         resultEl.className = 'msg ok';
         resultEl.textContent = 'Saved.';
       } catch(err){
