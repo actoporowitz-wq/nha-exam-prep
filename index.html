@@ -85,7 +85,16 @@ if('serviceWorker' in navigator){
     --nav-bg:#0B0E14; --nav-bg-2:#161B26; --nav-line:#262D3D; --nav-switch-bg:#0E121A;
   }
   *{box-sizing:border-box;}
-  body{margin:0;font-family:var(--font-display);background:var(--bg);color:var(--ink);}
+  /* Mobile browsers (Android Chrome especially) paint a brief translucent
+     highlight box over whatever you tap, by default, on any element --
+     meant for plain links on a page with no other feedback, but this app
+     already gives every interactive element its own real pressed/active/
+     focus styling, so the default highlight just reads as a flash of
+     visual noise layered on top of that. Disabling it site-wide, not
+     per-component -- it's a UA default with no relationship to this
+     app's own design system, not something to selectively keep anywhere. */
+  *{-webkit-tap-highlight-color:transparent;}
+  body{margin:0;font-family:var(--font-display);background:var(--bg);color:var(--ink);-webkit-tap-highlight-color:transparent;}
   /* Covers the real gap between "HTML has parsed" and "JS has figured out
      whether to show the landing page, sign-in, or the signed-in app shell"
      -- Supabase session restore is a real async network call, not instant,
@@ -369,15 +378,38 @@ if('serviceWorker' in navigator){
   .skel-line{height:12px;width:30%;border-radius:4px;}
   @media (prefers-reduced-motion: reduce){ .skel{animation:none;} }
 
-  /* Quiz-taking full screen -- same treatment, applied to #quizView
+  /* Quiz-taking full screen -- standardized to match flashcards' full-
+     screen treatment exactly (user feedback: flashcards' full screen was
+     "much more effective," this used to be a noticeably plainer version
+     of the same idea rather than the same system). Three concrete
+     differences fixed here: (1) background was var(--bg), the page's own
+     background, rather than var(--panel) like flashcards -- barely
+     visible on quizPanel itself but showed through as a mismatched strip
+     in the gap between quizPanel and #dotsPanel (two separate .panel
+     cards here, vs. flashcards' single unified panel). (2) qtext bump
+     was 1.4rem vs. flashcards' 1.7rem, a smaller, less confident jump.
+     (3) the biggest one: flashcards vertically centers its question+card
+     content within the full-screen viewport (.flash-layout, see above);
+     quiz had no equivalent at all, question content just started at the
+     top and left dead space at the bottom on any short question instead
+     of feeling deliberately centered/immersive. .quiz-question-block
+     (new wrapper around qnum-row+qtext+options, see renderQuestion())
+     gets the same min-height+justify-content:center treatment
+     .flash-layout uses, scoped to just that content the same way
+     flashcards' progress-row/toolbar stay pinned at their natural
+     position while only the question+card centers. Applied to #quizView
      (covers both the question panel and the dot-grid navigator) instead
      of a single panel. Shares body.fullscreen-active's scroll-lock with
      the flashcard mode above since only one is ever active at a time. */
   #quizView.quiz-fullscreen{
-    position:fixed;inset:0;z-index:70;overflow-y:auto;background:var(--bg);
+    position:fixed;inset:0;z-index:70;overflow-y:auto;background:var(--panel);
     padding:max(20px,env(safe-area-inset-top)) max(20px,env(safe-area-inset-right)) max(20px,env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left));
   }
-  #quizView.quiz-fullscreen .qtext{font-size:1.4rem;}
+  #quizView.quiz-fullscreen .qtext{font-size:1.7rem;}
+  #quizView.quiz-fullscreen .quiz-question-block{
+    display:flex;flex-direction:column;justify-content:center;
+    min-height:calc(100vh - 160px);
+  }
 
   /* Lock the Previous/Next/Flag row in place during full-screen study/
      quiz-taking, desktop AND phone, instead of letting it scroll away
@@ -632,10 +664,21 @@ if('serviceWorker' in navigator){
        True Recall mode switch don't fit on one line no matter how they're
        grouped, which was stacking the flashcards toolbar into 3 separate
        rows before you ever reach the card. Icon-only lets the setup
-       trigger actually share a row with the mode switch. */
-    #flashSetupMenuToggleBtn .nav-label, #flashFullscreenBtn .nav-label{display:none;}
-    #flashSetupMenuToggleBtn, #flashFullscreenBtn{padding:8px 10px;min-width:44px;justify-content:center;}
-    #flashSetupMenuToggleBtn .icon, #flashFullscreenBtn .icon{margin-right:0;}
+       trigger actually share a row with the mode switch.
+       #flashFullscreenBtn specifically is scoped to :not(.flash-fullscreen)
+       -- flashGoHomeBtn/flashSetupMenuToggleBtn/the mode switch are all
+       ALREADY absent entirely once full-screen is on (see topRowHtml),
+       so #flashFullscreenBtn has nothing left to share a row with there
+       and collapsing it to icon-only serves no space-saving purpose --
+       it just leaves a single unlabeled "X" sitting alone with no
+       context, real user complaint ("floating in the middle of
+       nowhere"). Full-screen keeps its real "Exit Full Screen" label,
+       same treatment quiz's equivalent toggle already had. */
+    #flashSetupMenuToggleBtn .nav-label,
+    #flashPanel:not(.flash-fullscreen) #flashFullscreenBtn .nav-label{display:none;}
+    #flashSetupMenuToggleBtn, #flashPanel:not(.flash-fullscreen) #flashFullscreenBtn{padding:8px 10px;min-width:44px;justify-content:center;}
+    #flashSetupMenuToggleBtn .icon,
+    #flashPanel:not(.flash-fullscreen) #flashFullscreenBtn .icon{margin-right:0;}
     .dot{width:38px;height:38px;}
     /* display:inline-block here is vestigial now that .dots-toggle is a
        flex child of the .btn-row wrapper around it and pauseExamBtn (see
@@ -650,10 +693,18 @@ if('serviceWorker' in navigator){
     /* The fixed nav-row above needs the same bottom clearance inside
        full-screen mode that .wrap gives it normally -- full-screen's own
        padding (set unconditionally, all widths) is only 20px, not enough
-       room once the bar is fixed instead of in normal flow. */
+       room once the bar is fixed instead of in normal flow. 100px, not
+       the 150px this used to be -- excess trailing padding here directly
+       works against .extra-actions actually ending up hidden behind
+       nav-row at rest/max-scroll (confirmed live via getBoundingClientRect:
+       every extra px of padding here is an extra px of visible gap
+       between .extra-actions and .nav-row's fixed zone, not "safety
+       margin"). 100px stays comfortably above nav-row's own real height
+       (~90px) so there's no risk of clipping it, while not padding the
+       gap out further than necessary. */
     #flashPanel.flash-fullscreen,
     #quizView.quiz-fullscreen{
-      padding-bottom:150px;
+      padding-bottom:100px;
     }
 
     /* Main-tab and Admin-sub-nav rows collapse into a hamburger-triggered
@@ -1723,11 +1774,35 @@ function loadExam(examData, attemptNumber){
    testing showed it can fail to fire at all in an embedded/backgrounded
    context -- this needs to run synchronously and unconditionally, not
    depend on a deferred callback that isn't guaranteed to happen. */
+/* Real bug, not just "fails slightly on short questions" (the way it was
+   first noticed): in full-screen mode #quizView/#flashPanel are
+   themselves position:fixed;overflow-y:auto (see .quiz-fullscreen/
+   .flash-fullscreen) -- THEY are the actual scrolling container in that
+   state, not the window. body also gets overflow:hidden the whole time
+   full-screen is active (body.fullscreen-active), so window.scrollTo()
+   was silently a no-op there regardless of content length -- confirmed
+   directly (quizView.scrollHeight > clientHeight, real scrollable room,
+   but window.scrollY stayed 0 after a window.scrollTo() call). Outside
+   full-screen the window really is the scrolling context, so this only
+   needs to branch, not replace, the normal path. getBoundingClientRect()
+   is always viewport-relative regardless of which element is doing the
+   scrolling, so the same target-position math works for either --
+   only the "current offset" and "who to call .scrollTo() on" change. */
 function scrollElementIntoView(el){
   if(!el) return;
+  const container = document.body.classList.contains('fullscreen-active')
+    ? (quizView.classList.contains('quiz-fullscreen') ? quizView
+       : flashPanel.classList.contains('flash-fullscreen') ? flashPanel
+       : null)
+    : null;
   const rect = el.getBoundingClientRect();
-  const target = window.scrollY + rect.top - 12; // 12px breathing room instead of flush-to-edge
-  window.scrollTo({ top: Math.max(0, target), behavior: 'auto' });
+  if(container){
+    const target = container.scrollTop + rect.top - 12;
+    container.scrollTo({ top: Math.max(0, target), behavior: 'auto' });
+  } else {
+    const target = window.scrollY + rect.top - 12; // 12px breathing room instead of flush-to-edge
+    window.scrollTo({ top: Math.max(0, target), behavior: 'auto' });
+  }
 }
 /* On phone widths, land on the question itself (qnum/progress line), not
    the top of the whole panel -- the panel's own top chrome (Full Screen
@@ -1782,6 +1857,7 @@ function renderQuestion(){
       <span>${answeredCount} answered</span>
     </div>
     <div class="bar"><div class="bar-fill" style="width:${(answeredCount/total*100).toFixed(1)}%"></div></div>
+    <div class="quiz-question-block">
     <div class="qnum-row" id="qnumAnchor">
       <div class="qnum">Question ${qNum}</div>
       <button type="button" class="icon-btn instant-toggle" id="instantFeedbackToggle" aria-pressed="${instantFeedback}" aria-label="Show correct answer instantly" title="Show correct answer instantly">${icon(instantFeedback?'eye':'eyeOff')}</button>
@@ -1805,16 +1881,30 @@ function renderQuestion(){
       <span class="letter">${letters[i]}</span><span>${escapeHtml(opt)}${tag}</span>
     </button>`;
   });
+  html += `</div>`; // closes .quiz-question-block
 
   /* "End Exam Now" removed entirely (redundant with "Submit Exam" on the
      last question -- ending an exam only ever needed one path, not two).
-     Pause & Save moved out of here to sit next to "Show question list"
-     in .dotsPanel instead (see renderDots()) -- with End Exam Now gone,
-     Pause was the only thing left in .extra-actions, and it makes more
-     sense grouped with the question-navigator toggle than floating alone
-     above the nav-row. .nav-row is back to just the three core paging
-     controls. */
+     Show question list / Pause & Save live here now, inside quizPanel
+     itself as a real .extra-actions row immediately before .nav-row --
+     NOT in the separate #dotsPanel card they were briefly moved to. That
+     placement looked right but didn't actually behave like flashcards'
+     Shuffle/Remove treatment: dotsPanel is a second, separate .panel
+     with its own padding, sitting after quizPanel's progress-bar/qnum-
+     row/qtext/options, so by the time you reach it there's already
+     enough scrolled distance that it lands ABOVE the fixed nav-row's
+     zone with a visible gap, not behind it (confirmed via
+     getBoundingClientRect() -- flashcards' shorter card content puts
+     .extra-actions inside nav-row's fixed-position territory, quiz's
+     taller content did not). Moving the actual buttons into quizPanel,
+     right before nav-row, is what makes them genuinely sit behind the
+     fixed bar the same way. #dotsPanel (see renderDots()) now holds only
+     the dot grid itself, still driven by the same dotsExpanded state. */
   html += `
+    <div class="extra-actions">
+      <button class="link-btn dots-toggle" id="dotsToggleBtn" type="button">${dotsExpanded ? 'Hide question list' : 'Show question list'}</button>
+      <button class="link-btn" id="pauseExamBtn" type="button">${icon('save')}Pause & Save for Later</button>
+    </div>
     <div class="nav-row">
       <button class="btn btn-ghost" id="prevBtn" ${current===0?'disabled':''}>← Previous</button>
       <button class="flag-btn ${flags[current]?'on':''}" id="flagBtn">${icon('flag',{filled:flags[current]})}${flags[current]?'Flagged':'Flag for review'}</button>
@@ -1826,6 +1916,8 @@ function renderQuestion(){
 
   quizPanel.innerHTML = html;
 
+  document.getElementById('dotsToggleBtn').onclick = ()=>{ dotsExpanded = !dotsExpanded; renderQuestion(); renderDots(); };
+  document.getElementById('pauseExamBtn').onclick = ()=> showView('progress');
   document.getElementById('instantFeedbackToggle').onclick = ()=>{
     instantFeedback = !instantFeedback;
     try{ localStorage.setItem('nha_instant_feedback', String(instantFeedback)); }catch(err){ /* fine, just won't persist */ }
@@ -1862,25 +1954,17 @@ function renderDots(){
   const restoreDotI = (activeEl && dotsPanel.contains(activeEl) && activeEl.classList.contains('dot')) ? activeEl.dataset.i : null;
 
   const total = exam.questions.length;
-  /* Pause & Save lives here now, next to "Show question list" -- moved
-     out of the nav-row area (see renderQuestion()) since "End Exam Now"
-     being removed left it as the only thing in that row, and it reads
-     more naturally grouped with the question-navigator toggle than
-     floating alone above Previous/Flag/Next. Not destructive, no confirm
-     needed -- every answer already syncs to Supabase as it's picked
-     (syncOnlineAnswer). Lands on Progress, not Library -- Library is a
-     static exam catalog with no idea an attempt is in progress, so
-     landing there after "Pause & Save" gave zero visible confirmation
-     anything happened. Progress always refetches on entry and has a
-     "Resume" banner right at the top, so it's the one destination that
-     actually confirms the save without needing a reload. */
-  let html = `
-    <div class="btn-row" style="margin-bottom:10px;">
-      <button class="link-btn dots-toggle" id="dotsToggleBtn" type="button">${dotsExpanded ? 'Hide question list' : 'Show question list'}</button>
-      <button class="link-btn" id="pauseExamBtn" type="button">${icon('save')}Pause & Save for Later</button>
-    </div>
-  `;
-  html += `<div class="dotgrid${dotsExpanded ? '' : ' collapsed'}">`;
+  /* dotsPanel now holds ONLY the grid -- the "Show question list" toggle
+     that controls it lives in quizPanel's .extra-actions instead (see
+     renderQuestion()), alongside Pause & Save, so both genuinely sit
+     behind the fixed nav-row on phone/full-screen the same way
+     flashcards' Shuffle/Remove do (a separate #dotsPanel .panel card
+     with its own padding put too much distance between it and nav-row
+     for that to happen -- see the comment in renderQuestion() for the
+     measured proof). Toggling dotsExpanded re-renders both this panel
+     (to show/hide the grid) and quizPanel (to update the toggle
+     button's own label) together. */
+  let html = `<div class="dotgrid${dotsExpanded ? '' : ' collapsed'}">`;
   for(let i=0;i<total;i++){
     let cls = 'dot';
     if(i===current) cls += ' current';
@@ -1890,11 +1974,19 @@ function renderDots(){
   }
   html += '</div>';
   dotsPanel.innerHTML = html;
+  /* .dotgrid.collapsed only actually hides (display:none) under the same
+     max-width:480px query the toggle button lives in -- desktop/tablet
+     always show the full grid regardless of dotsExpanded, so dotsPanel
+     always has real visible content there. But at <=480px with
+     dotsExpanded false, dotsPanel's only child is now that hidden div
+     (the toggle that used to sit beside it moved to quizPanel), which
+     would otherwise leave an empty, still-padded .panel card floating
+     with nothing visible inside it. Hide the whole panel in exactly that
+     one case instead. */
+  dotsPanel.style.display = (dotsExpanded || window.innerWidth > 480) ? '' : 'none';
   dotsPanel.querySelectorAll('.dot').forEach(el=>{
     el.onclick = ()=>{ current = parseInt(el.dataset.i); renderQuestion(); renderDots(); scrollQuestionIntoView(); };
   });
-  document.getElementById('dotsToggleBtn').onclick = ()=>{ dotsExpanded = !dotsExpanded; renderDots(); };
-  document.getElementById('pauseExamBtn').onclick = ()=> showView('progress');
 
   if(restoreDotI !== null){ dotsPanel.querySelector(`.dot[data-i="${restoreDotI}"]`)?.focus(); }
 }
