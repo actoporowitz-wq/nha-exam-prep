@@ -44,6 +44,12 @@ if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(()=>{ /* best-effort */ });
   });
+  let refreshingForNewSW = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if(refreshingForNewSW) return;
+    refreshingForNewSW = true;
+    window.location.reload();
+  });
 }
 </script>
 <style>
@@ -2286,7 +2292,7 @@ function renderReviewPanel(missed, total){
   reviewPanel.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:4px;">
       <h2 style="margin:0;font-size:1.3rem;">${heading}</h2>
-      <div class="toplinks" style="margin:0;">
+      <div class="toplinks" style="margin:0;margin-left:auto;">
         <button id="reviewMissedBtn" class="${reviewFilter==='missed'?'active':''}" aria-pressed="${reviewFilter==='missed'}">Review Missed Only</button>
         <button id="reviewAllBtn" class="${reviewFilter==='all'?'active':''}" aria-pressed="${reviewFilter==='all'}">Review All</button>
       </div>
@@ -5270,7 +5276,7 @@ function renderProgressAttemptDetail(){
   progressPanel.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:10px;">
       <h1 style="margin:0;font-size:1.3rem;">${heading}</h1>
-      <div style="display:flex;align-items:center;gap:10px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-left:auto;">
         <div class="toplinks" style="margin:0;">
           <button id="progressReviewMissedBtn" class="${progressReviewFilter==='missed'?'active':''}">Review Missed Only</button>
           <button id="progressReviewAllBtn" class="${progressReviewFilter==='all'?'active':''}">Review All</button>

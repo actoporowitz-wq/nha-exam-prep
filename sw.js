@@ -6,7 +6,16 @@
    thing this app goes out of its way to keep out of client-side storage
    (per-account watermarked exam content, auth tokens). Do not widen the
    match below to a prefix/wildcard without re-checking that guarantee. */
-const CACHE_NAME = 'nha-exam-prep-shell-v1';
+/* Bump this version string on every deploy that changes the app shell in a
+   way worth force-invalidating immediately (see the controllerchange
+   listener in exam_practice_app.html) -- this file itself had never been
+   touched since it was first added, across many deploys, which meant the
+   browser's own SW-update byte-diff check had nothing to detect and never
+   installed a fresh copy on its own. Combined with no controllerchange
+   listener existing at all (the page never reloaded itself even once a new
+   SW DID activate), this is the real reason "reload twice" repeatedly
+   failed to show a genuinely new deploy across multiple rounds of testing. */
+const CACHE_NAME = 'nha-exam-prep-shell-v2';
 const SHELL_URLS = [
   '/',
   '/index.html',
