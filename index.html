@@ -405,10 +405,89 @@ if('serviceWorker' in navigator){
     position:fixed;inset:0;z-index:70;overflow-y:auto;background:var(--panel);
     padding:max(20px,env(safe-area-inset-top)) max(20px,env(safe-area-inset-right)) max(20px,env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left));
   }
+  /* Real, measured bug (found via a live getBoundingClientRect() check
+     against the deployed site, not simulation alone): #quizPanel/#dotsPanel
+     are still plain .panel elements even inside quiz-fullscreen (only
+     #quizView itself gets the .quiz-fullscreen class) -- so their base
+     .panel padding:22px 24px + margin-bottom:18px (40px combined) stayed
+     in effect UNDERNEATH quizView's own fullscreen padding, on top of it,
+     not replacing it. Flashcards never has this problem because
+     #flashPanel.flash-fullscreen resets its own margin/padding/border/
+     shadow to 0 directly (its .panel *is* the fullscreen box, one element,
+     not a wrapper around one) -- see that rule above. That extra 40px is
+     exactly what was pushing .extra-actions measurably farther from
+     .nav-row's fixed zone here than on flashcards (confirmed live: 69px
+     gap here vs 30.67px on flashcards at an identical 390px width, before
+     this fix). Resetting quizPanel/dotsPanel to plain content wrappers in
+     fullscreen -- same treatment flashPanel already gives itself -- closes
+     that gap to match. */
+  #quizView.quiz-fullscreen #quizPanel,
+  #quizView.quiz-fullscreen #dotsPanel{
+    padding:0;margin:0;border:none;box-shadow:none;background:transparent;
+  }
   #quizView.quiz-fullscreen .qtext{font-size:1.7rem;}
   #quizView.quiz-fullscreen .quiz-question-block{
     display:flex;flex-direction:column;justify-content:center;
     min-height:calc(100vh - 160px);
+  }
+  /* Real bug, user-confirmed and root-caused (not the padding/margin one
+     above -- a separate mechanism): on mobile, scrollQuestionIntoView()
+     targets #qnumAnchor specifically, which lives INSIDE this centered
+     block -- justify-content:center means qnumAnchor's natural (pre-scroll)
+     position gets pushed an amount that depends on how much empty space
+     the centering has to distribute, which for a SHORT question inside a
+     min-height:100vh-160px box can be hundreds of px. The scroll-to-anchor
+     math (scrollElementIntoView) needs that same amount of actual
+     scrollable overflow to exist in order to pull qnumAnchor up to its
+     12px-from-top target -- but short content doesn't generate anywhere
+     near that much scrollHeight, so the browser silently clamps the scroll
+     to whatever max actually exists, landing qnumAnchor well below where
+     it's supposed to land ("doesn't have enough slack to scroll all the
+     way up when the questions are short"). Worse, the exact shortfall
+     varies with question length, which is the "still inconsistent even
+     when there is enough slack" half of the same report -- different
+     questions want a different amount of centering-driven offset, so the
+     landing position drifts question to question even when a given one
+     technically has enough room to fully reach 12px. Desktop never had
+     this because its own scroll target (quizPanel, the whole panel) sits
+     BEFORE this centered block entirely, so centering never fights it.
+     Fix, mobile only (desktop's target/behavior is untouched and was never
+     reported broken): drop true centering in favor of a small, fixed
+     top offset capped well below any realistic scrollable range -- gives
+     short questions breathing room instead of jamming flush to the top,
+     without ever demanding more scroll slack than a short question
+     actually has. */
+  @media (max-width:900px){
+    #quizView.quiz-fullscreen .quiz-question-block{
+      justify-content:flex-start;min-height:0;padding-top:clamp(8px,6vh,56px);
+    }
+    /* Second half of the same fix: the "Exit Full Screen" link row was
+       still plain in-flow content sitting above .progress-row/.bar/
+       .quiz-question-block, so scrolling qnumAnchor toward the top still
+       had to travel past its height too (confirmed live: ~30-40px of the
+       measured shortfall was this row alone). Taking it out of flow
+       entirely (absolute, pinned to quizView's own top-right corner --
+       quizView is already the fixed positioning context in fullscreen, see
+       above) means qnumAnchor's natural position no longer depends on it
+       at all, shrinking the fixed chrome height every question has to
+       scroll past to just .progress-row + .bar, which is small and truly
+       constant regardless of question length. */
+    #quizView.quiz-fullscreen .fullscreen-toggle-row{
+      position:absolute;top:max(14px,env(safe-area-inset-top));
+      right:max(16px,env(safe-area-inset-right));margin:0;z-index:16;
+    }
+    /* Clearance for the now-floating toggle button lives on quizView's own
+       top padding instead of a per-row margin -- a margin big enough to
+       clear the button (~40px) would have clawed back almost the entire
+       gain from taking the button out of flow in the first place (measured
+       live: qnumAnchor only improved 176px->126px before this, then right
+       back up toward 166px once clearance was added the naive way). Doing
+       it here instead means it's paid for exactly once, at the very top,
+       rather than compounding with every row that would otherwise need its
+       own clearance. */
+    #quizView.quiz-fullscreen{
+      padding-top:max(60px, calc(env(safe-area-inset-top) + 44px));
+    }
   }
 
   /* Lock the Previous/Next/Flag row in place during full-screen study/
@@ -1849,7 +1928,7 @@ function renderQuestion(){
   document.body.classList.toggle('fullscreen-active', quizFullScreen);
 
   let html = `
-    <div style="text-align:right;margin-bottom:6px;">
+    <div class="fullscreen-toggle-row" style="text-align:right;margin-bottom:6px;">
       <button class="link-btn" id="quizFullscreenBtn" type="button">${quizFullScreen ? icon('close')+'Exit Full Screen' : icon('expand')+'Full Screen'}</button>
     </div>
     <div class="progress-row">
@@ -1902,8 +1981,8 @@ function renderQuestion(){
      the dot grid itself, still driven by the same dotsExpanded state. */
   html += `
     <div class="extra-actions">
-      <button class="link-btn dots-toggle" id="dotsToggleBtn" type="button">${dotsExpanded ? 'Hide question list' : 'Show question list'}</button>
-      <button class="link-btn" id="pauseExamBtn" type="button">${icon('save')}Pause & Save for Later</button>
+      <button class="link-btn dots-toggle" id="dotsToggleBtn" type="button">${icon('practice')}${dotsExpanded ? 'Hide list' : 'Question list'}</button>
+      <button class="link-btn" id="pauseExamBtn" type="button">${icon('save')}Pause & Save</button>
     </div>
     <div class="nav-row">
       <button class="btn btn-ghost" id="prevBtn" ${current===0?'disabled':''}>← Previous</button>
