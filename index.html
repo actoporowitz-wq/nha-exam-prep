@@ -110,6 +110,18 @@ if('serviceWorker' in navigator){
   .toplinks{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;font-family:system-ui,sans-serif;font-size:.82rem;}
   .toplinks button{background:var(--chip);border:1px solid var(--line);color:var(--ink);padding:6px 12px;border-radius:20px;cursor:pointer;}
   .toplinks button.active{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);}
+  /* Same family of fix as .nav-row/.extra-actions/.btn-row (see that CSS
+     comment) applied here too, phone-width only -- .toplinks is left-
+     aligned by default (not centered), so a wrapped button doesn't read
+     as centered debris the way the others did, but it still leaves two
+     different-width pills stacked with no shared alignment (confirmed
+     live: Results' "Review Missed Only"/"Review All" toggle at 320px).
+     Scoped to a media query rather than applying unconditionally --
+     .toplinks is also Admin's 5-item sub-nav, and stretching 5 compact
+     pills to fill a wide desktop row would look worse, not better. */
+  @media (max-width:480px){
+    .toplinks > *{flex:1 1 auto;min-width:0;}
+  }
 
   .header-row{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;}
   .status-bar{font-size:.82rem;color:var(--muted);display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
