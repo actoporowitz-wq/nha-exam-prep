@@ -154,7 +154,7 @@ if('serviceWorker' in navigator){
      the space outright instead of just shrinking it. Auth view keeps it
      (its own page heading, nothing else serves that role there). */
   @media (max-width:900px){
-    #examHeaderRow.is-quiz-header{display:none;}
+    #examHeaderRow.hide-header-mobile{display:none;}
   }
   .status-bar{font-size:.82rem;color:var(--muted);display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
   .status-bar .email{color:var(--ink);font-weight:600;}
@@ -1073,6 +1073,10 @@ if('serviceWorker' in navigator){
      card edge on a phone. */
   #turnstileWidget{max-width:100%;overflow:hidden;display:flex;justify-content:center;}
   #turnstileWidget iframe{max-width:100%!important;}
+  @media (max-width:480px){
+    .auth-links-row{flex-direction:column;gap:8px;}
+    .auth-links-row .link-btn{width:100%;justify-content:center;}
+  }
   .auth-brand{display:flex;align-items:center;gap:10px;font-family:var(--font-display);font-weight:800;font-size:1.2rem;letter-spacing:-.02em;margin-bottom:26px;color:var(--ink);}
   .auth-brand .mark{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,#8FA6FF,#5B6BFF);display:flex;align-items:center;justify-content:center;}
 
@@ -1783,7 +1787,7 @@ function showView(v, opts){
      see the .is-quiz-header rule -- without needing a resize listener: the
      class only needs to track which VIEW is active, the media query alone
      handles which WIDTH it applies at. */
-  examHeaderRow.classList.toggle('is-quiz-header', v==='quiz');
+  examHeaderRow.classList.toggle('hide-header-mobile', v==='quiz' || v==='auth');
   flashView.style.display = v==='flash' ? 'block':'none';
   libraryView.style.display = v==='library' ? 'block':'none';
   authView.style.display = v==='auth' ? 'block':'none';
@@ -1852,7 +1856,7 @@ function renderLibrary(){
           <div class="lib-title">${escapeHtml(e.title)}</div>
           <div class="lib-meta">${e.questions.length} questions</div>
         </div>
-        <div style="display:flex;align-items:center;gap:10px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-left:auto;">
           <button class="btn btn-primary" data-idx="${idx}">Start</button>
         </div>
       </div>
@@ -3993,7 +3997,7 @@ function renderAuthView(){
         <div class="cf-turnstile" id="turnstileWidget"></div>
         <button class="btn btn-primary" id="authSubmitBtn">Sign In</button>
       </div>
-      <div style="margin-top:14px;font-family:system-ui,sans-serif;font-size:.85rem;display:flex;gap:16px;flex-wrap:wrap;">
+      <div class="auth-links-row" style="margin-top:14px;font-family:system-ui,sans-serif;font-size:.85rem;display:flex;gap:16px;flex-wrap:wrap;">
         <button class="link-btn" id="goSignupBtn">Need an account? Sign up</button>
         <button class="link-btn" id="goForgotBtn">Forgot password?</button>
       </div>
