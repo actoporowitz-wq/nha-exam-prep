@@ -194,6 +194,7 @@ if('serviceWorker' in navigator){
      button's --bad red) with no per-instance overrides needed. */
   .icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;flex:none;}
   button .icon, .link-btn .icon{margin-right:.32em;}
+  .back-arrow{margin-right:.32em;}
 
   /* Small icon-trigger buttons: the account kebab (always visible, plain
      .menu-trigger) and the mobile nav hamburgers (.menu-trigger.nav-hamburger,
@@ -806,11 +807,11 @@ if('serviceWorker' in navigator){
        nowhere"). Full-screen keeps its real "Exit Full Screen" label,
        same treatment quiz's equivalent toggle already had. */
     #flashSetupMenuToggleBtn .nav-label,
-    #flashSaveToggleBtn .nav-label,
+    #flashGoHomeBtn .nav-label,
     #flashPanel:not(.flash-fullscreen) #flashFullscreenBtn .nav-label{display:none;}
-    #flashSetupMenuToggleBtn, #flashSaveToggleBtn, #flashPanel:not(.flash-fullscreen) #flashFullscreenBtn{padding:8px 10px;min-width:44px;justify-content:center;}
+    #flashSetupMenuToggleBtn, #flashGoHomeBtn, #flashPanel:not(.flash-fullscreen) #flashFullscreenBtn{padding:8px 10px;min-width:44px;justify-content:center;}
     #flashSetupMenuToggleBtn .icon,
-    #flashSaveToggleBtn .icon,
+    #flashGoHomeBtn .back-arrow,
     #flashPanel:not(.flash-fullscreen) #flashFullscreenBtn .icon{margin-right:0;}
     .dot{width:38px;height:38px;}
     /* display:inline-block here is vestigial now that .dots-toggle is a
@@ -974,6 +975,7 @@ if('serviceWorker' in navigator){
      states it's meant for. */
   @media (max-width:900px){
     .empty-state-block{min-height:50vh;display:flex;flex-direction:column;justify-content:flex-start;}
+    .empty-state-block.centered{justify-content:center;}
   }
 
   @media (max-width:900px){
@@ -3424,7 +3426,8 @@ function renderFlashcard(){
     const backToDeckHtml = (flashcards.length && flashGeneratorOpen)
       ? `<button class="link-btn" id="flashBackToDeckBtn" type="button">${icon('close')}Back to ${currentSetName ? `"${escapeHtml(currentSetName)}"` : 'your deck'} (${flashcards.length} card${flashcards.length===1?'':'s'})</button>`
       : '';
-    flashPanel.innerHTML = `<div class="empty-state-block">${topHtml}<h1 class="sr-only">Flashcards</h1>${backToDeckHtml}${flashcards.length ? '' : `<div class="format-help">No flashcards yet. Generate a set from your progress above.</div>`}</div>`;
+    const emptyStateClass = flashcards.length ? 'empty-state-block centered' : 'empty-state-block';
+    flashPanel.innerHTML = `<div class="${emptyStateClass}">${topHtml}<h1 class="sr-only">Flashcards</h1>${backToDeckHtml}${flashcards.length ? '' : `<div class="format-help">No flashcards yet. Generate a set from your progress above.</div>`}</div>`;
     if(currentUser){ bindFlashGeneratorHandlers(); bindFlashLibraryPickerHandlers(); }
     const backToDeckBtn = document.getElementById('flashBackToDeckBtn');
     if(backToDeckBtn) backToDeckBtn.onclick = ()=>{ flashGeneratorOpen = false; renderFlashcard(); };
@@ -3500,9 +3503,9 @@ function renderFlashcard(){
   ` : `
     <h1 class="sr-only">Flashcards</h1>
     <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:6px;">
-        ${currentUser ? `<button class="link-btn" id="flashGoHomeBtn" type="button">← Flashcards home</button>` : ''}
+        ${currentUser ? `<button class="link-btn" id="flashGoHomeBtn" type="button" aria-label="Flashcards home"><span class="back-arrow" aria-hidden="true">←</span><span class="nav-label" aria-hidden="true">Flashcards home</span></button>` : ''}
         ${currentUser ? `<button class="link-btn" id="flashSetupMenuToggleBtn" type="button" aria-label="${flashSetupMenuOpen ? 'Hide set options' : 'Manage this set'}">${flashSetupMenuOpen ? icon('close') : icon('settings')}<span class="nav-label" aria-hidden="true">${flashSetupMenuOpen ? 'Hide set options' : 'Manage this set'}</span></button>` : ''}
-        ${currentUser ? `<button class="link-btn" id="flashSaveToggleBtn" type="button" style="margin-left:auto;" aria-label="${flashSaveOpen ? 'Cancel save' : (currentSetId ? 'Save as new set' : 'Save this set')}">${flashSaveOpen ? icon('close') : icon('save')}<span class="nav-label" aria-hidden="true">${flashSaveOpen ? 'Cancel save' : (currentSetId ? 'Save as new set' : 'Save this set')}</span></button>` : ''}
+        ${currentUser ? `<button class="link-btn" id="flashSaveToggleBtn" type="button" style="margin-left:auto;">${flashSaveOpen ? icon('close')+'Cancel save' : icon('save')+(currentSetId ? 'Save as new set' : 'Save this set')}</button>` : ''}
     </div>
     <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:6px;">
         ${modeSwitchHtml}
