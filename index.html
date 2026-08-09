@@ -44,6 +44,15 @@ if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(()=>{ /* best-effort */ });
   });
+  /* Without this, a new SW version can install and activate (skipWaiting +
+     clients.claim in sw.js already make that happen automatically) while
+     the currently-open page keeps right on running the OLD in-memory JS --
+     "reload" was the only thing that ever picked up a genuinely new
+     deploy, and relying on the user to know to do that (and do it enough
+     times) is exactly what repeatedly produced "still broken" reports for
+     fixes that were actually already live. One automatic reload the moment
+     a new SW takes control closes that gap -- refreshing guards against
+     controllerchange firing more than once in a row. */
   let refreshingForNewSW = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if(refreshingForNewSW) return;
@@ -151,8 +160,11 @@ if('serviceWorker' in navigator){
      once you're mid-exam (the exam identity is already obvious from context,
      and "Question N of Total" in the panel's own progress row already
      covers what this duplicates) -- removing it entirely on mobile recovers
-     the space outright instead of just shrinking it. Auth view keeps it
-     (its own page heading, nothing else serves that role there). */
+     the space outright instead of just shrinking it. Auth view gets the
+     same treatment (see the classList.toggle in showView()) -- its own
+     "NHA Exam Prep" brand mark + "Sign In" heading already cover the same
+     role, and leaving this row in place was opening a large awkward gap
+     above .auth-outer's vertically-centered card on mobile. */
   @media (max-width:900px){
     #examHeaderRow.hide-header-mobile{display:none;}
   }
@@ -165,6 +177,16 @@ if('serviceWorker' in navigator){
   .link-btn{background:var(--surface-2);border:1px solid var(--line);color:var(--ink);cursor:pointer;font-family:system-ui,sans-serif;font-weight:600;font-size:.82rem;padding:7px 12px;border-radius:8px;text-decoration:none;display:inline-flex;align-items:center;}
   .link-btn:hover{border-color:var(--accent);color:var(--accent);}
   .link-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+  /* Plain hyperlink -- no chip background/border/padding, for the handful
+     of spots that should read as ordinary web links (sign-in's "Forgot
+     password?"/"Sign up", and a link embedded mid-sentence in flowing
+     text) rather than as buttons. A .link-btn chip dropped into a text
+     sentence doesn't wrap like a word -- it's a fixed-size inline-flex box
+     with its own padding, so when the line breaks around it the trailing
+     punctuation right after it can end up looking orphaned on its own
+     line. Real <button> elements (not <a>) for the same reason .link-btn
+     uses buttons -- these are JS actions (switch auth screen, toggle a
+     panel), not navigable URLs. */
   .text-link{background:none;border:none;padding:0;margin:0;color:var(--accent);font:inherit;text-decoration:underline;cursor:pointer;}
   .text-link:hover{text-decoration:none;}
   .text-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
@@ -339,6 +361,12 @@ if('serviceWorker' in navigator){
      max-width caps it, min-width:0 on the label span lets a flex child
      actually shrink below its content size (the flex default is not to),
      and text-overflow does the graceful clipping. */
+  /* height:44px matches every other control (.link-btn row buttons,
+     .study-mode-switch, icon-only toggles) this shares a row with
+     site-wide (Progress's sort dropdown next to Grid/Stacked, Admin's
+     filter/sort next to other controls, etc) -- was 35px from padding+
+     line-height alone, a real height mismatch against 44px neighbors on
+     the same row, same bug class as .study-mode-switch's (see that rule). */
   .dd-trigger{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-family:system-ui,sans-serif;font-size:.85rem;cursor:pointer;white-space:nowrap;max-width:100%;box-sizing:border-box;height:44px;}
   .dd-trigger:hover{border-color:var(--accent);}
   .dd-trigger>span{overflow:hidden;text-overflow:ellipsis;min-width:0;}
@@ -485,9 +513,37 @@ if('serviceWorker' in navigator){
      without ever demanding more scroll slack than a short question
      actually has. */
   @media (max-width:900px){
+    /* min-height:0 here (an earlier version of this fix) traded one bug for
+       another: it solved the scroll-slack problem but also removed the
+       only thing that was reserving space below a short question, so
+       .extra-actions (Question list/Pause & Save) started showing up
+       immediately instead of requiring a scroll to reveal -- a real
+       regression, confirmed via user report and screenshot. The two goals
+       (reach the anchor near the top consistently, AND keep the buttons
+       requiring a deliberate scroll) aren't actually in conflict once
+       scrollElementIntoView's target offset accounts for the fixed toggle
+       button (see that function) -- the required scroll distance shrank
+       enough that a real reserved min-height no longer starves it. Not
+       centered (justify-content stays flex-start) -- only the ORIGINAL
+       min-height:calc(100vh-160px) combined with centering was the actual
+       problem; min-height alone with content pinned to the top is fine. */
     #quizView.quiz-fullscreen .quiz-question-block{
       justify-content:flex-start;min-height:calc(100vh - 40px);padding-top:clamp(8px,6vh,56px);
     }
+    /* Same "not enough scroll slack" mechanism as full-screen above, but
+       for the NON-full-screen path -- .quiz-question-block never had any
+       min-height at all outside .quiz-fullscreen, so whether a question's
+       natural content was tall enough to let window scrolling reach
+       #qnumAnchor's 12px-from-top target depended entirely on that
+       question's own length. Confirmed live (real repro, not guessed): a
+       short question clamped at scrollY=51 (target needed ~144) while a
+       longer one on the same exam reached exactly 12px -- same mechanism,
+       different question, different outcome, which is exactly what "loads
+       inconsistently from one question to the next" describes. Reserving a
+       real minimum height here removes the dependency on any single
+       question's actual length, same fix shape as full-screen's version
+       just without a fixed toggle button to clear (topOffset stays 12 here
+       -- see scrollElementIntoView). */
     #quizView:not(.quiz-fullscreen) .quiz-question-block{
       min-height:calc(100vh - 280px);
     }
@@ -703,6 +759,100 @@ if('serviceWorker' in navigator){
   .review-line.correct-line{color:var(--good);}
   .review-line.wrong-line{color:var(--bad);}
   .review-explanation{font-size:.85rem;margin-top:6px;padding:8px 10px;background:var(--chip);border-radius:6px;color:var(--muted);}
+  .review-explain-row{margin-top:6px;}
+  .review-explain-row .ai-explain-btn{margin-top:6px;}
+  .review-explain-row .ai-chat-open-btn{margin-top:6px;margin-left:14px;}
+  /* .link-btn's own display:inline-flex otherwise beats the [hidden]
+     attribute's UA-stylesheet display:none at equal specificity (author
+     styles win ties) -- same fix already applied to every other
+     hidden-toggled element in this file (.sidebar[hidden] etc.), just
+     never needed for a .link-btn until this one. */
+  .ai-chat-open-btn[hidden]{display:none;}
+
+  /* AI Layer 2 review chat -- one panel reused across whichever question is
+     open, injected into <body> lazily on first open rather than rendered
+     per-question in renderReviewList(), which would conflict with
+     wireReviewList()'s in-place-DOM-edit design and duplicate a lot of
+     markup for something only one instance of is ever open at a time.
+     Desktop: docked side panel, review content stays visible/scrollable
+     alongside it, closer to a real chat app's layout than an inline blob
+     of text under the question. Mobile: full-screen takeover with its own
+     scroll container instead of inline-expanding under the question --
+     this project has hit repeated mobile bugs from unbounded-height
+     content fighting fixed nav bars/scroll math (the quiz full-screen
+     scroll saga), and a multi-turn chat is exactly that risk again if
+     rendered inline. */
+  /* Transparent by design, on both breakpoints -- exists purely to catch
+     an outside click that closes the panel, not to visually cover
+     anything. Desktop: the panel sits beside the review content, not over
+     it, so dimming would misrepresent that as a modal blocking the page;
+     .main-content itself gets pushed left instead (body.ai-chat-open
+     below) so the panel has genuinely empty space to occupy rather than
+     overlapping real content at the right edge. Mobile: the panel is
+     100vw (full-screen takeover), so there's nothing left showing through
+     the backdrop to dim regardless. */
+  .ai-chat-backdrop{position:fixed;inset:0;background:transparent;z-index:120;}
+  .ai-chat-backdrop[hidden]{display:none;}
+  .ai-chat-panel{
+    position:fixed;top:0;right:0;bottom:0;width:min(420px,100vw);
+    background:var(--panel);border-left:1px solid var(--line);
+    z-index:121;display:flex;flex-direction:column;
+    box-shadow:-8px 0 24px rgba(0,0,0,.18);
+  }
+  .ai-chat-panel[hidden]{display:none;}
+  @media (min-width:901px){
+    body.ai-chat-open .main-content{
+      margin-right:min(420px,100vw);
+      transition:margin-right .15s ease;
+    }
+  }
+  .ai-chat-header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line);}
+  .ai-chat-header h3{margin:0;font-size:1rem;}
+  .ai-chat-qtext{font-size:.8rem;color:var(--muted);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+  .ai-chat-messages{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px;}
+  .ai-chat-bubble{max-width:85%;padding:10px 13px;border-radius:12px;font-size:.92rem;line-height:1.45;white-space:pre-wrap;}
+  .ai-chat-bubble.assistant{align-self:flex-start;background:var(--surface-2);color:var(--ink);}
+  .ai-chat-bubble.user{align-self:flex-end;background:var(--accent);color:var(--accent-ink);}
+  .ai-chat-bubble.error{align-self:center;background:transparent;color:var(--bad);font-size:.85rem;text-align:center;}
+  .ai-chat-bubble.pending{opacity:.6;}
+  .ai-chat-footer{border-top:1px solid var(--line);padding:12px 16px;}
+  .ai-chat-turns{font-size:.78rem;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  /* One cohesive rounded bar (textarea + send button both live inside the
+     same bordered container) rather than two separate elements sitting
+     next to each other -- the send button is an icon anchored to the
+     bar's own right edge, not a second free-floating control. */
+  .ai-chat-input-bar{
+    display:flex;align-items:flex-end;gap:6px;
+    border:1px solid var(--line);border-radius:16px;
+    background:var(--surface);padding:6px 6px 6px 14px;
+  }
+  .ai-chat-input-bar textarea{
+    /* min-height:0 overrides this file's generic textarea{min-height:220px}
+       rule (meant for the admin/import textareas) -- min-height wins over
+       max-height on conflict per spec, so without this the box was
+       flooring at 220px regardless of the max-height cap below. */
+    flex:1;border:none;background:transparent;resize:none;outline:none;
+    padding:6px 0;font:inherit;color:var(--ink);min-height:0;max-height:110px;
+  }
+  .ai-chat-input-bar textarea::placeholder{color:var(--muted);}
+  .ai-chat-send-btn{
+    flex:none;width:34px;height:34px;border-radius:50%;border:none;
+    background:var(--accent);color:var(--accent-ink);cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .ai-chat-send-btn:disabled{background:var(--surface-2);color:var(--muted);cursor:not-allowed;}
+  .ai-chat-input-bar.capped{opacity:.55;}
+  .ai-chat-upgrade-badge{
+    font-size:.76rem;color:var(--accent);border:1px solid var(--accent);
+    border-radius:20px;padding:2px 10px;white-space:nowrap;
+  }
+  @media (max-width:900px){
+    .ai-chat-panel{
+      width:100vw;border-left:none;
+      padding-top:env(safe-area-inset-top);
+      padding-bottom:env(safe-area-inset-bottom);
+    }
+  }
   .all-correct{display:flex;align-items:center;justify-content:center;gap:10px;font-family:system-ui,sans-serif;color:var(--good);background:var(--good-bg);border-radius:12px;padding:16px 18px;font-size:1.02rem;font-weight:700;}
   .all-correct .icon{font-size:1.3rem;flex:none;}
 
@@ -717,7 +867,19 @@ if('serviceWorker' in navigator){
   .lib-badge.verified{background:var(--good-bg);color:var(--good);}
   .stat-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;}
   .stat-pill{display:flex;align-items:center;gap:8px;font-family:system-ui,sans-serif;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:9px 14px;}
-  @media (max-width:480px){.stat-row{gap:8px;margin-bottom:10px;}.stat-pill{padding:7px 10px;}.flash-hero{padding:14px 16px;gap:12px;margin-bottom:10px;}}
+  /* Progress tab mobile density pass: the stat pills, resume banner, and
+     sort/view-mode row each carry desktop-scale padding/margins that,
+     stacked one after another above the actual round cards, add up to a
+     lot of pure whitespace-plus-borders before any real content -- reads
+     as "overloaded" less because of any one element and more from several
+     boxy, generously-padded rows piling up in a row on a narrow screen.
+     Tightening padding/margins here (not removing anything) closes that
+     gap without losing any functionality. */
+  @media (max-width:480px){
+    .stat-row{gap:8px;margin-bottom:10px;}
+    .stat-pill{padding:7px 10px;}
+    .flash-hero{padding:14px 16px;gap:12px;margin-bottom:10px;}
+  }
   .stat-pill .icon{color:var(--accent);flex-shrink:0;}
   .stat-pill strong{font-size:.95rem;color:var(--ink);font-weight:700;}
   .stat-pill .stat-label{font-size:.78rem;color:var(--muted);}
@@ -930,6 +1092,16 @@ if('serviceWorker' in navigator){
      labels is the other half -- guarantees that if the pill doesn't fit
      it wraps as one whole unit (normal flex-wrap on its flex-row parent)
      instead of surviving by breaking its own text apart. */
+  /* height:44px + box-sizing:border-box pins this to the same real height
+     as the plain icon buttons (Manage/Save/Full Screen etc, all 44px) it
+     shares a row with -- without an explicit height, the pill's total came
+     from its own padding + button padding + this font's line-height
+     stacking up to ~51px, a real (not just visual) mismatch against its
+     row-mates that read as buttons randomly sized differently. Buttons
+     inside get align-items:center (default stretch from the parent
+     already makes them fill the 44px) instead of their own vertical
+     padding, so the text centers within whatever height they're given
+     rather than the padding dictating the height. */
   .study-mode-switch{display:inline-flex;flex:none;background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:3px;margin-bottom:14px;}
   .study-mode-switch.full-width{display:flex;flex:1;}
   .study-mode-switch.full-width button{flex:1;justify-content:center;}
@@ -970,11 +1142,17 @@ if('serviceWorker' in navigator){
      empty -- on desktop the sidebar gives the page enough visual anchoring
      that this reads fine, but on mobile (no sidebar, no top app bar
      either) it looked like the content had gotten stranded near the top
-     edge rather than deliberately placed. min-height centers it within
-     the available viewport instead; content taller than that (an open
-     set-menu, a picker) just fills normally, since min-height is a floor,
-     not a cap -- this only visibly kicks in for the short, truly-empty
-     states it's meant for. */
+     edge rather than deliberately placed.
+
+     REVISED, direct user feedback ("off center, looks bad"): true vertical
+     centering (justify-content:center) was the actual problem, not the
+     fix -- it reads as content randomly floating mid-page rather than a
+     normal top-down page. flex-start keeps content anchored to the top
+     (the conventional, expected place for it) while min-height still
+     stops the page from feeling like it ends abruptly short on a mostly-
+     empty state; content taller than that (an open set-menu, a picker)
+     just fills normally either way, since min-height is a floor, not a
+     cap. */
   @media (max-width:900px){
     .empty-state-block{min-height:50vh;display:flex;flex-direction:column;justify-content:flex-start;}
     .empty-state-block.centered{justify-content:center;}
@@ -1083,6 +1261,10 @@ if('serviceWorker' in navigator){
      card edge on a phone. */
   #turnstileWidget{max-width:100%;overflow:hidden;display:flex;justify-content:center;}
   #turnstileWidget iframe{max-width:100%!important;}
+  /* Sign-in's "Sign up" / "Forgot password?" row: now plain .text-link
+     hyperlinks (see that class), not chips, so there's no button box to
+     mismatch-width or center -- centering the row itself is enough for a
+     clean stacked pair at phone width. */
   @media (max-width:480px){
     .auth-links-row{flex-direction:column;gap:8px;align-items:center;}
   }
@@ -1127,6 +1309,10 @@ if('serviceWorker' in navigator){
   .dialog-overlay{position:fixed;inset:0;background:rgba(6,8,12,.55);display:flex;align-items:center;justify-content:center;z-index:95;}
   .dialog-overlay[hidden]{display:none;}
   .dialog-card{background:var(--surface);border-radius:14px;padding:26px 28px;max-width:360px;width:90%;}
+  .dialog-card label{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:.9rem;}
+  .dialog-card label .ai-override-select, .dialog-card label input[type="number"]{
+    border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--surface);color:var(--ink);font:inherit;width:150px;
+  }
   /* Dialog action rows (Cancel/Confirm, Start Fresh/Continue, etc.) --
      unlike .nav-row/.extra-actions/.btn-row above, these are deliberately
      compact and right-aligned on desktop, not filling their container, so the same
@@ -1788,14 +1974,20 @@ function showView(v, opts){
      rendering its own <h1>, see the promoted headings in those render
      functions), that header is stale, irrelevant copy sitting on top of
      every one of them -- only 'quiz' (the one place examTitle/examSub
-     actually describe something) and 'auth' (no other heading of its own
-     above the Sign In/Sign Up card -- this doubles as that page's <h1>)
-     still need it. */
+     actually describe something) and 'auth' still need it on desktop,
+     where there's room to spare. On mobile, 'auth' turned out to be
+     redundant too -- the auth card has its own "NHA Exam Prep" brand mark
+     plus a "Sign In"/"Create Account" <h2>, so this row duplicates that
+     identity rather than adding one, and since .auth-outer vertically
+     centers itself within its own 100vh regardless of what's above it,
+     the duplicate row doesn't just waste space, it visibly pushes the
+     centered card down and opens a large awkward gap above it (found via
+     a mobile aesthetics audit, not reported broken directly). */
   examHeaderRow.style.display = (v==='quiz' || v==='auth') ? '' : 'none';
-  /* Marks quiz specifically (not auth) so mobile CSS can hide this row --
-     see the .is-quiz-header rule -- without needing a resize listener: the
-     class only needs to track which VIEW is active, the media query alone
-     handles which WIDTH it applies at. */
+  /* Marks quiz AND auth so mobile CSS can hide this row for both -- see
+     the .hide-header-mobile rule -- without needing a resize listener:
+     the class only needs to track which VIEW is active, the media query
+     alone handles which WIDTH it applies at. */
   examHeaderRow.classList.toggle('hide-header-mobile', v==='quiz' || v==='auth');
   flashView.style.display = v==='flash' ? 'block':'none';
   libraryView.style.display = v==='library' ? 'block':'none';
@@ -1941,6 +2133,24 @@ function scrollElementIntoView(el){
        : null)
     : null;
   const rect = el.getBoundingClientRect();
+  /* Real bug, found from a real-device screenshot showing question text
+     visibly cut through by the "Exit Full Screen" button: that button is
+     position:fixed (see .fullscreen-toggle-row) at a CONSTANT screen
+     position (top:14 to roughly top:58) regardless of scroll -- but this
+     function was always targeting a flat 12px offset from the container's
+     top, landing content's anchor well inside that fixed button's own
+     vertical band. Scrolling content up that far doesn't move the button
+     (it can't, it's fixed) -- it just drags whatever WAS at that scroll
+     position into visual collision with it. Quiz's own anchor ("QUESTION
+     N", short text, left-aligned) happened not to visibly overlap the
+     button (which sits on the right) purely by accident of being narrow;
+     flashcards' question text routinely spans wide enough to collide
+     directly. The fix is a bigger offset specifically when a fixed toggle
+     is actually occupying that space -- not a width/layout constraint on
+     the content, since the real conflict is vertical (same screen band),
+     not something content width alone could reliably dodge. Measuring the
+     toggle's own rendered height (rather than hardcoding it) keeps this
+     correct if its size ever changes. */
   const toggleRow = container ? container.querySelector('.fullscreen-toggle-row') : null;
   const topOffset = toggleRow ? (toggleRow.getBoundingClientRect().height + 26) : 12;
   if(container){
@@ -1965,6 +2175,279 @@ function scrollQuestionIntoView(){
 function scrollFlashcardIntoView(){
   const target = window.innerWidth <= 900 ? document.getElementById('flashProgressAnchor') : flashPanel;
   scrollElementIntoView(target || flashPanel);
+}
+
+/* AI Layer 1 explanations (ai-explain Edge Function, Phase 1). In-memory
+   only, per page load -- the server side (ai_explanations table) is the
+   real persistent cache; this Map just stops the same question being
+   re-fetched every time renderQuestion() re-runs for an unrelated reason
+   (flagging, toggling the question list, etc.), which happens far more
+   often than the question itself actually changes. Keyed by question_key
+   (same identity scheme used server-side and by flashcard_recall_progress)
+   rather than by array index, so it also naturally dedupes a question that
+   appears more than once across retakes/rounds within the same session.
+   Stores the in-flight fetch Promise itself (not just the eventual result)
+   so two renders that both land while a fetch is still pending share the
+   same request instead of firing a second one. */
+/* Admin kill switches + configurable chat limits (migration 0026/0027,
+   get_ai_feature_flags() RPC -- already merges any per-account override
+   with the global default server-side, this client never needs to know
+   which one applied). Optimistic defaults match the config table's own
+   column defaults, so a render that happens before this has resolved just
+   shows the buttons normally; if AI is really disabled or a cap already
+   reached, the actual request still gets rejected server-side regardless
+   of what this object says -- this is only for showing the right state in
+   the common case, not the real enforcement point. loadAiFeatureFlags()
+   is called once, fire-and-forget, right after a genuine sign-in grants
+   access (see applyAccessGate) -- not re-fetched on every render, so a
+   config change made while this tab is already open (by an admin, or by
+   this account's own chat_period_used climbing) won't be reflected until
+   the next sign-in/reload -- except chat_period_used, which sendAiChatMessage()
+   also updates in place from each response so the period cap's greyed
+   state doesn't need a reload to appear once actually hit this session. */
+let aiFeatureFlags = {
+  explain_enabled: true, chat_enabled: true, chat_turn_limit: 5,
+  chat_period_limit: 40, chat_period_days: 30, chat_period_used: 0,
+};
+async function loadAiFeatureFlags(){
+  try{
+    const { data, error } = await supabaseClient.rpc('get_ai_feature_flags');
+    if(!error && data && data.length) aiFeatureFlags = data[0];
+  }catch(e){ /* keep the optimistic defaults -- server-side is the real gate */ }
+}
+function isChatPeriodCapped(){
+  return aiFeatureFlags.chat_period_used >= aiFeatureFlags.chat_period_limit;
+}
+
+const aiExplanationCache = new Map();
+function fetchAiExplanation(q){
+  const key = q.text.trim().toLowerCase();
+  if(!aiExplanationCache.has(key)){
+    const p = supabaseClient.functions.invoke('ai-explain', {
+      body: {
+        question_text: q.text,
+        options: q.options,
+        correct_option: q.correct,
+        existing_explanation: q.explanation || undefined,
+      },
+    }).then(({data, error})=>{
+      if(error) throw error;
+      if(data && data.error) throw new Error(data.error);
+      return data.explanation;
+    });
+    // A failed fetch shouldn't get permanently stuck as "no explanation
+    // for this question all session" -- drop it from the cache so the
+    // next render (or next visit to this question) tries again.
+    p.catch(()=>{ aiExplanationCache.delete(key); });
+    aiExplanationCache.set(key, p);
+  }
+  return aiExplanationCache.get(key);
+}
+
+/* AI Layer 2 review chat (ai-chat Edge Function). Review-only, matching
+   the same auto-vs-on-demand split as ai-explain -- never wired into
+   exam-taking. One global panel (lazily created, appended to <body> on
+   first use) reused across whichever question is open at a time, rather
+   than one per review row -- keeps wireReviewList()'s in-place-DOM-edit
+   design intact and avoids duplicating panel markup per question.
+
+   aiChatThreads is client-side-only per page load, keyed like
+   aiExplanationCache -- there's no GET-thread endpoint on the server, so
+   reopening a question chatted about earlier in the same session shows
+   that history, but a fresh page load starts the *visible* thread empty.
+   The actual turn cap is enforced server-side by counting rows in
+   ai_chat_messages regardless of what the client remembers, so a reload
+   can't be used to dodge the limit -- it only means old messages scroll
+   out of view locally, not that the cap resets. */
+const aiChatThreads = new Map(); // question_key -> { messages, turnsRemaining, capped }
+let aiChatCurrentQuestion = null;
+let aiChatEl = null;
+
+function ensureAiChatPanel(){
+  if(aiChatEl) return aiChatEl;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'ai-chat-backdrop';
+  backdrop.hidden = true;
+  backdrop.onclick = closeAiChat;
+  const panel = document.createElement('div');
+  panel.className = 'ai-chat-panel';
+  panel.hidden = true;
+  panel.innerHTML = `
+    <div class="ai-chat-header">
+      <div>
+        <h3>Ask about this question</h3>
+        <div class="ai-chat-qtext" id="aiChatQtext"></div>
+      </div>
+      <button type="button" class="icon-btn" id="aiChatCloseBtn" aria-label="Close chat">${icon('close')}</button>
+    </div>
+    <div class="ai-chat-messages" id="aiChatMessages"></div>
+    <div class="ai-chat-footer">
+      <div class="ai-chat-turns" id="aiChatTurns"></div>
+      <div class="ai-chat-input-bar" id="aiChatInputBar">
+        <textarea id="aiChatInput" rows="1" placeholder="Ask a follow-up…"></textarea>
+        <button type="button" class="ai-chat-send-btn" id="aiChatSendBtn" aria-label="Send">${icon('send')}</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  document.body.appendChild(panel);
+  panel.querySelector('#aiChatCloseBtn').onclick = closeAiChat;
+  panel.querySelector('#aiChatSendBtn').onclick = sendAiChatMessage;
+  panel.querySelector('#aiChatInput').addEventListener('keydown', (e)=>{
+    if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendAiChatMessage(); }
+  });
+  aiChatEl = { backdrop, panel };
+  return aiChatEl;
+}
+
+async function openAiChat(q){
+  const { backdrop, panel } = ensureAiChatPanel();
+  aiChatCurrentQuestion = q;
+  const key = q.text.trim().toLowerCase();
+  panel.querySelector('#aiChatQtext').textContent = q.text;
+  backdrop.hidden = false;
+  panel.hidden = false;
+  // ai-chat-open pushes .main-content left (CSS, desktop only) so the
+  // panel has real empty space beside the review content instead of
+  // overlapping it -- the content stays visible AND usable, so background
+  // scroll is only locked below 900px, where the panel is a full-screen
+  // takeover and there's nothing sensible left to scroll behind it.
+  document.body.classList.add('ai-chat-open');
+  if(window.innerWidth <= 900) document.body.style.overflow = 'hidden';
+  if(!aiChatThreads.has(key)){
+    // A fresh thread opens onto the actual explanation the user already
+    // read on the left, as the first message -- not a generic "ask me
+    // anything" instruction -- so the conversation reads as a real
+    // continuation of what they just saw, not a blank slate. This button
+    // can't be reached before AI Explain has already been toggled on for
+    // this question (see wireReviewList()), so fetchAiExplanation() is
+    // already resolved client-side and this returns instantly in the
+    // normal case -- the loading state below is only for the rare case
+    // where it isn't.
+    aiChatThreads.set(key, { messages: [], turnsRemaining: null, capped: false });
+    renderAiChatMessages();
+    try{
+      const explanation = await fetchAiExplanation(q);
+      const thread = aiChatThreads.get(key);
+      if(thread && thread.messages.length === 0){
+        thread.messages.push({ role: 'assistant', text: explanation });
+      }
+    } catch(e){ /* leave empty -- renderAiChatMessages()'s own fallback copy covers this */ }
+  }
+  renderAiChatMessages();
+  panel.querySelector('#aiChatInput').focus();
+}
+
+function closeAiChat(){
+  if(!aiChatEl) return;
+  aiChatEl.backdrop.hidden = true;
+  aiChatEl.panel.hidden = true;
+  document.body.classList.remove('ai-chat-open');
+  document.body.style.overflow = '';
+  aiChatCurrentQuestion = null;
+}
+
+function renderAiChatMessages(){
+  if(!aiChatEl || !aiChatCurrentQuestion) return;
+  const key = aiChatCurrentQuestion.text.trim().toLowerCase();
+  const thread = aiChatThreads.get(key);
+  const list = aiChatEl.panel.querySelector('#aiChatMessages');
+  if(thread.messages.length===0){
+    // Transient -- openAiChat() seeds the real explanation as the first
+    // message and this only shows for the brief window (or rare failure)
+    // before that lands, never as a steady-state "ask me anything" screen.
+    list.innerHTML = `<div class="ai-chat-bubble assistant"><em>Loading…</em></div>`;
+  } else {
+    list.innerHTML = thread.messages.map(m=>
+      `<div class="ai-chat-bubble ${m.role}${m.pending?' pending':''}">${escapeHtml(m.text)}</div>`
+    ).join('');
+  }
+  list.scrollTop = list.scrollHeight;
+  const turnsEl = aiChatEl.panel.querySelector('#aiChatTurns');
+  const inputBar = aiChatEl.panel.querySelector('#aiChatInputBar');
+  const input = aiChatEl.panel.querySelector('#aiChatInput');
+  const sendBtn = aiChatEl.panel.querySelector('#aiChatSendBtn');
+  // Period cap spans every question, so it's checked first and takes
+  // precedence over the per-question cap's own message -- shown
+  // immediately on open (this function runs at the end of openAiChat()
+  // too), not only after a rejected send, since it isn't specific to
+  // whichever question happened to be open when the limit was hit.
+  if(isChatPeriodCapped()){
+    turnsEl.innerHTML = `You've reached your ${aiFeatureFlags.chat_period_days}-day follow-up limit. <span class="ai-chat-upgrade-badge">Upgrade for more (coming soon)</span>`;
+    inputBar.classList.add('capped');
+    input.disabled = true;
+    sendBtn.disabled = true;
+  } else if(thread.capped){
+    // Greyed-out, not hidden -- the limit is visibly still there rather
+    // than the option just disappearing, with a placeholder for a real
+    // upgrade path once one exists (subscription tiers, per-account admin
+    // overrides) rather than a dead end.
+    turnsEl.innerHTML = `You've used your follow-ups for this question. <span class="ai-chat-upgrade-badge">Upgrade for more (coming soon)</span>`;
+    inputBar.classList.add('capped');
+    input.disabled = true;
+    sendBtn.disabled = true;
+  } else {
+    turnsEl.textContent = thread.turnsRemaining===null ? ''
+      : `${thread.turnsRemaining} follow-up${thread.turnsRemaining===1?'':'s'} left for this question`;
+    inputBar.classList.remove('capped');
+    input.disabled = false;
+    sendBtn.disabled = false;
+  }
+}
+
+async function sendAiChatMessage(){
+  if(!aiChatEl || !aiChatCurrentQuestion) return;
+  const input = aiChatEl.panel.querySelector('#aiChatInput');
+  const text = input.value.trim();
+  if(!text) return;
+  const q = aiChatCurrentQuestion;
+  const key = q.text.trim().toLowerCase();
+  const thread = aiChatThreads.get(key);
+  thread.messages.push({ role:'user', text });
+  thread.messages.push({ role:'assistant', text:'…', pending:true });
+  input.value = '';
+  const sendBtn = aiChatEl.panel.querySelector('#aiChatSendBtn');
+  sendBtn.disabled = true;
+  input.disabled = true;
+  renderAiChatMessages();
+  try{
+    const { data, error } = await supabaseClient.functions.invoke('ai-chat', {
+      body: {
+        question_text: q.text,
+        options: q.options,
+        correct_option: q.correct,
+        existing_explanation: q.explanation || undefined,
+        message: text,
+      },
+    });
+    thread.messages.pop(); // drop the pending placeholder
+    if(error){
+      let errBody = null;
+      try{ errBody = error.context ? await error.context.json() : null; }catch(e){}
+      if(errBody && errBody.period_limit_reached){
+        // Global, not question-specific -- mark it on aiFeatureFlags itself
+        // (via the used>=limit check isChatPeriodCapped() does) rather than
+        // on this one thread, so every other question's chat greys out too
+        // without each needing its own round-trip to discover it.
+        aiFeatureFlags.chat_period_used = aiFeatureFlags.chat_period_limit;
+      } else if(errBody && /follow-up questions/.test(errBody.error || '')){
+        thread.capped = true;
+        thread.turnsRemaining = 0;
+      }
+      thread.messages.push({ role:'error', text: (errBody && errBody.error) || "Couldn't get a reply right now." });
+    } else if(data && data.error){
+      thread.messages.push({ role:'error', text: data.error });
+    } else {
+      thread.messages.push({ role:'assistant', text: data.reply });
+      thread.turnsRemaining = data.turns_remaining;
+      thread.capped = data.turns_remaining <= 0;
+      if(typeof data.period_used === 'number') aiFeatureFlags.chat_period_used = data.period_used;
+    }
+  } catch(e){
+    thread.messages.pop();
+    thread.messages.push({ role:'error', text: "Couldn't get a reply right now." });
+  }
+  renderAiChatMessages();
 }
 
 /* ================= quiz rendering ================= */
@@ -2028,6 +2511,13 @@ function renderQuestion(){
       <span class="letter">${letters[i]}</span><span>${escapeHtml(opt)}${tag}</span>
     </button>`;
   });
+  // Filled in below, after quizPanel.innerHTML is set -- the fetch itself
+  // (cached or not) can't complete before that innerHTML assignment runs,
+  // so this always starts as a loading placeholder, never a flash of
+  // stale content from the previous question.
+  if(showFeedback && aiFeatureFlags.explain_enabled){
+    html += `<div class="review-explanation" id="aiExplainBlock"><em>Loading explanation…</em></div>`;
+  }
   html += `</div>`; // closes .quiz-question-block
 
   /* "End Exam Now" removed entirely (redundant with "Submit Exam" on the
@@ -2062,6 +2552,24 @@ function renderQuestion(){
   `;
 
   quizPanel.innerHTML = html;
+
+  if(showFeedback && aiFeatureFlags.explain_enabled){
+    // current can change (nav, or another renderQuestion() re-run from an
+    // unrelated click) before this resolves -- re-check before writing, and
+    // look the element up fresh at resolution time rather than capturing a
+    // reference now, since a re-render in the meantime replaces the whole
+    // innerHTML tree including this node.
+    const myCurrent = current;
+    fetchAiExplanation(q).then(explanation=>{
+      if(current !== myCurrent) return;
+      const el = document.getElementById('aiExplainBlock');
+      if(el) el.innerHTML = `<strong>Explanation:</strong> ${escapeHtml(explanation)}`;
+    }).catch(()=>{
+      if(current !== myCurrent) return;
+      const el = document.getElementById('aiExplainBlock');
+      if(el) el.textContent = "Couldn't load an explanation right now.";
+    });
+  }
 
   document.getElementById('dotsToggleBtn').onclick = ()=>{ dotsExpanded = !dotsExpanded; renderQuestion(); renderDots(); };
   document.getElementById('pauseExamBtn').onclick = ()=> showView('progress');
@@ -2296,12 +2804,91 @@ function renderReviewList(indices, questions, answersMap){
     if(userAns===undefined){
       html += `<div class="review-line wrong-line">Not answered</div>`;
     }
+    // data-role="explain-text" is filled in by wireReviewList()'s toggle
+    // handler -- rendered here as either the bank explanation (unchanged
+    // from before this feature existed) or hidden/empty, so a user who
+    // never touches the AI Explain button sees exactly the same thing as
+    // always. AI Explain REPLACES this content when toggled on (never
+    // shown alongside it) -- the two are one explanation slot, not two.
+    html += `<div class="review-explain-row">`;
     if(q.explanation){
-      html += `<div class="review-explanation"><strong>Explanation:</strong> ${escapeHtml(q.explanation)}</div>`;
+      html += `<div class="review-explanation" data-role="explain-text"><strong>Explanation:</strong> ${escapeHtml(q.explanation)}</div>`;
+    } else {
+      html += `<div class="review-explanation" data-role="explain-text" hidden></div>`;
     }
+    if(aiFeatureFlags.explain_enabled){
+      html += `<button type="button" class="link-btn ai-explain-btn" data-qi="${i}" aria-pressed="false">${icon('info')}AI Explanation</button>`;
+      // Ask a follow-up is nested under AI Explain, not a sibling feature --
+      // starts hidden and only appears once AI Explain has actually been
+      // toggled on for this question (see wireReviewList()), matching the
+      // product relationship: the chat builds on the AI explanation, it
+      // isn't a separately-discoverable thing sitting next to it.
+      if(aiFeatureFlags.chat_enabled){
+        html += `<button type="button" class="link-btn ai-chat-open-btn" data-qi="${i}" hidden>${icon('feedback')}Ask a follow-up</button>`;
+      }
+    }
+    html += `</div>`;
     html += `</div>`;
   });
   return html;
+}
+
+// Wires the AI Explain toggle for a renderReviewList() result already
+// inserted into the DOM. Three different views render this shared list
+// (Results, Progress's per-attempt review, Admin's per-user review) --
+// each calls this once, right after setting its own innerHTML, passing
+// the same questions array it rendered with (so data-qi indices resolve
+// to the right question). Deliberately in-place DOM edits, not a full
+// parent re-render -- Admin's own render path is an async Supabase fetch,
+// re-running that on every single toggle click would be wasteful and slow.
+function wireReviewList(container, questions){
+  questions = questions || exam.questions;
+  container.querySelectorAll('.ai-explain-btn').forEach(btn=>{
+    // Ask a follow-up lives nested under this same button (see
+    // renderReviewList()) rather than as an independent sibling feature --
+    // shown only while the AI explanation itself is showing, hidden the
+    // moment it's toggled back off. May not exist at all if chat is
+    // globally disabled.
+    const chatBtn = btn.closest('.review-explain-row').querySelector('.ai-chat-open-btn');
+    btn.onclick = ()=>{
+      const q = questions[parseInt(btn.dataset.qi)];
+      const textEl = btn.closest('.review-explain-row').querySelector('[data-role="explain-text"]');
+      const active = btn.getAttribute('aria-pressed') === 'true';
+      if(active){
+        btn.setAttribute('aria-pressed','false');
+        btn.innerHTML = `${icon('info')}AI Explanation`;
+        if(chatBtn) chatBtn.hidden = true;
+        if(q.explanation){
+          textEl.hidden = false;
+          textEl.innerHTML = `<strong>Explanation:</strong> ${escapeHtml(q.explanation)}`;
+        } else {
+          textEl.hidden = true;
+          textEl.innerHTML = '';
+        }
+        return;
+      }
+      btn.setAttribute('aria-pressed','true');
+      btn.disabled = true;
+      textEl.hidden = false;
+      textEl.innerHTML = '<em>Loading explanation…</em>';
+      fetchAiExplanation(q).then(explanation=>{
+        textEl.innerHTML = `<strong>Explanation:</strong> ${escapeHtml(explanation)}`;
+        btn.disabled = false;
+        btn.innerHTML = `${icon('close')}Hide AI Explanation`;
+        if(chatBtn) chatBtn.hidden = false;
+      }).catch(()=>{
+        textEl.innerHTML = "Couldn't load an explanation right now.";
+        btn.disabled = false;
+        btn.setAttribute('aria-pressed','false');
+        btn.innerHTML = `${icon('info')}AI Explanation`;
+      });
+    };
+  });
+  container.querySelectorAll('.ai-chat-open-btn').forEach(btn=>{
+    btn.onclick = ()=>{
+      openAiChat(questions[parseInt(btn.dataset.qi)]);
+    };
+  });
 }
 
 function renderReviewPanel(missed, total){
@@ -2310,6 +2897,11 @@ function renderReviewPanel(missed, total){
   reviewPanel.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:4px;">
       <h2 style="margin:0;font-size:1.3rem;">${heading}</h2>
+      <!-- Same wrap-stranding bug class as flashcards' full-screen toggle
+           (see CLAUDE.md) -- when this row wraps at phone width, space-between
+           on a single leftover item resolves to flex-start, landing the
+           buttons at the left edge on their own line instead of staying
+           right-aligned. margin-left:auto keeps it pinned right regardless. -->
       <div class="toplinks" style="margin:0;margin-left:auto;">
         <button id="reviewMissedBtn" class="${reviewFilter==='missed'?'active':''}" aria-pressed="${reviewFilter==='missed'}">Review Missed Only</button>
         <button id="reviewAllBtn" class="${reviewFilter==='all'?'active':''}" aria-pressed="${reviewFilter==='all'}">Review All</button>
@@ -2319,6 +2911,7 @@ function renderReviewPanel(missed, total){
   `;
   document.getElementById('reviewMissedBtn').onclick = ()=>{ reviewFilter='missed'; renderReviewPanel(missed, total); };
   document.getElementById('reviewAllBtn').onclick = ()=>{ reviewFilter='all'; renderReviewPanel(missed, total); };
+  wireReviewList(reviewPanel, exam.questions);
 }
 
 function escapeHtml(s){
@@ -2358,7 +2951,8 @@ const ICONS = {
   info: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>',
   shield: '<path d="M12 3l7 3v6c0 5-3.5 8-7 9-3.5-1-7-4-7-9V6z"/>',
   chevronLeft: '<polyline points="15,18 9,12 15,6"/>',
-  chevronDown: '<polyline points="6,9 12,15 18,9"/>'
+  chevronDown: '<polyline points="6,9 12,15 18,9"/>',
+  send: '<line x1="4" y1="20" x2="20" y2="4"/><polyline points="9,4 20,4 20,15"/>'
 };
 function icon(name, opts){
   opts = opts || {};
@@ -3428,6 +4022,15 @@ function renderFlashcard(){
     const backToDeckHtml = (flashcards.length && flashGeneratorOpen)
       ? `<button class="link-btn" id="flashBackToDeckBtn" type="button">${icon('close')}Back to ${currentSetName ? `"${escapeHtml(currentSetName)}"` : 'your deck'} (${flashcards.length} card${flashcards.length===1?'':'s'})</button>`
       : '';
+    /* Two different screens share this block, and per direct user feedback
+       they want opposite mobile treatment: the true first-time-empty state
+       (no deck at all) should stay anchored to the top (a previous "off
+       center, looks bad" complaint), but reopening the generator OVER an
+       existing deck (flashcards.length>0 here) is a short, deliberate
+       "make a choice" moment where centering was explicitly asked for back
+       ("ok to make it look nice, don't think it should be top anchored").
+       .centered opts back into the pre-existing centered treatment for
+       just that second case. */
     const emptyStateClass = flashcards.length ? 'empty-state-block centered' : 'empty-state-block';
     flashPanel.innerHTML = `<div class="${emptyStateClass}">${topHtml}<h1 class="sr-only">Flashcards</h1>${backToDeckHtml}${flashcards.length ? '' : `<div class="format-help">No flashcards yet. Generate a set from your progress above.</div>`}</div>`;
     if(currentUser){ bindFlashGeneratorHandlers(); bindFlashLibraryPickerHandlers(); }
@@ -3496,7 +4099,31 @@ function renderFlashcard(){
      living in-flow inside the space-between header row the non-fullscreen
      case still uses -- same treatment quiz's toggle already gets, and for
      the same reason (stay reachable regardless of scroll position, instead
-     of scrolling away with the rest of the header). */
+     of scrolling away with the rest of the header).
+
+     Non-fullscreen is two deliberate rows, not one long flex-wrap cascade --
+     a single wrapping row put "Save this set" wherever cumulative width
+     happened to push it (its own third line on phone width, not filling
+     the real gap). That gap was specifically at the end of the goHome/
+     Manage row (mode-switch + Full-Screen already form a clean second row
+     below it) -- explicit rows put Save exactly there, deterministically.
+     Save itself is promoted out of the "Manage this set" menu to a direct,
+     always-visible action -- it used to be one of five items buried behind
+     that toggle, and this is the one worth one tap instead of two (open
+     menu, then tap Save).
+
+     REAL BUG hit while building this: an HTML-style angle-bracket-bang
+     comment placed directly in this template literal's rendered output
+     (not a JS block comment like this one, an actual angle-bracket comment
+     in the markup itself) containing this project's usual " -- " dash
+     separator silently broke HTML parsing -- the two buttons right after
+     it (goHome, Manage) stopped appearing in the DOM entirely despite
+     showing up fine in the innerHTML string, because "--" inside that kind
+     of comment is invalid per spec and real browsers close it early. Same
+     bug class CLAUDE.md already documents for XML comments in the Android
+     project. Never put an explanatory comment directly in HTML template
+     output here -- JS comments above the template (like this one) don't
+     have this problem since they're stripped before the string is built. */
   const topRowHtml = flashFullScreen ? `
     <h1 class="sr-only">Flashcards</h1>
     <div class="fullscreen-toggle-row">
@@ -4586,6 +5213,7 @@ async function applyAccessGate(authEvent){
   if(!wasGranted){
     renderEmptyState();
     showView(initialView || 'quiz', initialView ? { fromPopState: true } : undefined);
+    loadAiFeatureFlags();
   }
 }
 
@@ -4924,6 +5552,12 @@ async function renderProgressView(){
    didn't need a second copy of this logic. */
 function renderRoundAttemptsHtml(r){
   let html = `<div style="padding:4px 0 10px 14px;">`;
+  /* Real bug, found via a mobile UI audit: with zero attempts (a round
+     that exists but was never actually started -- e.g. created then
+     abandoned before answering anything), maxAttempt stays 0 and the loop
+     below never runs at all, so "Show attempts" expanded to a completely
+     empty, silent void -- no error, no message, just nothing where content
+     was expected, easy to mistake for the click not having worked. */
   if(!r.attempts.length){
     html += `<div class="format-help" style="margin:0;">No attempts yet for this round.</div></div>`;
     return html;
@@ -5303,6 +5937,9 @@ function renderProgressAttemptDetail(){
   progressPanel.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:10px;">
       <h1 style="margin:0;font-size:1.3rem;">${heading}</h1>
+      <!-- Same wrap-stranding bug class as flashcards' full-screen toggle
+           (see CLAUDE.md) -- margin-left:auto keeps this group pinned right
+           even when it wraps onto its own line at phone width. -->
       <div style="display:flex;align-items:center;gap:10px;margin-left:auto;">
         <div class="toplinks" style="margin:0;">
           <button id="progressReviewMissedBtn" class="${progressReviewFilter==='missed'?'active':''}">Review Missed Only</button>
@@ -5316,6 +5953,7 @@ function renderProgressAttemptDetail(){
   document.getElementById('backToProgressBtn').onclick = ()=>{ progressAttemptView = null; renderProgressPanel(); };
   document.getElementById('progressReviewMissedBtn').onclick = ()=>{ progressReviewFilter='missed'; renderProgressAttemptDetail(); };
   document.getElementById('progressReviewAllBtn').onclick = ()=>{ progressReviewFilter='all'; renderProgressAttemptDetail(); };
+  wireReviewList(progressPanel, questions);
 }
 
 /* ================= ADMIN TAB (role==='admin' only) ================= */
@@ -5346,6 +5984,27 @@ async function renderAdminView(){
     if(dErr) throw dErr;
     const dismissalByUserType = {};
     dismissals.forEach(d=>{ dismissalByUserType[d.user_id + ':' + d.flag_type] = d; });
+
+    // AI usage/overrides -- same "admin reads the underlying table directly
+    // via its own admin-read RLS policy, computes flags client-side" pattern
+    // as the device/rate flags above (migration 0027 added matching
+    // admin-read policies to ai_feature_config/ai_account_overrides/
+    // ai_usage_log specifically so this could work the same way, rather
+    // than needing a dedicated RPC just for this list view).
+    const { data: aiConfigRow, error: aiCfgErr } = await supabaseClient.from('ai_feature_config')
+      .select('*').eq('id', 1).maybeSingle();
+    if(aiCfgErr) throw aiCfgErr;
+    const aiConfig = aiConfigRow || { chat_period_limit: 40, chat_period_days: 30 };
+    const { data: aiOverrideRows, error: aiOvErr } = await supabaseClient.from('ai_account_overrides').select('*');
+    if(aiOvErr) throw aiOvErr;
+    const aiOverridesByUser = {};
+    aiOverrideRows.forEach(o=>{ aiOverridesByUser[o.user_id] = o; });
+    const periodStartIso = new Date(Date.now() - aiConfig.chat_period_days*24*60*60*1000).toISOString();
+    const { data: aiUsageRows, error: aiUsageErr } = await supabaseClient.from('ai_usage_log')
+      .select('user_id').eq('layer', 'branch').gte('created_at', periodStartIso);
+    if(aiUsageErr) throw aiUsageErr;
+    const aiPeriodUsedByUser = {};
+    aiUsageRows.forEach(r=>{ aiPeriodUsedByUser[r.user_id] = (aiPeriodUsedByUser[r.user_id]||0) + 1; });
 
     const flagsByUser = {};
     profiles.forEach(p=>{
@@ -5386,6 +6045,16 @@ async function renderAdminView(){
       const maxSingleIpFetches = Object.values(perIpCount).reduce((m,c)=>Math.max(m,c), 0);
       const rateFlag = p.role !== 'admin' && (distinctIpsDay.size > 1 || maxSingleIpFetches > 15);
 
+      // Heavy AI usage: this account's own override wins over the global
+      // default, same merge logic get_ai_feature_flags() does server-side
+      // -- just recomputed here since this view needs it for every account
+      // at once, not just the calling admin's own.
+      const aiOverride = aiOverridesByUser[p.user_id];
+      const effectivePeriodLimit = (aiOverride && aiOverride.chat_period_limit != null)
+        ? aiOverride.chat_period_limit : aiConfig.chat_period_limit;
+      const aiPeriodUsed = aiPeriodUsedByUser[p.user_id] || 0;
+      const aiHeavyUsage = aiPeriodUsed >= effectivePeriodLimit;
+
       flagsByUser[p.user_id] = {
         /* `permanent` never gates deviceFlag/rateFlag above -- it only
            controls whether the dismissed-state UI shows a "Reviewed" badge
@@ -5395,10 +6064,11 @@ async function renderAdminView(){
            either way. */
         deviceFlag, distinctIpCountWeek: distinctIpsWeek.size, deviceDismissed: !!deviceDismissal, deviceDismissedPermanent: !!(deviceDismissal && deviceDismissal.permanent),
         phoneIpCountWeek: phoneIpsWeek.size, computerIpCountWeek: computerIpsWeek.size, otherIpCountWeek: otherIpsWeek.size,
-        rateFlag, fetchesLast24h: fetches.length, distinctIpCountDay: distinctIpsDay.size, rateDismissed: !!rateDismissal, rateDismissedPermanent: !!(rateDismissal && rateDismissal.permanent)
+        rateFlag, fetchesLast24h: fetches.length, distinctIpCountDay: distinctIpsDay.size, rateDismissed: !!rateDismissal, rateDismissedPermanent: !!(rateDismissal && rateDismissal.permanent),
+        aiHeavyUsage, aiPeriodUsed, aiEffectivePeriodLimit: effectivePeriodLimit,
       };
     });
-    adminData = { profiles, flagsByUser };
+    adminData = { profiles, flagsByUser, aiConfig, aiOverridesByUser };
   } catch(err){
     adminPanel.innerHTML = `<h1>Admin</h1><div class="msg err">Could not load admin data: ${escapeHtml(err.message)}</div>`;
     return;
@@ -5451,6 +6121,122 @@ function describeDeviceBreakdown(flags){
   return parts.length ? parts.join(', ') : `${flags.distinctIpCountWeek} IP addresses`;
 }
 
+/* Per-account AI overrides (migration 0027). A modal, not another set of
+   always-visible controls on every row -- the Accounts list is already
+   dense with badges/actions per account, and this is a rarely-touched
+   setting compared to Approve/Suspend, so it belongs behind one small
+   link rather than adding three more inline controls to every single row.
+   Reuses the existing .dialog-overlay/.dialog-card pattern (shortcuts
+   help, feedback form) rather than introducing a new modal component.
+   Plain native <selects> for the tri-state enabled/disabled/inherit
+   controls rather than this app's custom dropdown component -- that
+   component is wired around a persistent panel's own rerender function,
+   and integrating it with a dialog created fresh each time it's opened
+   would add real complexity for a low-traffic admin settings form. */
+function openAiAccountOverrideDialog(userId, email){
+  const existing = (adminData.aiOverridesByUser && adminData.aiOverridesByUser[userId]) || {};
+  const periodDays = adminData.aiConfig ? adminData.aiConfig.chat_period_days : 30;
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  const boolField = (id, current)=> `
+    <select id="${id}" class="ai-override-select">
+      <option value="">Inherit site default</option>
+      <option value="true" ${current===true?'selected':''}>On</option>
+      <option value="false" ${current===false?'selected':''}>Off</option>
+    </select>`;
+  overlay.innerHTML = `
+    <div class="dialog-card" style="max-width:420px;">
+      <h3 style="margin-top:0;">AI settings — ${escapeHtml(email)}</h3>
+      <div class="format-help">Overrides apply to this one account only, on top of the site-wide default in Admin → Tools → AI Features. Leave a field on "Inherit" to just use that default.</div>
+      <div style="display:flex;flex-direction:column;gap:14px;font-family:system-ui,sans-serif;margin-top:4px;">
+        <label>AI explanations ${boolField('ovExplainEnabled', existing.explain_enabled)}</label>
+        <label>Follow-up chat ${boolField('ovChatEnabled', existing.chat_enabled)}</label>
+        <label>Follow-ups allowed per question
+          <input type="number" id="ovTurnLimit" min="1" max="50" placeholder="Site default" value="${existing.chat_turn_limit ?? ''}">
+        </label>
+        <label>Follow-ups allowed per ${periodDays}-day period
+          <input type="number" id="ovPeriodLimit" min="1" max="2000" placeholder="Site default" value="${existing.chat_period_limit ?? ''}">
+        </label>
+      </div>
+      <div class="msg" id="ovResult"></div>
+      <div class="dialog-actions" style="margin-top:16px;">
+        <button class="btn btn-ghost" id="ovCancelBtn">Cancel</button>
+        <button class="btn btn-primary" id="ovSaveBtn">Save</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = ()=>{ overlay.remove(); };
+  overlay.onclick = (e)=>{ if(e.target === overlay) close(); };
+  overlay.querySelector('#ovCancelBtn').onclick = close;
+  const doSave = async (explainEnabled, chatEnabled, turnLimit, periodLimit)=>{
+    const resultEl = overlay.querySelector('#ovResult');
+    try{
+      const { error } = await supabaseClient.rpc('admin_set_ai_account_override', {
+        target_user_id: userId,
+        new_explain_enabled: explainEnabled,
+        new_chat_enabled: chatEnabled,
+        new_chat_turn_limit: turnLimit,
+        new_chat_period_limit: periodLimit,
+      });
+      if(error) throw error;
+      resultEl.className = 'msg ok';
+      resultEl.textContent = 'Saved.';
+      setTimeout(()=>{ close(); renderAdminView(); }, 500);
+    } catch(err){
+      resultEl.className = 'msg err';
+      resultEl.textContent = 'Could not save: ' + err.message;
+    }
+  };
+  overlay.querySelector('#ovSaveBtn').onclick = ()=>{
+    const resultEl = overlay.querySelector('#ovResult');
+    resultEl.className = 'msg';
+    resultEl.textContent = '';
+    const parseBool = (v)=> v === '' ? null : v === 'true';
+    const parseLimit = (v)=>{
+      const t = v.trim();
+      if(t === '') return { ok:true, value:null };
+      const n = parseInt(t, 10);
+      if(!Number.isInteger(n) || n <= 0) return { ok:false };
+      return { ok:true, value:n };
+    };
+    const explainEnabled = parseBool(overlay.querySelector('#ovExplainEnabled').value);
+    const chatEnabled = parseBool(overlay.querySelector('#ovChatEnabled').value);
+    const turnLimitP = parseLimit(overlay.querySelector('#ovTurnLimit').value);
+    const periodLimitP = parseLimit(overlay.querySelector('#ovPeriodLimit').value);
+    if(!turnLimitP.ok || !periodLimitP.ok){
+      resultEl.className = 'msg err';
+      resultEl.textContent = 'Limits must be positive whole numbers, or blank to inherit.';
+      return;
+    }
+    // A blank field inherits the site default -- resolve both to their
+    // actual effective numbers before comparing, not just the two raw
+    // inputs, so a blank period-limit field (inheriting e.g. 40) still
+    // gets checked against an explicit turn-limit override correctly.
+    const siteTurnLimit = adminData.aiConfig ? adminData.aiConfig.chat_turn_limit : 5;
+    const sitePeriodLimit = adminData.aiConfig ? adminData.aiConfig.chat_period_limit : 40;
+    const effectiveTurnLimit = turnLimitP.value ?? siteTurnLimit;
+    const effectivePeriodLimit = periodLimitP.value ?? sitePeriodLimit;
+    // Don't silently save a combination where the per-question limit can
+    // never actually be reached -- e.g. 10 follow-ups allowed on one
+    // question but only 5 allowed total in the period means that "10" is
+    // pure fiction. Ask which number the admin actually wants rather than
+    // saving both as entered and letting the account behave in a way
+    // neither number on its own would suggest.
+    if(effectiveTurnLimit > effectivePeriodLimit){
+      showConfirmDialog(
+        `The per-question limit (${effectiveTurnLimit}) is higher than the ${periodDays}-day period limit (${effectivePeriodLimit}) -- this account could never actually use ${effectiveTurnLimit} follow-ups on one question, since the period limit would cut them off first. Save anyway, or go back and adjust one of the two numbers?`,
+        ()=> doSave(explainEnabled, chatEnabled, turnLimitP.value, periodLimitP.value),
+        'Save Anyway'
+      );
+      return;
+    }
+    doSave(explainEnabled, chatEnabled, turnLimitP.value, periodLimitP.value);
+  };
+}
+
 function renderAdminAccountsView(){
   const sub = document.getElementById('adminSubPanel');
 
@@ -5499,6 +6285,13 @@ function renderAdminAccountsView(){
     if(flags.deviceFlag || flags.rateFlag){
       badges.push(`<button class="link-btn" data-dismiss-all-user="${p.user_id}" data-dismiss-all-device="${flags.deviceFlag}" data-dismiss-all-rate="${flags.rateFlag}">Dismiss permanently</button>`);
     }
+    // Heavy AI usage isn't a behavioral judgment needing a review/dismiss
+    // workflow like the device/rate flags above -- it's just a live number
+    // that self-resolves as the rolling period window moves forward, so no
+    // dismiss control here, just the count for awareness.
+    if(flags.aiHeavyUsage){
+      badges.push(`<span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">${flags.aiPeriodUsed}/${flags.aiEffectivePeriodLimit} AI follow-ups this period</span>`);
+    }
     return `
       <div class="lib-row">
         <div class="lib-info">
@@ -5509,6 +6302,7 @@ function renderAdminAccountsView(){
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <button class="link-btn" data-view-user="${p.user_id}">View Progress</button>
           <button class="link-btn" data-view-events="${p.user_id}">View Security Events</button>
+          <button class="link-btn" data-ai-settings-user="${p.user_id}" data-ai-settings-email="${escapeHtml(p.email)}">AI Settings</button>
           ${isSelf ? '' : isProtected ? `
             <span class="lib-badge" style="background:var(--chip);" title="Suspend/delete/role-change are blocked server-side for this account">Protected account</span>
           ` : `
@@ -5578,6 +6372,9 @@ function renderAdminAccountsView(){
   });
   sub.querySelectorAll('button[data-view-events]').forEach(btn=>{
     btn.onclick = ()=>{ adminSecurityEventsUserId = btn.dataset.viewEvents; renderAdminPanel(); };
+  });
+  sub.querySelectorAll('button[data-ai-settings-user]').forEach(btn=>{
+    btn.onclick = ()=>{ openAiAccountOverrideDialog(btn.dataset.aiSettingsUser, btn.dataset.aiSettingsEmail); };
   });
   sub.querySelectorAll('button[data-dismiss-user]').forEach(btn=>{
     btn.onclick = async ()=>{
@@ -5747,9 +6544,188 @@ async function renderAdminFeedbackView(){
   }
 }
 
+/* Admin controls for the two AI layers (migration 0026) -- the standing
+   requirement that unblocked the review chat from going live at all (see
+   CLAUDE.md / project memory project_ai_chat_launch_gate): an enable/
+   disable switch for each layer plus a configurable per-question chat
+   follow-up limit, replacing what used to be a hardcoded constant in
+   ai-chat's own source. Reads/writes via get_ai_feature_flags() /
+   admin_update_ai_feature_config() -- the same RPCs the review screens'
+   own gating uses, never the ai_feature_config table directly (it has no
+   policies for any client, admin or not). */
+async function renderAiFeatureConfigSection(){
+  const section = document.getElementById('aiFeatureConfigSection');
+  if(!section) return;
+  try{
+    const { data, error } = await supabaseClient.rpc('get_ai_feature_flags');
+    if(error) throw error;
+    const cfg = (data && data[0]) || { explain_enabled: true, chat_enabled: true, chat_turn_limit: 5 };
+    section.innerHTML = `
+      <h2>AI Features</h2>
+      <div class="format-help">Controls both AI layers app-wide — the base explanation shown during exam-taking and review, and the review-only follow-up chat.</div>
+      <div style="display:flex;flex-direction:column;gap:14px;max-width:420px;font-family:system-ui,sans-serif;margin-top:10px;">
+        <label style="display:flex;align-items:center;gap:10px;">
+          <input type="checkbox" id="aiExplainEnabledInput" ${cfg.explain_enabled ? 'checked' : ''}>
+          AI explanations enabled
+        </label>
+        <label style="display:flex;align-items:center;gap:10px;">
+          <input type="checkbox" id="aiChatEnabledInput" ${cfg.chat_enabled ? 'checked' : ''}>
+          Review follow-up chat enabled
+        </label>
+        <label style="display:flex;align-items:center;gap:10px;">
+          Follow-up questions allowed per exam question
+          <input type="number" id="aiChatTurnLimitInput" min="1" max="50" value="${cfg.chat_turn_limit}" style="width:64px;">
+        </label>
+        <button class="btn btn-primary" id="saveAiFeatureConfigBtn" style="align-self:flex-start;">Save</button>
+        <div class="msg" id="aiFeatureConfigResult"></div>
+      </div>
+    `;
+    document.getElementById('saveAiFeatureConfigBtn').onclick = async ()=>{
+      const resultEl = document.getElementById('aiFeatureConfigResult');
+      resultEl.className = 'msg';
+      resultEl.textContent = '';
+      const explainEnabled = document.getElementById('aiExplainEnabledInput').checked;
+      const chatEnabled = document.getElementById('aiChatEnabledInput').checked;
+      const turnLimit = parseInt(document.getElementById('aiChatTurnLimitInput').value, 10);
+      if(!Number.isInteger(turnLimit) || turnLimit <= 0){
+        resultEl.className = 'msg err';
+        resultEl.textContent = 'Follow-up limit must be a positive whole number.';
+        return;
+      }
+      try{
+        const { error: saveErr } = await supabaseClient.rpc('admin_update_ai_feature_config', {
+          new_explain_enabled: explainEnabled,
+          new_chat_enabled: chatEnabled,
+          new_chat_turn_limit: turnLimit,
+        });
+        if(saveErr) throw saveErr;
+        // Updates this admin's own session immediately -- their review
+        // screens reflect the change on the next render without needing to
+        // sign out/in. Other already-open sessions elsewhere won't see it
+        // until their own next sign-in/reload (loadAiFeatureFlags() is only
+        // called once per session, not polled) -- an accepted tradeoff at
+        // this traffic level, same as this app's other in-memory caches.
+        aiFeatureFlags = { explain_enabled: explainEnabled, chat_enabled: chatEnabled, chat_turn_limit: turnLimit };
+        resultEl.className = 'msg ok';
+        resultEl.textContent = 'Saved.';
+      } catch(err){
+        resultEl.className = 'msg err';
+        resultEl.textContent = 'Could not save: ' + err.message;
+      }
+    };
+  } catch(err){
+    section.innerHTML = `<h2>AI Features</h2><div class="msg err">Could not load current settings: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+/* Pre-generates Layer 1 AI explanations for the whole question bank up
+   front, so real users never pay the first-time generation latency (or,
+   equivalently, so the real dollar cost of generating each unique
+   question's explanation is paid once by this admin action rather than
+   scattered across whichever real user happens to view each question
+   first). Reuses the ai-explain function itself (not a separate code
+   path) -- calling it for an already-cached question is cheap and safe
+   (one DB lookup, no Claude call), so this is naturally idempotent and
+   safe to re-run on a partially-completed or previously-run library.
+
+   Deduped by question_key before running -- the cache is keyed by content,
+   not by which exam/round a question happens to sit in, so an identical
+   question appearing in multiple exams only needs generating once.
+
+   Concurrency-limited (worker-pool pattern, not one giant Promise.all) to
+   avoid hammering the Anthropic API past its rate limits and to keep this
+   controllable/interruptible rather than an unstoppable burst of ~3,400
+   simultaneous requests. */
+let aiPregenState = { running: false, stop: false, total: 0, processed: 0, generated: 0, alreadyCached: 0, errors: 0 };
+const AI_PREGEN_CONCURRENCY = 4;
+const AI_PREGEN_AVG_COST_USD = 0.0055; // matches the documented $0.005-0.0065 real range from hand-testing
+
+function getUniqueLibraryQuestions(){
+  const seen = new Set();
+  const unique = [];
+  EXAM_LIBRARY.forEach(exam=>{
+    (exam.questions||[]).forEach(q=>{
+      const key = q.text.trim().toLowerCase();
+      if(seen.has(key)) return;
+      seen.add(key);
+      unique.push(q);
+    });
+  });
+  return unique;
+}
+
+function renderAiPregenStatus(){
+  const statusEl = document.getElementById('aiPregenStatus');
+  const startBtn = document.getElementById('aiPregenStartBtn');
+  const stopBtn = document.getElementById('aiPregenStopBtn');
+  if(!statusEl) return; // panel navigated away from mid-run -- state keeps running in the background regardless
+  const s = aiPregenState;
+  if(s.total === 0 && !s.running){
+    statusEl.className = 'msg';
+    statusEl.textContent = '';
+    return;
+  }
+  const estCost = (s.generated * AI_PREGEN_AVG_COST_USD).toFixed(2);
+  statusEl.className = 'msg' + (s.running ? '' : ' ok');
+  statusEl.textContent = `${s.processed} / ${s.total} processed — ${s.generated} generated, ${s.alreadyCached} already cached, ${s.errors} errors — ~$${estCost} spent this run` + (s.running ? '' : (s.stop ? ' (stopped)' : ' (done)'));
+  if(startBtn) startBtn.disabled = s.running;
+  if(stopBtn) stopBtn.hidden = !s.running;
+}
+
+async function runAiPregeneration(limit){
+  let questions = getUniqueLibraryQuestions();
+  if(limit && limit > 0) questions = questions.slice(0, limit);
+  aiPregenState = { running: true, stop: false, total: questions.length, processed: 0, generated: 0, alreadyCached: 0, errors: 0 };
+  renderAiPregenStatus();
+  let idx = 0;
+  async function worker(){
+    while(idx < questions.length){
+      if(aiPregenState.stop) return;
+      const q = questions[idx++];
+      try{
+        const { data, error } = await supabaseClient.functions.invoke('ai-explain', {
+          body: {
+            question_text: q.text,
+            options: q.options,
+            correct_option: q.correct,
+            existing_explanation: q.explanation || undefined,
+          },
+        });
+        if(error || (data && data.error)) aiPregenState.errors++;
+        else if(data.cached) aiPregenState.alreadyCached++;
+        else aiPregenState.generated++;
+      } catch(e){
+        aiPregenState.errors++;
+      }
+      aiPregenState.processed++;
+      renderAiPregenStatus();
+    }
+  }
+  await Promise.all(Array.from({ length: AI_PREGEN_CONCURRENCY }, worker));
+  aiPregenState.running = false;
+  renderAiPregenStatus();
+}
+
 function renderAdminToolsView(){
   const sub = document.getElementById('adminSubPanel');
   sub.innerHTML = `
+    <div class="subsection" id="aiFeatureConfigSection">
+      <h2>AI Features</h2>
+      <div class="format-help">Loading current settings…</div>
+    </div>
+    <div class="subsection" id="aiPregenSection">
+      <h2>Pre-generate AI Explanations</h2>
+      <div class="format-help">Layer 1 explanations are cached per unique question — the first person to ever view a given question pays the real generation cost (a few seconds, a fraction of a cent) and everyone after that gets it instantly for free. Run this once to pre-warm the whole question bank up front, rather than leaving real users to hit that first-time cost live.</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-family:system-ui,sans-serif;">
+        <label style="display:flex;align-items:center;gap:8px;">
+          Limit (blank = whole library)
+          <input type="number" id="aiPregenLimit" min="1" style="width:90px;border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--surface);color:var(--ink);">
+        </label>
+        <button class="btn btn-primary" id="aiPregenStartBtn">Start</button>
+        <button class="btn btn-ghost" id="aiPregenStopBtn" hidden>Stop</button>
+      </div>
+      <div class="msg" id="aiPregenStatus" style="margin-top:10px;"></div>
+    </div>
     <div class="subsection">
       <h2>Trace a leaked copy of exam content</h2>
       <div class="format-help">Paste suspicious content here — every account's copy carries an invisible fingerprint, so this can identify whose account it came from.</div>
@@ -5776,6 +6752,13 @@ function renderAdminToolsView(){
       <div class="msg" id="revokeAdminResult"></div>
     </div>
   `;
+  renderAiFeatureConfigSection();
+  renderAiPregenStatus(); // reflects an already-in-progress run if the admin navigated away and back
+  document.getElementById('aiPregenStartBtn').onclick = ()=>{
+    const limitVal = parseInt(document.getElementById('aiPregenLimit').value, 10);
+    runAiPregeneration(Number.isInteger(limitVal) && limitVal > 0 ? limitVal : null);
+  };
+  document.getElementById('aiPregenStopBtn').onclick = ()=>{ aiPregenState.stop = true; };
   document.getElementById('decodeWatermarkBtn').onclick = ()=>{
     document.getElementById('watermarkResult').textContent = decodeWatermark(document.getElementById('watermarkInput').value, adminData.profiles);
   };
@@ -6027,6 +7010,7 @@ async function renderAdminAttemptReview(reviewCtx){
     document.getElementById('backToUserProgressBtn').onclick = ()=>{ adminReviewAttempt = null; renderAdminPanel(); };
     document.getElementById('adminReviewMissedBtn').onclick = ()=>{ adminReviewFilter = 'missed'; renderAdminPanel(); };
     document.getElementById('adminReviewAllBtn').onclick = ()=>{ adminReviewFilter = 'all'; renderAdminPanel(); };
+    wireReviewList(adminPanel, questions);
   } catch(err){
     adminPanel.innerHTML = `
       <h1>Admin</h1>
