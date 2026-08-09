@@ -955,19 +955,18 @@ if('serviceWorker' in navigator){
   @media (max-width: 480px){
     .extra-actions{gap:10px;}
     .extra-actions .link-btn{min-height:44px;padding:11px 14px;}
-    /* "Options" / "Full Screen" text labels collapse to icon-only here --
-       Options shares row 1 with Back + Save, Full Screen shares row 2 with
-       the Multiple Choice/True Recall mode switch, and neither full label
-       is needed to fit at this width once its row-mate is already text.
-       #flashFullscreenBtn is scoped to :not(.flash-fullscreen) -- in
-       full-screen it's alone on its own row (see topRowHtml) with nothing
-       to make space for, so it keeps its real "Exit Full Screen" label,
-       same treatment quiz's equivalent toggle already had. */
-    #flashSetupMenuToggleBtn .nav-label,
+    /* "Back" / "Full Screen" text labels collapse to icon-only here -- Back
+       shares row 1 with Save + Options, Full Screen shares row 2 with the
+       Multiple Choice/True Recall mode switch. Options keeps its text: per
+       the user's explicit call, Back's icon is the one that gives up its
+       label when the row is tight, not Options'. #flashFullscreenBtn is
+       scoped to :not(.flash-fullscreen) -- in full-screen it's alone on its
+       own row (see topRowHtml) with nothing to make space for, so it keeps
+       its real "Exit Full Screen" label, same treatment quiz's equivalent
+       toggle already had. */
     #flashGoHomeBtn .nav-label,
     #flashPanel:not(.flash-fullscreen) #flashFullscreenBtn .nav-label{display:none;}
-    #flashSetupMenuToggleBtn, #flashGoHomeBtn, #flashPanel:not(.flash-fullscreen) #flashFullscreenBtn{padding:8px 10px;min-width:44px;justify-content:center;}
-    #flashSetupMenuToggleBtn .icon,
+    #flashGoHomeBtn, #flashPanel:not(.flash-fullscreen) #flashFullscreenBtn{padding:8px 10px;min-width:44px;justify-content:center;}
     #flashGoHomeBtn .back-arrow,
     #flashPanel:not(.flash-fullscreen) #flashFullscreenBtn .icon{margin-right:0;}
     .dot{width:38px;height:38px;}
