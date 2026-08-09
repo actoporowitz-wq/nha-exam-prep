@@ -133,6 +133,23 @@ if('serviceWorker' in navigator){
   }
 
   .header-row{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;}
+  /* Non-fullscreen exam-taking on mobile has the same "not enough scroll
+     slack" problem full-screen mode had (see the quiz-fullscreen CSS below)
+     -- scrollQuestionIntoView() targets #qnumAnchor and needs real page
+     height below the fold to push everything above it out of view, but
+     "Exam Practice Tool" / "X questions" (this row, ~78px including its own
+     margin) plus .wrap's 28px top padding was ~106px of constant chrome
+     every question has to generate enough scrollable content to clear --
+     failing on short questions the same way the full-screen centering bug
+     used to. Unlike full-screen mode there's no content here worth keeping
+     once you're mid-exam (the exam identity is already obvious from context,
+     and "Question N of Total" in the panel's own progress row already
+     covers what this duplicates) -- removing it entirely on mobile recovers
+     the space outright instead of just shrinking it. Auth view keeps it
+     (its own page heading, nothing else serves that role there). */
+  @media (max-width:900px){
+    #examHeaderRow.is-quiz-header{display:none;}
+  }
   .status-bar{font-size:.82rem;color:var(--muted);display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
   .status-bar .email{color:var(--ink);font-weight:600;}
   /* Was an underlined text link everywhere -- now a real (compact, low-
@@ -1753,6 +1770,11 @@ function showView(v, opts){
      above the Sign In/Sign Up card -- this doubles as that page's <h1>)
      still need it. */
   examHeaderRow.style.display = (v==='quiz' || v==='auth') ? '' : 'none';
+  /* Marks quiz specifically (not auth) so mobile CSS can hide this row --
+     see the .is-quiz-header rule -- without needing a resize listener: the
+     class only needs to track which VIEW is active, the media query alone
+     handles which WIDTH it applies at. */
+  examHeaderRow.classList.toggle('is-quiz-header', v==='quiz');
   flashView.style.display = v==='flash' ? 'block':'none';
   libraryView.style.display = v==='library' ? 'block':'none';
   authView.style.display = v==='auth' ? 'block':'none';
@@ -3426,7 +3448,17 @@ function renderFlashcard(){
      chrome above the card matters more there than at any other width. */
   const modeSwitchHtml = flashFullScreen ? '' : `
     <div style="display:flex;align-items:center;gap:6px;">
-      <div class="study-mode-switch" role="group" aria-label="Study mode">
+      <!-- margin-bottom:0 override -- .study-mode-switch's default 14px
+           bottom margin was designed for standalone use (own line, spacing
+           to whatever follows), same as the Progress-tab view-switch already
+           overrides it (search view-mode-switch). Here it's a flex ITEM
+           sharing a wrapping row with flashFullscreenBtn (see topRowHtml) --
+           an item's own margin inflates its contribution to the row's
+           cross-axis height for align-items:center, so the 14px was making
+           this pill's *alignment box* ~51px tall against its ~37px visible
+           height, throwing off centering against the 44px toggle button
+           next to it (measured: toggle sat 7px lower than true-centered). -->
+      <div class="study-mode-switch" role="group" aria-label="Study mode" style="margin-bottom:0;">
         <button type="button" data-flash-mode="mc" class="${flashMode==='mc'?'active':''}">Multiple Choice</button>
         <button type="button" data-flash-mode="recall" class="${flashMode==='recall'?'active':''}">True Recall</button>
       </div>
