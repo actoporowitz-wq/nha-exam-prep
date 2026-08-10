@@ -288,7 +288,21 @@ if('serviceWorker' in navigator){
      MC mode still uses (MC needs the question pinned beside the options,
      recall doesn't have a second element to sit beside). */
   .recall-flip-outer{margin:0 auto;max-width:520px;}
-  .recall-flip-outer .flash-face:not(.flash-face-back){display:flex;flex-direction:column;align-items:flex-start;}
+  /* Both faces now fill the flip container identically (position:absolute;
+     inset:0, same treatment .flash-face-back already had) instead of just
+     the back face -- previously the front face sat in normal flow, sized to
+     its own short content (question + "Show Answer" button), while the
+     container itself was sized to fit whichever face is tallest (see the
+     min-height measurement in renderFlashcard()), which for True Recall is
+     almost always the back face (answer + explanation + rate buttons, much
+     longer content than the question alone). That mismatch is what made the
+     card visibly jump from a small box to a much taller one the instant
+     Show Answer was clicked -- the box was never actually changing size,
+     the SHORT front face was just floating inside a taller invisible
+     wrapper the whole time. Making both faces stretch to the same fixed
+     footprint (and centering the shorter front face's content within it)
+     means the visible card is one constant size across both states. */
+  .recall-flip-outer .flash-face:not(.flash-face-back){position:absolute;inset:0;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;}
 
   /* Flip reveal. An animation, not a transition -- flashPanel gets fully
      rebuilt via innerHTML on every render (same pattern as the rest of the
@@ -394,19 +408,15 @@ if('serviceWorker' in navigator){
   .dd-menu button:hover{background:var(--surface-2);}
   .dd-menu button[aria-selected="true"]{background:var(--accent-soft);color:var(--accent);font-weight:600;}
 
-  /* Progress: a visual bar for each round's funnel completion, alongside
-     the existing percentage text -- same underlying numbers already
-     computed (masteredSoFar/originalTotal), just given a glance-able
-     visual instead of text-only. */
-  .funnel-bar{height:6px;background:var(--line);border-radius:4px;overflow:hidden;margin:8px 0 2px;}
-  .funnel-bar-fill{height:100%;background:var(--accent);}
-
-  /* Progress grid view -- card-per-round alternative to the stacked .lib-row
-     list above, toggleable (see .view-mode-switch). Same underlying data,
-     just a progress ring instead of a bar and its own card instead of a
-     thin row -- easier to scan many rounds at a glance, at the cost of more
-     vertical space once an exam has several rounds (why stacked stays an
-     option rather than being replaced outright). */
+  /* Progress: one round-card per round (ring + name/status side by side,
+     meta line, actions row), auto-filling into columns on wide screens and
+     a single column on mobile via the same minmax(220px,1fr) track --
+     deliberately the ONLY layout now. A separate "Stacked" list mode used
+     to exist behind a toggle, but on mobile its flex-wrap row (title+bar
+     stacked over a button-group that itself wrapped onto its own lines)
+     produced a squished, everything-on-top-of-itself result -- removed
+     rather than fixed, since this card layout already handles both narrow
+     and wide viewports cleanly without needing a second mode to maintain. */
   .round-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:8px;}
   .round-card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;}
   .round-card.mastered{border-color:var(--good);}
@@ -425,7 +435,6 @@ if('serviceWorker' in navigator){
   .round-card-meta{font-family:system-ui,sans-serif;font-size:.76rem;color:var(--muted);margin-bottom:12px;}
   .round-card-actions{display:flex;gap:8px;flex-wrap:wrap;}
   .round-card-actions .btn, .round-card-actions .link-btn{flex:1;justify-content:center;text-align:center;}
-  .view-mode-switch{margin-left:auto;}
 
   /* Loading skeletons -- shape-matched placeholders for the Progress panel
      (the one real, frequently-hit loading gap; Admin's plain "Loading…"
@@ -893,7 +902,10 @@ if('serviceWorker' in navigator){
      as "overloaded" less because of any one element and more from several
      boxy, generously-padded rows piling up in a row on a narrow screen.
      Tightening padding/margins here (not removing anything) closes that
-     gap without losing any functionality. */
+     gap without losing any functionality. Follow-up (see .progress-toolbar
+     below): tightening spacing alone wasn't enough -- the real fix was
+     consolidating what used to be three separate full-width rows (stats,
+     AI-feedback button, sort+toggle) down into one. */
   @media (max-width:480px){
     .stat-row{gap:8px;margin-bottom:10px;}
     .stat-pill{padding:7px 10px;}
@@ -902,6 +914,17 @@ if('serviceWorker' in navigator){
   .stat-pill .icon{color:var(--accent);flex-shrink:0;}
   .stat-pill strong{font-size:.95rem;color:var(--ink);font-weight:700;}
   .stat-pill .stat-label{font-size:.78rem;color:var(--muted);}
+  /* Progress toolbar: stat pills + sort dropdown + AI-feedback button(s) all
+     share one flex-wrap row instead of stacking as separate rows -- used to
+     be three: stat-row, a standalone "Get AI Feedback" row, and a sort +
+     Grid/Stacked-toggle row, each full-width chrome before any real content
+     (worse on desktop, which has plenty of horizontal room to combine them
+     instead). The Grid/Stacked toggle is gone entirely (see the round-grid
+     comment above), which is what freed the sort control to move in here
+     rather than needing a row of its own. */
+  .progress-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:14px;}
+  .progress-toolbar .stat-row{margin-bottom:0;}
+  .progress-toolbar-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-family:system-ui,sans-serif;font-size:.85rem;color:var(--muted);}
   .subsection{border-top:1px solid var(--line);margin-top:18px;padding-top:18px;}
   .lib-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;}
   .lib-info{display:flex;flex-direction:column;gap:2px;}
@@ -3114,10 +3137,10 @@ function wireDropdown(id, onSelect, rerender){
   });
 }
 
-/* Progress grid view's per-round ring -- same masteredPct the stacked
-   view's .funnel-bar-fill width already uses, just drawn as a circle.
-   r=21 on a 52x52 viewBox (scaled down to 48px on screen via CSS) keeps
-   the stroke-dasharray math simple/legible rather than hand-tuning it. */
+/* Progress round-card's per-round ring, driven by the same masteredPct used
+   in the meta line's text below it. r=21 on a 52x52 viewBox (scaled down to
+   48px on screen via CSS) keeps the stroke-dasharray math simple/legible
+   rather than hand-tuning it. */
 function renderProgressRing(pct, mastered){
   const r = 21, c = 2*Math.PI*r;
   const offset = c * (1 - Math.min(100, Math.max(0, pct))/100);
@@ -3132,12 +3155,12 @@ function renderProgressRing(pct, mastered){
   `;
 }
 
-/* Shape-matched loading skeleton for the Progress panel -- mimics the real
-   per-exam .subsection shape (title line + funnel-bar + a couple of text
-   lines) so the transition from skeleton to real content doesn't jump
-   around. rows defaults to 3, a reasonable guess at how many exams most
-   accounts have progress on -- it's just a loading placeholder, not meant
-   to match the real count. */
+/* Generic loading skeleton for the Progress panel (title line + a bar +
+   text lines per row) -- not shape-matched to the real round-card grid,
+   just a placeholder so something reasonable shows while data loads. rows
+   defaults to 3, a reasonable guess at how many exams most accounts have
+   progress on -- it's just a loading placeholder, not meant to match the
+   real count. */
 function renderProgressSkeleton(rows){
   rows = rows || 3;
   let html = '';
@@ -5529,7 +5552,6 @@ let progressData = null;
 let progressExpandedRoundId = null;
 let progressAttemptView = null; // { questions, answersMap } while drilled into one attempt's review
 let progressSortMode = 'name'; // 'name' | 'last' | 'first'
-let progressViewMode = localStorage.getItem('nha_progress_view_mode') === 'stacked' ? 'stacked' : 'grid'; // 'grid' (card + ring per round, default) | 'stacked' (compact list, more efficient for many rounds)
 // AI progress feedback (Feature 3 of the original AI roadmap, corrected
 // scope) -- on-demand, inline in the main Progress screen, not a separate
 // sub-view. No persistence across visits: renderProgressView() clears it
@@ -5702,11 +5724,32 @@ function findMostRecentResumableRound(d){
    scope) -- on-demand button + inline result, not a separate screen.
    Hidden entirely when the admin kill switch is off, same convention as
    the AI Explanation / Ask-a-follow-up buttons elsewhere. */
-function renderProgressAiFeedbackBlock(){
+/* Split into controls (small buttons -- live inline in the compact
+   .progress-toolbar row alongside the stat pills/sort dropdown) and content
+   (the feedback text/error itself -- variable height, doesn't belong
+   crammed into a fixed toolbar row, rendered as its own full-width block
+   below it instead). Previously one combined block that always rendered
+   as its own row(s) above the toolbar, contributing to the "too many rows
+   before any real content" crowding on both mobile and desktop. */
+function renderProgressAiFeedbackControls(){
   if(!aiFeatureFlags.progress_feedback_enabled) return '';
   if(progressAiFeedbackLoading){
-    return `<div class="review-explanation" style="margin-bottom:10px;"><em>Analyzing your progress…</em></div>`;
+    return `<span class="stat-label"><em>Analyzing your progress…</em></span>`;
   }
+  let html = '';
+  if(progressAiFeedback){
+    html += `
+      <button type="button" class="link-btn" id="progressAiFeedbackToggleBtn" aria-expanded="${!progressAiFeedbackCollapsed}">
+        ${icon('chevronDown')}${progressAiFeedbackCollapsed ? 'Show AI Feedback' : 'Hide AI Feedback'}
+      </button>
+    `;
+  }
+  html += `<button type="button" class="link-btn" id="progressAiFeedbackBtn">${icon('feedback')}${progressAiFeedback ? 'Refresh Feedback' : 'Get AI Feedback'}</button>`;
+  return html;
+}
+
+function renderProgressAiFeedbackContent(){
+  if(!aiFeatureFlags.progress_feedback_enabled) return '';
   // Error and feedback are independent, not mutually exclusive -- hitting
   // the daily cap still comes back with the last real summary generated
   // (server-side cache, see ai-progress-feedback's own notes), so a capped
@@ -5716,15 +5759,9 @@ function renderProgressAiFeedbackBlock(){
   if(progressAiFeedbackError){
     html += `<div class="msg err" style="margin-bottom:10px;">${escapeHtml(progressAiFeedbackError)}</div>`;
   }
-  if(progressAiFeedback){
-    html += `
-      <button type="button" class="link-btn" id="progressAiFeedbackToggleBtn" aria-expanded="${!progressAiFeedbackCollapsed}" style="margin-bottom:6px;">
-        ${icon('chevronDown')}${progressAiFeedbackCollapsed ? 'Show AI Feedback' : 'Hide AI Feedback'}
-      </button>
-      ${progressAiFeedbackCollapsed ? '' : `<div class="review-explanation" style="margin-bottom:10px;">${escapeHtml(progressAiFeedback)}</div>`}
-    `;
+  if(progressAiFeedback && !progressAiFeedbackCollapsed){
+    html += `<div class="review-explanation" style="margin-bottom:10px;">${escapeHtml(progressAiFeedback)}</div>`;
   }
-  html += `<button type="button" class="link-btn" id="progressAiFeedbackBtn">${icon('feedback')}${progressAiFeedback ? 'Refresh Feedback' : 'Get AI Feedback'}</button>`;
   return html;
 }
 
@@ -5787,11 +5824,21 @@ function renderProgressPanel(){
   const resumable = d.exams.length ? findMostRecentResumableRound(d) : null;
   let html = `
     <h1>Progress</h1>
-    <div class="stat-row">
-      <div class="stat-pill">${icon('library')}<strong>${d.exams.length}</strong><span class="stat-label">exam${d.exams.length===1?'':'s'} started</span></div>
-      <div class="stat-pill">${icon('check')}<strong>${d.masteredRounds} of ${d.totalRounds}</strong><span class="stat-label">round${d.totalRounds===1?'':'s'} mastered</span></div>
+    <div class="progress-toolbar">
+      <div class="stat-row">
+        <div class="stat-pill">${icon('library')}<strong>${d.exams.length}</strong><span class="stat-label">exam${d.exams.length===1?'':'s'} started</span></div>
+        <div class="stat-pill">${icon('check')}<strong>${d.masteredRounds} of ${d.totalRounds}</strong><span class="stat-label">round${d.totalRounds===1?'':'s'} mastered</span></div>
+      </div>
+      <div class="progress-toolbar-controls">
+        ${d.exams.length ? renderDropdown({ id:'progressSort', ariaLabel:'Sort progress list', selected: progressSortMode, options:[
+          {value:'name', label:'Sort: Name'},
+          {value:'last', label:'Sort: Last Attempt'},
+          {value:'first', label:'Sort: First Attempt'}
+        ]}) : ''}
+        ${renderProgressAiFeedbackControls()}
+      </div>
     </div>
-    ${renderProgressAiFeedbackBlock()}
+    ${renderProgressAiFeedbackContent()}
     <div class="msg" id="progressMsg"></div>
   `;
   if(resumable){
@@ -5803,21 +5850,7 @@ function renderProgressPanel(){
       </button>
     `;
   }
-  if(d.exams.length){
-    html += `
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;font-family:system-ui,sans-serif;font-size:.85rem;color:var(--muted);">
-        ${renderDropdown({ id:'progressSort', ariaLabel:'Sort progress list', selected: progressSortMode, options:[
-          {value:'name', label:'Sort: Name'},
-          {value:'last', label:'Sort: Last Attempt'},
-          {value:'first', label:'Sort: First Attempt'}
-        ]})}
-        <div class="study-mode-switch view-mode-switch" role="group" aria-label="Progress view" style="margin-bottom:0;">
-          <button type="button" data-progress-view="grid" class="${progressViewMode==='grid'?'active':''}">Grid</button>
-          <button type="button" data-progress-view="stacked" class="${progressViewMode==='stacked'?'active':''}">Stacked</button>
-        </div>
-      </div>
-    `;
-  } else {
+  if(!d.exams.length){
     html += `<div class="format-help">No attempts yet — start an exam from the Test Library.</div>`;
   }
   sortProgressExams(d.exams, progressSortMode).forEach(ex=>{
@@ -5830,8 +5863,6 @@ function renderProgressPanel(){
     html += `<div class="subsection"><h2>${escapeHtml(ex.examTitle)}${examMastered ? ` <span class="mastery-badge" title="Mastered — reached 98%+ cumulative on at least one round">${icon('check')}Mastered</span>` : ''}</h2>`;
     let gridHtml = '';
     ex.rounds.forEach(r=>{
-      /* Mastery badge fires only on the round's cumulative funnel score, never a single attempt's raw score */
-      const masteryBadge = r.status==='mastered' ? '<span class="lib-badge verified" style="margin-left:8px;">Mastered</span>' : '';
       const expanded = progressExpandedRoundId === r.id;
       const masteredSoFar = r.original_total - r.funnel_missed_count;
       const masteredPctNum = (masteredSoFar / r.original_total) * 100;
@@ -5856,56 +5887,29 @@ function renderProgressPanel(){
       const latestAttempt = r.attempts.length ? r.attempts.reduce((a,b)=> a.attempt_number > b.attempt_number ? a : b) : null;
       const canContinue = (r.status==='in_progress' || r.status==='abandoned') && latestAttempt &&
         (latestAttempt.status==='in_progress' || (latestAttempt.hasAnswers && r.funnel_missed_count > 0));
-      if(progressViewMode === 'grid'){
-        gridHtml += `
-          <div class="round-card ${r.status==='mastered'?'mastered':''} ${r.status==='abandoned'?'abandoned':''}">
-            <div class="round-card-top" data-round-toggle="${r.id}">
-              <div>
-                <div class="round-card-name">Round ${r.round_number}</div>
-                <div class="round-card-tag">${r.status==='mastered'?'Mastered':r.status==='abandoned'?'Abandoned':'In progress'}</div>
-              </div>
-              ${renderProgressRing(masteredPctNum, r.status==='mastered')}
+      gridHtml += `
+        <div class="round-card ${r.status==='mastered'?'mastered':''} ${r.status==='abandoned'?'abandoned':''}">
+          <div class="round-card-top" data-round-toggle="${r.id}">
+            <div>
+              <div class="round-card-name">Round ${r.round_number}</div>
+              <div class="round-card-tag">${r.status==='mastered'?'Mastered':r.status==='abandoned'?'Abandoned':'In progress'}</div>
             </div>
-            <div class="round-card-meta">${masteredSoFar} of ${r.original_total} mastered${r.status!=='mastered' ? ` · ${r.original_total - masteredSoFar} left` : ''} · ${r.attempts.length} attempt(s)</div>
-            <div class="round-card-actions">
-              ${canContinue ? `<button class="btn btn-ghost" data-continue-round="${r.id}">Continue</button>` : ''}
-              <button class="link-btn" data-round-toggle="${r.id}">${expanded ? 'Hide' : 'Show'} attempts</button>
-            </div>
-            ${expanded ? renderRoundAttemptsHtml(r) : ''}
+            ${renderProgressRing(masteredPctNum, r.status==='mastered')}
           </div>
-        `;
-      } else {
-        html += `
-          <div class="lib-row" style="flex-direction:column;align-items:stretch;">
-            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;width:100%;cursor:pointer;" data-round-toggle="${r.id}">
-              <div class="lib-info" style="flex:1;min-width:220px;">
-                <div class="lib-title">Round ${r.round_number}${masteryBadge}${r.status==='abandoned' ? ' <span class="lib-badge" style="margin-left:8px;">Abandoned</span>' : ''}</div>
-                <div class="funnel-bar"><div class="funnel-bar-fill" style="width:${masteredPct}%;"></div></div>
-                <div class="lib-meta">${masteredPct}% — ${masteredSoFar} of ${r.original_total} mastered so far${r.status!=='mastered' ? ` · ${r.original_total - masteredSoFar} left` : ''} · ${r.attempts.length} attempt(s)</div>
-              </div>
-              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                ${canContinue ? `<button class="btn btn-ghost" data-continue-round="${r.id}" style="padding:4px 10px;font-size:.8rem;">Continue (Missed Only)</button>` : ''}
-                <span class="link-btn">${expanded ? 'Hide' : 'Show'} attempts</span>
-              </div>
-            </div>
+          <div class="round-card-meta">${masteredSoFar} of ${r.original_total} mastered${r.status!=='mastered' ? ` · ${r.original_total - masteredSoFar} left` : ''} · ${r.attempts.length} attempt(s)</div>
+          <div class="round-card-actions">
+            ${canContinue ? `<button class="btn btn-ghost" data-continue-round="${r.id}">Continue</button>` : ''}
+            <button class="link-btn" data-round-toggle="${r.id}">${expanded ? 'Hide' : 'Show'} attempts</button>
           </div>
-        `;
-        if(expanded) html += renderRoundAttemptsHtml(r);
-      }
+          ${expanded ? renderRoundAttemptsHtml(r) : ''}
+        </div>
+      `;
     });
-    if(progressViewMode === 'grid') html += `<div class="round-grid">${gridHtml}</div>`;
-    html += `</div>`;
+    html += `<div class="round-grid">${gridHtml}</div></div>`;
   });
   progressPanel.innerHTML = html;
   wireProgressAiFeedbackBlock();
   wireDropdown('progressSort', (value)=>{ progressSortMode = value; renderProgressPanel(); }, renderProgressPanel);
-  progressPanel.querySelectorAll('[data-progress-view]').forEach(btn=>{
-    btn.onclick = ()=>{
-      progressViewMode = btn.dataset.progressView;
-      localStorage.setItem('nha_progress_view_mode', progressViewMode);
-      renderProgressPanel();
-    };
-  });
   progressPanel.querySelectorAll('[data-round-toggle]').forEach(el=>{
     el.onclick = ()=>{
       const id = el.dataset.roundToggle;
