@@ -377,6 +377,11 @@ if('serviceWorker' in navigator){
      points up. */
   #progressAiFeedbackToggleBtn .icon{transition:transform .15s ease;}
   #progressAiFeedbackToggleBtn[aria-expanded="true"] .icon{transform:rotate(180deg);}
+  /* Same convention, generalized as a reusable class instead of a new
+     per-ID rule each time -- used by the admin AI Usage section's two
+     independent collapse toggles (summary numbers / raw call history). */
+  .collapse-toggle-btn .icon{transition:transform .15s ease;}
+  .collapse-toggle-btn[aria-expanded="true"] .icon{transform:rotate(180deg);}
   /* Same story for the open menu's own option rows -- a long exam-title
      option used to force the whole popover wider than the viewport on
      mobile instead of clipping. max-width caps the popover itself
@@ -7266,7 +7271,16 @@ function decodeWatermark(text, profiles){
    query, because the cost/standing totals need to be accurate -- a capped
    fetch would silently under-report total spend for any heavy user. Only
    the on-screen list of individual calls is capped, after the totals are
-   already computed from the complete set. */
+   already computed from the complete set.
+
+   The summary $ tiles and the raw per-call history each collapse behind
+   their own toggle, default collapsed -- the "standing vs limits" block
+   (on/off, period usage, at-limit badges) stays always-visible since
+   that's the actual at-a-glance oversight signal; the $ tiles and the raw
+   history are supporting detail an admin drills into on demand, not
+   something that needs to load open on every visit to this drilldown. */
+let adminAiUsageStatsCollapsed = true;
+let adminAiUsageHistoryCollapsed = true;
 async function renderAdminAiUsageSection(targetUserId){
   const section = document.getElementById('adminAiUsageSection');
   if(!section) return;
@@ -7320,30 +7334,44 @@ async function renderAdminAiUsageSection(targetUserId){
     section.innerHTML = `
       <h2>AI Usage</h2>
       <div class="format-help">This account's own spend and usage across all three AI features, and where they stand against current limits (per-account override where one is set, site-wide default otherwise).</div>
-      <div style="display:flex;gap:24px;flex-wrap:wrap;margin:12px 0;font-family:system-ui,sans-serif;">
-        <div><div class="lib-meta">Total spend</div><div style="font-size:1.3em;font-weight:600;">${fmtCost(totalCost)}</div></div>
-        <div><div class="lib-meta">Explanations</div><div style="font-size:1.3em;font-weight:600;">${fmtCost(costByLayer.base||0)}</div></div>
-        <div><div class="lib-meta">Follow-up chat</div><div style="font-size:1.3em;font-weight:600;">${fmtCost(costByLayer.branch||0)}</div></div>
-        <div><div class="lib-meta">Progress feedback</div><div style="font-size:1.3em;font-weight:600;">${fmtCost(costByLayer.progress||0)}</div></div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:6px;font-family:system-ui,sans-serif;margin-bottom:14px;">
+      <button type="button" class="link-btn collapse-toggle-btn" id="adminAiUsageStatsToggleBtn" aria-expanded="${!adminAiUsageStatsCollapsed}" style="margin-top:10px;">
+        ${icon('chevronDown')}${adminAiUsageStatsCollapsed ? 'Show spend by feature' : 'Hide spend by feature'}
+      </button>
+      ${adminAiUsageStatsCollapsed ? '' : `
+        <div style="display:flex;gap:24px;flex-wrap:wrap;margin:12px 0;font-family:system-ui,sans-serif;">
+          <div><div class="lib-meta">Total spend</div><div style="font-size:1.3em;font-weight:600;">${fmtCost(totalCost)}</div></div>
+          <div><div class="lib-meta">Explanations</div><div style="font-size:1.3em;font-weight:600;">${fmtCost(costByLayer.base||0)}</div></div>
+          <div><div class="lib-meta">Follow-up chat</div><div style="font-size:1.3em;font-weight:600;">${fmtCost(costByLayer.branch||0)}</div></div>
+          <div><div class="lib-meta">Progress feedback</div><div style="font-size:1.3em;font-weight:600;">${fmtCost(costByLayer.progress||0)}</div></div>
+        </div>
+      `}
+      <div style="display:flex;flex-direction:column;gap:6px;font-family:system-ui,sans-serif;margin:14px 0;">
         <div>AI explanations: ${explainOn ? 'on' : '<strong>off</strong>'} &nbsp;·&nbsp; Follow-up chat: ${chatOn ? 'on' : '<strong>off</strong>'}</div>
         <div>Follow-up chat: <strong>${chatPeriodUsed} / ${chatPeriodLimit}</strong> messages in the trailing ${chatPeriodDays} days${chatPeriodUsed >= chatPeriodLimit ? ' ' + atLimitBadge : ''} &nbsp;·&nbsp; up to ${chatTurnLimit} follow-ups per question per 24h</div>
         <div>Progress feedback: <strong>${progressUsedToday} / ${PROGRESS_DAILY_LIMIT}</strong> requests today${progressUsedToday >= PROGRESS_DAILY_LIMIT ? ' ' + atLimitBadge : ''}</div>
       </div>
       ${auditRows.length ? `<div class="format-help">Also ran ${auditRows.length} Layer 3 accuracy-audit call(s) as an admin action — not counted in the personal spend/usage above.</div>` : ''}
       ${rows.length ? `
-        <div class="lib-meta" style="margin:10px 0 4px;">${rows.length > 50 ? `Most recent 50 of ${rows.length} calls` : `All ${rows.length} call(s)`}, newest first.</div>
-        ${historyRows.map(r=>`
-          <div class="lib-row">
-            <div class="lib-info">
-              <div class="lib-title">${escapeHtml(LAYER_LABEL[r.layer] || r.layer)} <span class="lib-meta">· ${escapeHtml(r.model)}</span></div>
-              <div class="lib-meta">${new Date(r.created_at).toLocaleString()} · ${r.tokens_in}→${r.tokens_out} tokens · ${fmtCost(Number(r.estimated_cost_usd||0))}</div>
+        <button type="button" class="link-btn collapse-toggle-btn" id="adminAiUsageHistoryToggleBtn" aria-expanded="${!adminAiUsageHistoryCollapsed}" style="margin-top:10px;">
+          ${icon('chevronDown')}${adminAiUsageHistoryCollapsed ? 'Show call history' : 'Hide call history'}
+        </button>
+        ${adminAiUsageHistoryCollapsed ? '' : `
+          <div class="lib-meta" style="margin:10px 0 4px;">${rows.length > 50 ? `Most recent 50 of ${rows.length} calls` : `All ${rows.length} call(s)`}, newest first.</div>
+          ${historyRows.map(r=>`
+            <div class="lib-row">
+              <div class="lib-info">
+                <div class="lib-title">${escapeHtml(LAYER_LABEL[r.layer] || r.layer)} <span class="lib-meta">· ${escapeHtml(r.model)}</span></div>
+                <div class="lib-meta">${new Date(r.created_at).toLocaleString()} · ${r.tokens_in}→${r.tokens_out} tokens · ${fmtCost(Number(r.estimated_cost_usd||0))}</div>
+              </div>
             </div>
-          </div>
-        `).join('')}
+          `).join('')}
+        `}
       ` : `<div class="format-help">No AI calls recorded for this account yet.</div>`}
     `;
+    const statsToggleBtn = document.getElementById('adminAiUsageStatsToggleBtn');
+    if(statsToggleBtn) statsToggleBtn.onclick = ()=>{ adminAiUsageStatsCollapsed = !adminAiUsageStatsCollapsed; renderAdminAiUsageSection(targetUserId); };
+    const historyToggleBtn = document.getElementById('adminAiUsageHistoryToggleBtn');
+    if(historyToggleBtn) historyToggleBtn.onclick = ()=>{ adminAiUsageHistoryCollapsed = !adminAiUsageHistoryCollapsed; renderAdminAiUsageSection(targetUserId); };
   } catch(err){
     section.innerHTML = `<h2>AI Usage</h2><div class="msg err">Could not load AI usage: ${escapeHtml(err.message)}</div>`;
   }
