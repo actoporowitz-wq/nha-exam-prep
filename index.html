@@ -7274,14 +7274,45 @@ function decodeWatermark(text, profiles){
    the on-screen list of individual calls is capped, after the totals are
    already computed from the complete set.
 
-   The summary $ tiles and the raw per-call history each collapse behind
-   their own toggle, default collapsed -- the "standing vs limits" block
-   (on/off, period usage, at-limit badges) stays always-visible since
-   that's the actual at-a-glance oversight signal; the $ tiles and the raw
-   history are supporting detail an admin drills into on demand, not
-   something that needs to load open on every visit to this drilldown. */
+   The whole section sits behind a master toggle (a small corner link next
+   to "Back to Admin", not a full heading -- present and discoverable, but
+   not competing with the exam-history content below it for attention by
+   default) -- see renderAdminAiUsageMasterToggle() and its own wiring in
+   renderAdminUserProgress(). Inside, the permissions/limits standing, the
+   $ spend tiles, and the raw per-call history are each further collapsed
+   behind their own toggle -- all default collapsed, all peers, none
+   privileged over the others now that the whole section is opt-in. */
+let adminAiUsageMasterCollapsed = true;
+let adminAiUsagePermissionsCollapsed = true;
 let adminAiUsageStatsCollapsed = true;
 let adminAiUsageHistoryCollapsed = true;
+
+/* Small corner toggle that stands in for the section's own heading --
+   collapsed by default (fetches nothing until expanded, so viewing an
+   account's progress doesn't pay for an AI-usage query the admin didn't
+   ask for), re-rendered into its own wrapper on every click so the
+   chevron/aria-expanded state stays in sync without re-rendering the
+   whole progress page around it. */
+function renderAdminAiUsageMasterToggle(targetUserId){
+  const wrap = document.getElementById('adminAiUsageMasterToggleWrap');
+  if(!wrap) return;
+  wrap.innerHTML = `
+    <button type="button" class="link-btn collapse-toggle-btn" id="adminAiUsageMasterToggleBtn" aria-expanded="${!adminAiUsageMasterCollapsed}">
+      ${icon('chevronDown')}AI Usage
+    </button>
+  `;
+  document.getElementById('adminAiUsageMasterToggleBtn').onclick = ()=>{
+    adminAiUsageMasterCollapsed = !adminAiUsageMasterCollapsed;
+    renderAdminAiUsageMasterToggle(targetUserId);
+    const section = document.getElementById('adminAiUsageSection');
+    if(adminAiUsageMasterCollapsed){
+      if(section) section.innerHTML = '';
+    } else {
+      renderAdminAiUsageSection(targetUserId);
+    }
+  };
+}
+
 async function renderAdminAiUsageSection(targetUserId){
   const section = document.getElementById('adminAiUsageSection');
   if(!section) return;
@@ -7333,8 +7364,17 @@ async function renderAdminAiUsageSection(targetUserId){
     const historyRows = rows.slice(0, 50);
 
     section.innerHTML = `
-      <h2>AI Usage</h2>
       <div class="format-help">This account's own spend and usage across all three AI features, and where they stand against current limits (per-account override where one is set, site-wide default otherwise).</div>
+      <button type="button" class="link-btn collapse-toggle-btn" id="adminAiUsagePermissionsToggleBtn" aria-expanded="${!adminAiUsagePermissionsCollapsed}" style="margin-top:10px;">
+        ${icon('chevronDown')}${adminAiUsagePermissionsCollapsed ? 'Show permissions & limits' : 'Hide permissions & limits'}
+      </button>
+      ${adminAiUsagePermissionsCollapsed ? '' : `
+        <div style="display:flex;flex-direction:column;gap:6px;font-family:system-ui,sans-serif;margin:12px 0;">
+          <div>AI explanations: ${explainOn ? 'on' : '<strong>off</strong>'} &nbsp;·&nbsp; Follow-up chat: ${chatOn ? 'on' : '<strong>off</strong>'}</div>
+          <div>Follow-up chat: <strong>${chatPeriodUsed} / ${chatPeriodLimit}</strong> messages in the trailing ${chatPeriodDays} days${chatPeriodUsed >= chatPeriodLimit ? ' ' + atLimitBadge : ''} &nbsp;·&nbsp; up to ${chatTurnLimit} follow-ups per question per 24h</div>
+          <div>Progress feedback: <strong>${progressUsedToday} / ${PROGRESS_DAILY_LIMIT}</strong> requests today${progressUsedToday >= PROGRESS_DAILY_LIMIT ? ' ' + atLimitBadge : ''}</div>
+        </div>
+      `}
       <button type="button" class="link-btn collapse-toggle-btn" id="adminAiUsageStatsToggleBtn" aria-expanded="${!adminAiUsageStatsCollapsed}" style="margin-top:10px;">
         ${icon('chevronDown')}${adminAiUsageStatsCollapsed ? 'Show spend by feature' : 'Hide spend by feature'}
       </button>
@@ -7346,12 +7386,7 @@ async function renderAdminAiUsageSection(targetUserId){
           <div><div class="lib-meta">Progress feedback</div><div style="font-size:1.3em;font-weight:600;">${fmtCost(costByLayer.progress||0)}</div></div>
         </div>
       `}
-      <div style="display:flex;flex-direction:column;gap:6px;font-family:system-ui,sans-serif;margin:14px 0;">
-        <div>AI explanations: ${explainOn ? 'on' : '<strong>off</strong>'} &nbsp;·&nbsp; Follow-up chat: ${chatOn ? 'on' : '<strong>off</strong>'}</div>
-        <div>Follow-up chat: <strong>${chatPeriodUsed} / ${chatPeriodLimit}</strong> messages in the trailing ${chatPeriodDays} days${chatPeriodUsed >= chatPeriodLimit ? ' ' + atLimitBadge : ''} &nbsp;·&nbsp; up to ${chatTurnLimit} follow-ups per question per 24h</div>
-        <div>Progress feedback: <strong>${progressUsedToday} / ${PROGRESS_DAILY_LIMIT}</strong> requests today${progressUsedToday >= PROGRESS_DAILY_LIMIT ? ' ' + atLimitBadge : ''}</div>
-      </div>
-      ${auditRows.length ? `<div class="format-help">Also ran ${auditRows.length} Layer 3 accuracy-audit call(s) as an admin action — not counted in the personal spend/usage above.</div>` : ''}
+      ${auditRows.length ? `<div class="format-help" style="margin-top:10px;">Also ran ${auditRows.length} Layer 3 accuracy-audit call(s) as an admin action — not counted in the personal spend/usage above.</div>` : ''}
       ${rows.length ? `
         <button type="button" class="link-btn collapse-toggle-btn" id="adminAiUsageHistoryToggleBtn" aria-expanded="${!adminAiUsageHistoryCollapsed}" style="margin-top:10px;">
           ${icon('chevronDown')}${adminAiUsageHistoryCollapsed ? 'Show call history' : 'Hide call history'}
@@ -7367,14 +7402,16 @@ async function renderAdminAiUsageSection(targetUserId){
             </div>
           `).join('')}
         `}
-      ` : `<div class="format-help">No AI calls recorded for this account yet.</div>`}
+      ` : `<div class="format-help" style="margin-top:10px;">No AI calls recorded for this account yet.</div>`}
     `;
+    const permissionsToggleBtn = document.getElementById('adminAiUsagePermissionsToggleBtn');
+    if(permissionsToggleBtn) permissionsToggleBtn.onclick = ()=>{ adminAiUsagePermissionsCollapsed = !adminAiUsagePermissionsCollapsed; renderAdminAiUsageSection(targetUserId); };
     const statsToggleBtn = document.getElementById('adminAiUsageStatsToggleBtn');
     if(statsToggleBtn) statsToggleBtn.onclick = ()=>{ adminAiUsageStatsCollapsed = !adminAiUsageStatsCollapsed; renderAdminAiUsageSection(targetUserId); };
     const historyToggleBtn = document.getElementById('adminAiUsageHistoryToggleBtn');
     if(historyToggleBtn) historyToggleBtn.onclick = ()=>{ adminAiUsageHistoryCollapsed = !adminAiUsageHistoryCollapsed; renderAdminAiUsageSection(targetUserId); };
   } catch(err){
-    section.innerHTML = `<h2>AI Usage</h2><div class="msg err">Could not load AI usage: ${escapeHtml(err.message)}</div>`;
+    section.innerHTML = `<div class="msg err">Could not load AI usage: ${escapeHtml(err.message)}</div>`;
   }
 }
 
@@ -7400,13 +7437,21 @@ async function renderAdminUserProgress(targetUserId){
       if(aErr) throw aErr;
       attempts = attemptRows;
     }
+    // Reset every AI Usage collapse state fresh on each drilldown visit --
+    // an admin switching from reviewing one account's AI usage to a
+    // different account shouldn't land already expanded just because the
+    // last account they looked at was left open.
+    adminAiUsageMasterCollapsed = true;
+    adminAiUsagePermissionsCollapsed = true;
+    adminAiUsageStatsCollapsed = true;
+    adminAiUsageHistoryCollapsed = true;
     let html = `
       <h1>Admin — Progress for ${escapeHtml(label)}</h1>
-      <button class="link-btn" id="backToAdminBtn">← Back to Admin</button>
-      <div class="subsection" id="adminAiUsageSection">
-        <h2>AI Usage</h2>
-        <div class="format-help">Loading…</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <button class="link-btn" id="backToAdminBtn">← Back to Admin</button>
+        <div id="adminAiUsageMasterToggleWrap"></div>
       </div>
+      <div class="subsection" id="adminAiUsageSection"></div>
     `;
     if(!rounds.length){
       html += `<div class="format-help">No online attempts for this account.</div>`;
@@ -7439,7 +7484,7 @@ async function renderAdminUserProgress(targetUserId){
     });
     adminPanel.innerHTML = html;
     document.getElementById('backToAdminBtn').onclick = ()=>{ adminDrilldownUserId = null; renderAdminPanel(); };
-    renderAdminAiUsageSection(targetUserId);
+    renderAdminAiUsageMasterToggle(targetUserId);
     adminPanel.querySelectorAll('button[data-review-attempt]').forEach(btn=>{
       btn.onclick = ()=>{
         adminReviewFilter = 'missed';
