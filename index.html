@@ -300,9 +300,17 @@ if('serviceWorker' in navigator){
      Show Answer was clicked -- the box was never actually changing size,
      the SHORT front face was just floating inside a taller invisible
      wrapper the whole time. Making both faces stretch to the same fixed
-     footprint (and centering the shorter front face's content within it)
-     means the visible card is one constant size across both states. */
-  .recall-flip-outer .flash-face:not(.flash-face-back){position:absolute;inset:0;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;}
+     footprint means the visible card is one constant size across both
+     states. justify-content:flex-start (NOT center) -- an earlier version
+     of this fix centered the front face's content, which caused a real
+     regression caught by a code-review pass: for an unusually long question
+     (longer than the container, which is normally sized off the back
+     face's content), centering overflows the box symmetrically in BOTH
+     directions, so the top half of the question rendered on top of the
+     mode-switch/info/full-screen row above the card entirely. Top-aligned
+     content only ever overflows downward, same as the back face's own
+     (uncentered) behavior already does safely. */
+  .recall-flip-outer .flash-face:not(.flash-face-back){position:absolute;inset:0;display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;}
 
   /* Flip reveal. An animation, not a transition -- flashPanel gets fully
      rebuilt via innerHTML on every render (same pattern as the rest of the
