@@ -6095,7 +6095,7 @@ let adminDrilldownUserId = null; // "View Progress" drilldown
 let adminSecurityEventsUserId = null; // "View Security Events" drilldown
 let adminReviewAttempt = null; // { id, label } | null -- set when drilling into one attempt's question-by-question review
 let adminReviewFilter = 'missed'; // 'missed' | 'all' -- mirrors reviewFilter, for renderAdminAttemptReview
-let adminSubView = 'accounts'; // 'accounts' | 'auditLog' | 'errors' | 'feedback' | 'tools' -- sub-nav within the Admin tab
+let adminSubView = 'accounts'; // 'accounts' | 'auditLog' | 'errors' | 'feedback' | 'ai' | 'tools' -- sub-nav within the Admin tab
 let adminSearch = ''; // account-list email search
 let adminFilter = 'all'; // 'all' | 'pending' | 'flagged' | 'admins'
 let adminSort = 'lastActive'; // 'lastActive' | 'signupDate' | 'flagSeverity' | 'name'
@@ -6225,6 +6225,7 @@ function renderAdminPanel(){
       <button id="adminNavAuditLog" class="${adminSubView==='auditLog'?'active':''}">Audit Log</button>
       <button id="adminNavErrors" class="${adminSubView==='errors'?'active':''}">Errors</button>
       <button id="adminNavFeedback" class="${adminSubView==='feedback'?'active':''}">Feedback</button>
+      <button id="adminNavAi" class="${adminSubView==='ai'?'active':''}">AI</button>
       <button id="adminNavTools" class="${adminSubView==='tools'?'active':''}">Tools</button>
     </div>
     <div id="adminSubPanel"></div>
@@ -6233,11 +6234,13 @@ function renderAdminPanel(){
   document.getElementById('adminNavAuditLog').onclick = ()=>{ adminSubView='auditLog'; renderAdminPanel(); };
   document.getElementById('adminNavErrors').onclick = ()=>{ adminSubView='errors'; renderAdminPanel(); };
   document.getElementById('adminNavFeedback').onclick = ()=>{ adminSubView='feedback'; renderAdminPanel(); };
+  document.getElementById('adminNavAi').onclick = ()=>{ adminSubView='ai'; renderAdminPanel(); };
   document.getElementById('adminNavTools').onclick = ()=>{ adminSubView='tools'; renderAdminPanel(); };
 
   if(adminSubView==='auditLog') renderAdminAuditLogView();
   else if(adminSubView==='errors') renderAdminErrorsView();
   else if(adminSubView==='feedback') renderAdminFeedbackView();
+  else if(adminSubView==='ai') renderAdminAiView();
   else if(adminSubView==='tools') renderAdminToolsView();
   else renderAdminAccountsView();
 }
@@ -6864,7 +6867,165 @@ async function runAiPregeneration(limit){
   renderAiPregenStatus();
 }
 
-function renderAdminToolsView(){
+/* Layer 3 -- rolling accuracy audit (migration 0035). Same admin-triggered,
+   client-driven worker-pool shape as runAiPregeneration() above: iterate
+   the unique library questions, invoke the ai-audit Edge Function once per
+   question with limited concurrency, let the function itself decide
+   whether there's anything cached to audit. Deliberately does NOT re-check
+   ai_explanation_audits client-side before calling -- the table is
+   service-role-only (no RLS policy for any client, admin included, see
+   migration 0035), so there's nothing to check against from here even if
+   it were worth the extra round trip; a re-audit of an already-audited
+   question is a cheap, harmless overwrite (see the function's own upsert
+   comment), not a bug to avoid. */
+let aiAuditState = { running: false, stop: false, total: 0, processed: 0, ok: 0, flagged: 0, skipped: 0, errors: 0 };
+const AI_AUDIT_CONCURRENCY = 4;
+const AI_AUDIT_AVG_COST_USD = 0.009; // matches the documented ~$0.009/call estimate this feature was sized against
+const AUDIT_MODEL_LABEL = 'Claude Opus 5'; // display label only -- must match ai-audit/index.ts's own AUDIT_MODEL if that ever changes
+
+function renderAiAuditStatus(){
+  const statusEl = document.getElementById('aiAuditStatus');
+  const startBtn = document.getElementById('aiAuditStartBtn');
+  const stopBtn = document.getElementById('aiAuditStopBtn');
+  if(!statusEl) return; // panel navigated away from mid-run -- state keeps running in the background regardless
+  const s = aiAuditState;
+  if(s.total === 0 && !s.running){
+    statusEl.className = 'msg';
+    statusEl.textContent = '';
+    return;
+  }
+  const audited = s.ok + s.flagged;
+  const estCost = (audited * AI_AUDIT_AVG_COST_USD).toFixed(2);
+  statusEl.className = 'msg' + (s.running ? '' : ' ok');
+  statusEl.textContent = `${s.processed} / ${s.total} processed — ${s.ok} ok, ${s.flagged} flagged, ${s.skipped} not cached yet, ${s.errors} errors — ~$${estCost} spent this run` + (s.running ? '' : (s.stop ? ' (stopped)' : ' (done)'));
+  if(startBtn) startBtn.disabled = s.running;
+  if(stopBtn) stopBtn.hidden = !s.running;
+}
+
+async function runAiAudit(limit){
+  let questions = getUniqueLibraryQuestions();
+  if(limit && limit > 0) questions = questions.slice(0, limit);
+  aiAuditState = { running: true, stop: false, total: questions.length, processed: 0, ok: 0, flagged: 0, skipped: 0, errors: 0 };
+  renderAiAuditStatus();
+  let idx = 0;
+  async function worker(){
+    while(idx < questions.length){
+      if(aiAuditState.stop) return;
+      const q = questions[idx++];
+      try{
+        const { data, error } = await supabaseClient.functions.invoke('ai-audit', {
+          body: {
+            question_text: q.text,
+            options: q.options,
+            correct_option: q.correct,
+            existing_explanation: q.explanation || undefined,
+          },
+        });
+        if(error || (data && data.error)) aiAuditState.errors++;
+        else if(data.skipped) aiAuditState.skipped++;
+        else if(data.verdict === 'flagged') aiAuditState.flagged++;
+        else aiAuditState.ok++;
+      } catch(e){
+        aiAuditState.errors++;
+      }
+      aiAuditState.processed++;
+      renderAiAuditStatus();
+    }
+  }
+  await Promise.all(Array.from({ length: AI_AUDIT_CONCURRENCY }, worker));
+  aiAuditState.running = false;
+  renderAiAuditStatus();
+  renderFlaggedAiAuditsSection(); // pick up anything the run just flagged
+}
+
+/* Review list for whatever the audit above has flagged and not yet been
+   acted on (admin_list_flagged_ai_audits() already filters to
+   verdict='flagged' AND reviewed=false server-side). Looks the real,
+   original-cased question text + options up from EXAM_LIBRARY by
+   question_key for display -- the RPC itself only has the normalized
+   lowercase key, same limitation every question_key-keyed table in this
+   app has (see ai_explanations' own migration comment). Falls back to the
+   raw key text if a question was removed from the library since it was
+   flagged. */
+async function renderFlaggedAiAuditsSection(){
+  const section = document.getElementById('flaggedAiAuditsSection');
+  if(!section) return;
+  section.innerHTML = `<h2>Flagged Explanations</h2><div class="format-help">Loading…</div>`;
+  try{
+    const { data: rows, error } = await supabaseClient.rpc('admin_list_flagged_ai_audits');
+    if(error) throw error;
+    if(!rows.length){
+      section.innerHTML = `<h2>Flagged Explanations</h2><div class="format-help">Nothing flagged right now. Run an accuracy audit above to check the current cache.</div>`;
+      return;
+    }
+    const byKey = {};
+    getUniqueLibraryQuestions().forEach(q=>{ byKey[q.text.trim().toLowerCase()] = q; });
+    section.innerHTML = `
+      <h2>Flagged Explanations</h2>
+      <div class="format-help">Cached AI explanations the accuracy audit thinks contain a real error, waiting on a decision.</div>
+      ${rows.map(r=>{
+        const q = byKey[r.question_key];
+        const questionHtml = q
+          ? `${escapeHtml(q.text)}<div class="lib-meta" style="margin-top:4px;">${q.options.map((o,i)=>`${String.fromCharCode(65+i)}. ${escapeHtml(o)}${i===q.correct ? ' ✓' : ''}`).join(' &nbsp; ')}</div>`
+          : escapeHtml(r.question_key);
+        return `
+        <div class="lib-row" data-qkey="${escapeHtml(r.question_key)}" data-chash="${escapeHtml(r.content_hash)}">
+          <div class="lib-info">
+            <div class="lib-title" style="white-space:pre-wrap;">${questionHtml}</div>
+            <div class="lib-meta" style="white-space:pre-wrap;color:var(--ink);margin:8px 0 4px;"><strong>AI explanation:</strong> ${escapeHtml(r.explanation)}</div>
+            <div class="lib-meta" style="white-space:pre-wrap;color:var(--danger,#c0392b);"><strong>Audit's concern:</strong> ${escapeHtml(r.concern)}</div>
+            <div class="lib-meta">Flagged by ${escapeHtml(r.audit_model)} · ${new Date(r.created_at).toLocaleString()}</div>
+            <div style="display:flex;gap:8px;margin-top:8px;">
+              <button class="btn btn-ghost flagged-dismiss-btn">Dismiss (false alarm)</button>
+              <button class="btn btn-ghost flagged-clear-btn">Clear cache & regenerate</button>
+            </div>
+            <div class="msg flagged-result"></div>
+          </div>
+        </div>
+      `;}).join('')}
+    `;
+    section.querySelectorAll('.flagged-dismiss-btn').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const row = btn.closest('.lib-row');
+        const resultEl = row.querySelector('.flagged-result');
+        try{
+          const { error: dismissErr } = await supabaseClient.rpc('admin_dismiss_ai_audit_flag', {
+            p_question_key: row.dataset.qkey, p_content_hash: row.dataset.chash,
+          });
+          if(dismissErr) throw dismissErr;
+          row.remove();
+        } catch(err){
+          resultEl.className = 'msg err flagged-result';
+          resultEl.textContent = 'Could not dismiss: ' + err.message;
+        }
+      };
+    });
+    section.querySelectorAll('.flagged-clear-btn').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const row = btn.closest('.lib-row');
+        const resultEl = row.querySelector('.flagged-result');
+        try{
+          const { error: clearErr } = await supabaseClient.rpc('admin_clear_ai_explanation_cache', {
+            p_question_key: row.dataset.qkey, p_content_hash: row.dataset.chash,
+          });
+          if(clearErr) throw clearErr;
+          row.remove();
+        } catch(err){
+          resultEl.className = 'msg err flagged-result';
+          resultEl.textContent = 'Could not clear: ' + err.message;
+        }
+      };
+    });
+  } catch(err){
+    section.innerHTML = `<h2>Flagged Explanations</h2><div class="msg err">Could not load flagged explanations: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+/* New AI admin tab (added alongside Layer 3) -- consolidates everything
+   AI-related that used to be split across the Tools tab (feature toggles,
+   pre-generation) plus the new accuracy-audit runner and its review list,
+   instead of growing the already-dense Tools tab further. */
+function renderAdminAiView(){
   const sub = document.getElementById('adminSubPanel');
   sub.innerHTML = `
     <div class="subsection" id="aiFeatureConfigSection">
@@ -6884,6 +7045,43 @@ function renderAdminToolsView(){
       </div>
       <div class="msg" id="aiPregenStatus" style="margin-top:10px;"></div>
     </div>
+    <div class="subsection" id="aiAuditSection">
+      <h2>Accuracy Audit</h2>
+      <div class="format-help">Re-checks every cached AI explanation with a stronger model (${escapeHtml(AUDIT_MODEL_LABEL)}) than the one that wrote it, looking for real factual or reasoning errors — not style nitpicks. Anything it flags shows up below for you to dismiss or clear. Safe to re-run any time; a fresh run overwrites the prior verdict for each question.</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-family:system-ui,sans-serif;">
+        <label style="display:flex;align-items:center;gap:8px;">
+          Limit (blank = whole library)
+          <input type="number" id="aiAuditLimit" min="1" style="width:90px;border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--surface);color:var(--ink);">
+        </label>
+        <button class="btn btn-primary" id="aiAuditStartBtn">Run Accuracy Audit</button>
+        <button class="btn btn-ghost" id="aiAuditStopBtn" hidden>Stop</button>
+      </div>
+      <div class="msg" id="aiAuditStatus" style="margin-top:10px;"></div>
+    </div>
+    <div class="subsection" id="flaggedAiAuditsSection">
+      <h2>Flagged Explanations</h2>
+      <div class="format-help">Loading…</div>
+    </div>
+  `;
+  renderAiFeatureConfigSection();
+  renderAiPregenStatus(); // reflects an already-in-progress run if the admin navigated away and back
+  renderAiAuditStatus();
+  renderFlaggedAiAuditsSection();
+  document.getElementById('aiPregenStartBtn').onclick = ()=>{
+    const limitVal = parseInt(document.getElementById('aiPregenLimit').value, 10);
+    runAiPregeneration(Number.isInteger(limitVal) && limitVal > 0 ? limitVal : null);
+  };
+  document.getElementById('aiPregenStopBtn').onclick = ()=>{ aiPregenState.stop = true; };
+  document.getElementById('aiAuditStartBtn').onclick = ()=>{
+    const limitVal = parseInt(document.getElementById('aiAuditLimit').value, 10);
+    runAiAudit(Number.isInteger(limitVal) && limitVal > 0 ? limitVal : null);
+  };
+  document.getElementById('aiAuditStopBtn').onclick = ()=>{ aiAuditState.stop = true; };
+}
+
+function renderAdminToolsView(){
+  const sub = document.getElementById('adminSubPanel');
+  sub.innerHTML = `
     <div class="subsection">
       <h2>Trace a leaked copy of exam content</h2>
       <div class="format-help">Paste suspicious content here — every account's copy carries an invisible fingerprint, so this can identify whose account it came from.</div>
@@ -6910,13 +7108,6 @@ function renderAdminToolsView(){
       <div class="msg" id="revokeAdminResult"></div>
     </div>
   `;
-  renderAiFeatureConfigSection();
-  renderAiPregenStatus(); // reflects an already-in-progress run if the admin navigated away and back
-  document.getElementById('aiPregenStartBtn').onclick = ()=>{
-    const limitVal = parseInt(document.getElementById('aiPregenLimit').value, 10);
-    runAiPregeneration(Number.isInteger(limitVal) && limitVal > 0 ? limitVal : null);
-  };
-  document.getElementById('aiPregenStopBtn').onclick = ()=>{ aiPregenState.stop = true; };
   document.getElementById('decodeWatermarkBtn').onclick = ()=>{
     document.getElementById('watermarkResult').textContent = decodeWatermark(document.getElementById('watermarkInput').value, adminData.profiles);
   };
