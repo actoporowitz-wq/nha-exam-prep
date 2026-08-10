@@ -372,6 +372,11 @@ if('serviceWorker' in navigator){
   .dd-trigger>span{overflow:hidden;text-overflow:ellipsis;min-width:0;}
   .dd-trigger .icon{flex:none;transition:transform .15s ease;color:var(--muted);}
   .dd-trigger[aria-expanded="true"] .icon{transform:rotate(180deg);}
+  /* Same collapsed/expanded chevron convention as .dd-trigger above --
+     collapsed (aria-expanded="false") points down (default), expanded
+     points up. */
+  #progressAiFeedbackToggleBtn .icon{transition:transform .15s ease;}
+  #progressAiFeedbackToggleBtn[aria-expanded="true"] .icon{transform:rotate(180deg);}
   /* Same story for the open menu's own option rows -- a long exam-title
      option used to force the whole popover wider than the viewport on
      mobile instead of clipping. max-width caps the popover itself
@@ -5517,6 +5522,7 @@ let progressViewMode = localStorage.getItem('nha_progress_view_mode') === 'stack
 let progressAiFeedback = null; // the returned feedback text, once loaded
 let progressAiFeedbackLoading = false;
 let progressAiFeedbackError = null;
+let progressAiFeedbackCollapsed = false; // manual show/hide once feedback exists -- reset to expanded on every fresh generation
 
 function sortProgressExams(exams, mode){
   const sorted = exams.slice();
@@ -5534,6 +5540,7 @@ async function renderProgressView(){
   progressAiFeedback = null;
   progressAiFeedbackLoading = false;
   progressAiFeedbackError = null;
+  progressAiFeedbackCollapsed = false;
   progressExpandedRoundId = null;
   progressPanel.innerHTML = `<h1>Progress</h1>${renderProgressSkeleton()}`;
   try{
@@ -5694,7 +5701,12 @@ function renderProgressAiFeedbackBlock(){
     html += `<div class="msg err" style="margin-bottom:10px;">${escapeHtml(progressAiFeedbackError)}</div>`;
   }
   if(progressAiFeedback){
-    html += `<div class="review-explanation" style="margin-bottom:10px;">${escapeHtml(progressAiFeedback)}</div>`;
+    html += `
+      <button type="button" class="link-btn" id="progressAiFeedbackToggleBtn" aria-expanded="${!progressAiFeedbackCollapsed}" style="margin-bottom:6px;">
+        ${icon('chevronDown')}${progressAiFeedbackCollapsed ? 'Show AI Feedback' : 'Hide AI Feedback'}
+      </button>
+      ${progressAiFeedbackCollapsed ? '' : `<div class="review-explanation" style="margin-bottom:10px;">${escapeHtml(progressAiFeedback)}</div>`}
+    `;
   }
   html += `<button type="button" class="link-btn" id="progressAiFeedbackBtn">${icon('feedback')}${progressAiFeedback ? 'Refresh Feedback' : 'Get AI Feedback'}</button>`;
   return html;
@@ -5721,7 +5733,10 @@ function wireProgressAiFeedbackBlock(){
           // student with nothing -- null only if this account has never
           // successfully generated one at all (shouldn't happen in
           // practice: you can't hit the cap without a prior success).
-          if(errBody.feedback) progressAiFeedback = errBody.feedback;
+          if(errBody.feedback){
+            progressAiFeedback = errBody.feedback;
+            progressAiFeedbackCollapsed = false;
+          }
         } else {
           progressAiFeedbackError = (errBody && errBody.error) || "Couldn't load feedback right now.";
         }
@@ -5729,6 +5744,10 @@ function wireProgressAiFeedbackBlock(){
         progressAiFeedbackError = data.error;
       } else {
         progressAiFeedback = data.feedback;
+        // Always land expanded on a fresh generation -- a manual collapse
+        // from a previous summary shouldn't carry over and hide the new
+        // one the student just asked for.
+        progressAiFeedbackCollapsed = false;
       }
     } catch(err){
       progressAiFeedbackError = err.message || "Couldn't load feedback right now.";
@@ -5737,6 +5756,13 @@ function wireProgressAiFeedbackBlock(){
       renderProgressPanel();
     }
   };
+  const toggleBtn = document.getElementById('progressAiFeedbackToggleBtn');
+  if(toggleBtn){
+    toggleBtn.onclick = ()=>{
+      progressAiFeedbackCollapsed = !progressAiFeedbackCollapsed;
+      renderProgressPanel();
+    };
+  }
 }
 
 function renderProgressPanel(){
