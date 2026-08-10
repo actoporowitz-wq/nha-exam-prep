@@ -2386,6 +2386,19 @@ function updateAiChatPinUI(){
   btn.classList.toggle('on', aiChatPinned);
   btn.setAttribute('aria-pressed', String(aiChatPinned));
   btn.title = aiChatPinned ? 'Pinned -- click elsewhere won\'t close this' : 'Keep chat open when clicking elsewhere';
+  // The backdrop is a real position:fixed;inset:0 element sitting under
+  // the panel but over the rest of the page -- its onclick not calling
+  // closeAiChat() while pinned was never enough on its own, because the
+  // element itself still absorbs every click before it can reach anything
+  // underneath (.main-content, the review list, etc.), pin or no pin.
+  // Before pinning existed this was invisible -- any click instantly
+  // closed the panel anyway, so there was nothing to "reach" -- but with
+  // pinning meant to let the student keep the chat open WHILE using the
+  // rest of the page, a live but inert backdrop silently blocked every
+  // click anywhere on screen. Disabling pointer-events while pinned lets
+  // clicks fall through to the real page; re-enabling on unpin restores
+  // the normal outside-click-to-close behavior.
+  aiChatEl.backdrop.style.pointerEvents = aiChatPinned ? 'none' : '';
 }
 
 function renderAiChatMessages(){
@@ -5671,19 +5684,20 @@ function renderProgressAiFeedbackBlock(){
   if(progressAiFeedbackLoading){
     return `<div class="review-explanation" style="margin-bottom:10px;"><em>Analyzing your progress…</em></div>`;
   }
+  // Error and feedback are independent, not mutually exclusive -- hitting
+  // the daily cap still comes back with the last real summary generated
+  // (server-side cache, see ai-progress-feedback's own notes), so a capped
+  // student sees why a fresh one didn't run AND still has something real
+  // to read, never just a bare "try again tomorrow" with nothing under it.
+  let html = '';
   if(progressAiFeedbackError){
-    return `
-      <div class="msg err" style="margin-bottom:10px;">${escapeHtml(progressAiFeedbackError)}</div>
-      <button type="button" class="link-btn" id="progressAiFeedbackBtn">${icon('feedback')}Get AI Feedback</button>
-    `;
+    html += `<div class="msg err" style="margin-bottom:10px;">${escapeHtml(progressAiFeedbackError)}</div>`;
   }
   if(progressAiFeedback){
-    return `
-      <div class="review-explanation" style="margin-bottom:10px;">${escapeHtml(progressAiFeedback)}</div>
-      <button type="button" class="link-btn" id="progressAiFeedbackBtn">${icon('feedback')}Refresh Feedback</button>
-    `;
+    html += `<div class="review-explanation" style="margin-bottom:10px;">${escapeHtml(progressAiFeedback)}</div>`;
   }
-  return `<button type="button" class="link-btn" id="progressAiFeedbackBtn">${icon('feedback')}Get AI Feedback</button>`;
+  html += `<button type="button" class="link-btn" id="progressAiFeedbackBtn">${icon('feedback')}${progressAiFeedback ? 'Refresh Feedback' : 'Get AI Feedback'}</button>`;
+  return html;
 }
 
 function wireProgressAiFeedbackBlock(){
@@ -5695,9 +5709,27 @@ function wireProgressAiFeedbackBlock(){
     renderProgressPanel();
     try{
       const { data, error } = await supabaseClient.functions.invoke('ai-progress-feedback', { body: {} });
-      if(error) throw error;
-      if(data && data.error) throw new Error(data.error);
-      progressAiFeedback = data.feedback;
+      if(error){
+        // Same error-body-parsing pattern sendAiChatMessage() already uses
+        // for its own cap response -- the real error details live in the
+        // non-2xx response body, not on the thrown error object itself.
+        let errBody = null;
+        try{ errBody = error.context ? await error.context.json() : null; }catch(e){}
+        if(errBody && errBody.limit_reached){
+          progressAiFeedbackError = errBody.error || "You've reached today's feedback limit.";
+          // Fall back to the last real summary rather than leaving the
+          // student with nothing -- null only if this account has never
+          // successfully generated one at all (shouldn't happen in
+          // practice: you can't hit the cap without a prior success).
+          if(errBody.feedback) progressAiFeedback = errBody.feedback;
+        } else {
+          progressAiFeedbackError = (errBody && errBody.error) || "Couldn't load feedback right now.";
+        }
+      } else if(data && data.error){
+        progressAiFeedbackError = data.error;
+      } else {
+        progressAiFeedback = data.feedback;
+      }
     } catch(err){
       progressAiFeedbackError = err.message || "Couldn't load feedback right now.";
     } finally{
