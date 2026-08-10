@@ -4679,13 +4679,14 @@ function renderAuthView(){
         <button class="btn btn-primary" id="authSubmitBtn">Sign In</button>
       </div>
       <div class="auth-links-row" style="margin-top:14px;font-family:system-ui,sans-serif;font-size:.85rem;display:flex;gap:16px;flex-wrap:wrap;">
-        <button class="text-link" id="goSignupBtn">Need an account? Sign up</button>
+        <button class="text-link" id="goSignupBtn">Want access? Request early access</button>
         <button class="text-link" id="goForgotBtn">Forgot password?</button>
       </div>
     `;
   } else if(authScreen === 'signup'){
     html = `
-      <h2>Create Account</h2>
+      <h2>Request Early Access</h2>
+      <div class="format-help" style="margin-bottom:12px;">New accounts are reviewed by an admin before you can sign in — this creates your account and puts it in the queue.</div>
       ${authError ? `<div class="msg err">${escapeHtml(authError)}</div>` : ''}
       <div style="display:flex;flex-direction:column;gap:10px;font-family:system-ui,sans-serif;max-width:340px;">
         <input type="email" id="authEmail" placeholder="Email" autocomplete="email">
@@ -4694,7 +4695,7 @@ function renderAuthView(){
           <button type="button" class="pw-toggle" id="authPasswordToggle" aria-label="Show password">${icon('eye')}</button>
         </div>
         <div class="cf-turnstile" id="turnstileWidget"></div>
-        <button class="btn btn-primary" id="authSubmitBtn">Sign Up</button>
+        <button class="btn btn-primary" id="authSubmitBtn">Request Access</button>
       </div>
       <div style="margin-top:14px;font-family:system-ui,sans-serif;font-size:.85rem;">
         <button class="link-btn" id="goSigninBtn">Already have an account? Sign in</button>
