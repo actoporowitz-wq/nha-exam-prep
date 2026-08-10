@@ -7249,6 +7249,106 @@ function decodeWatermark(text, profiles){
   return match ? `Matches account: ${match.email}` : `Decoded hex prefix "${hex}" — no matching account found among current profiles.`;
 }
 
+/* Per-account AI usage history: monetary spend + standing vs current limits,
+   for the "View Progress" admin drilldown. Independent fetch/render into its
+   own <div> (own loading/error state) rather than folded into the main try
+   block above -- same reasoning as renderAiFeatureConfigSection() and every
+   other subsection in this app that loads separately: a failure here
+   shouldn't take down the exam-history view sitting next to it.
+
+   ai_usage_log/ai_feature_config/ai_account_overrides are all directly
+   readable by admins via the "admin read ai *" RLS policies migration 0027
+   added specifically for the Accounts list's own "heavy AI usage" flag --
+   reused here rather than adding a new RPC, since the read access already
+   exists for exactly this purpose.
+
+   Fetches the account's FULL history (no .limit()) rather than capping the
+   query, because the cost/standing totals need to be accurate -- a capped
+   fetch would silently under-report total spend for any heavy user. Only
+   the on-screen list of individual calls is capped, after the totals are
+   already computed from the complete set. */
+async function renderAdminAiUsageSection(targetUserId){
+  const section = document.getElementById('adminAiUsageSection');
+  if(!section) return;
+  try{
+    const [{ data: rows, error: rowsErr }, { data: cfg, error: cfgErr }, { data: override, error: ovErr }] = await Promise.all([
+      supabaseClient.from('ai_usage_log').select('*').eq('user_id', targetUserId).order('created_at', { ascending: false }),
+      supabaseClient.from('ai_feature_config').select('*').eq('id', 1).maybeSingle(),
+      supabaseClient.from('ai_account_overrides').select('*').eq('user_id', targetUserId).maybeSingle(),
+    ]);
+    if(rowsErr) throw rowsErr;
+    if(cfgErr) throw cfgErr;
+    if(ovErr) throw ovErr;
+
+    const LAYER_LABEL = { base: 'Explanation', branch: 'Follow-up Chat', progress: 'Progress Feedback', audit: 'Accuracy Audit (admin action)' };
+    // layer='audit' rows are logged when THIS account ran the Layer 3
+    // accuracy audit as an admin, not personal study usage -- only reachable
+    // if the account being viewed is itself an admin. Called out separately
+    // below rather than folded into the personal spend total, so an admin
+    // reviewing their own account doesn't see their own audit runs inflate
+    // what looks like a student-usage figure.
+    const personalRows = rows.filter(r=>r.layer!=='audit');
+    const auditRows = rows.filter(r=>r.layer==='audit');
+    const totalCost = personalRows.reduce((s,r)=>s + Number(r.estimated_cost_usd||0), 0);
+    const costByLayer = {};
+    personalRows.forEach(r=>{ costByLayer[r.layer] = (costByLayer[r.layer]||0) + Number(r.estimated_cost_usd||0); });
+
+    // Same override-wins-over-global-default merge get_ai_feature_flags()
+    // does server-side (0027) -- recomputed here rather than trusted from
+    // adminData.flagsByUser, since that snapshot is only as fresh as the
+    // last full Admin panel load, not this specific drilldown.
+    const chatPeriodDays = cfg?.chat_period_days ?? 30;
+    const chatPeriodLimit = override?.chat_period_limit ?? cfg?.chat_period_limit ?? 40;
+    const chatTurnLimit = override?.chat_turn_limit ?? cfg?.chat_turn_limit ?? 5;
+    const periodCutoff = new Date(Date.now() - chatPeriodDays*24*60*60*1000);
+    const chatPeriodUsed = rows.filter(r=>r.layer==='branch' && new Date(r.created_at) >= periodCutoff).length;
+
+    // Progress feedback's cap is a hardcoded DAILY_LIMIT in
+    // ai-progress-feedback/index.ts, not admin-configurable (no override
+    // column exists for it) -- mirror that constant here; keep it in sync
+    // if that file's own DAILY_LIMIT ever changes.
+    const PROGRESS_DAILY_LIMIT = 10;
+    const oneDayAgo = new Date(Date.now() - 24*60*60*1000);
+    const progressUsedToday = rows.filter(r=>r.layer==='progress' && new Date(r.created_at) >= oneDayAgo).length;
+
+    const explainOn = override?.explain_enabled ?? cfg?.explain_enabled ?? true;
+    const chatOn = override?.chat_enabled ?? cfg?.chat_enabled ?? true;
+    const fmtCost = (n)=> '$' + n.toFixed(4);
+    const atLimitBadge = `<span class="lib-badge" style="background:#fbeaea;color:#c0392b;">at limit</span>`;
+    const historyRows = rows.slice(0, 50);
+
+    section.innerHTML = `
+      <h2>AI Usage</h2>
+      <div class="format-help">This account's own spend and usage across all three AI features, and where they stand against current limits (per-account override where one is set, site-wide default otherwise).</div>
+      <div style="display:flex;gap:24px;flex-wrap:wrap;margin:12px 0;font-family:system-ui,sans-serif;">
+        <div><div class="lib-meta">Total spend</div><div style="font-size:1.3em;font-weight:600;">${fmtCost(totalCost)}</div></div>
+        <div><div class="lib-meta">Explanations</div><div style="font-size:1.3em;font-weight:600;">${fmtCost(costByLayer.base||0)}</div></div>
+        <div><div class="lib-meta">Follow-up chat</div><div style="font-size:1.3em;font-weight:600;">${fmtCost(costByLayer.branch||0)}</div></div>
+        <div><div class="lib-meta">Progress feedback</div><div style="font-size:1.3em;font-weight:600;">${fmtCost(costByLayer.progress||0)}</div></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;font-family:system-ui,sans-serif;margin-bottom:14px;">
+        <div>AI explanations: ${explainOn ? 'on' : '<strong>off</strong>'} &nbsp;·&nbsp; Follow-up chat: ${chatOn ? 'on' : '<strong>off</strong>'}</div>
+        <div>Follow-up chat: <strong>${chatPeriodUsed} / ${chatPeriodLimit}</strong> messages in the trailing ${chatPeriodDays} days${chatPeriodUsed >= chatPeriodLimit ? ' ' + atLimitBadge : ''} &nbsp;·&nbsp; up to ${chatTurnLimit} follow-ups per question per 24h</div>
+        <div>Progress feedback: <strong>${progressUsedToday} / ${PROGRESS_DAILY_LIMIT}</strong> requests today${progressUsedToday >= PROGRESS_DAILY_LIMIT ? ' ' + atLimitBadge : ''}</div>
+      </div>
+      ${auditRows.length ? `<div class="format-help">Also ran ${auditRows.length} Layer 3 accuracy-audit call(s) as an admin action — not counted in the personal spend/usage above.</div>` : ''}
+      ${rows.length ? `
+        <div class="lib-meta" style="margin:10px 0 4px;">${rows.length > 50 ? `Most recent 50 of ${rows.length} calls` : `All ${rows.length} call(s)`}, newest first.</div>
+        ${historyRows.map(r=>`
+          <div class="lib-row">
+            <div class="lib-info">
+              <div class="lib-title">${escapeHtml(LAYER_LABEL[r.layer] || r.layer)} <span class="lib-meta">· ${escapeHtml(r.model)}</span></div>
+              <div class="lib-meta">${new Date(r.created_at).toLocaleString()} · ${r.tokens_in}→${r.tokens_out} tokens · ${fmtCost(Number(r.estimated_cost_usd||0))}</div>
+            </div>
+          </div>
+        `).join('')}
+      ` : `<div class="format-help">No AI calls recorded for this account yet.</div>`}
+    `;
+  } catch(err){
+    section.innerHTML = `<h2>AI Usage</h2><div class="msg err">Could not load AI usage: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
 /* Deliberately a separate, simpler, read-only view rather than threading
    a target-user parameter through renderProgressView()/renderProgressPanel()
    above -- those wire up Continue/Delete/Export/Import against
@@ -7274,6 +7374,10 @@ async function renderAdminUserProgress(targetUserId){
     let html = `
       <h1>Admin — Progress for ${escapeHtml(label)}</h1>
       <button class="link-btn" id="backToAdminBtn">← Back to Admin</button>
+      <div class="subsection" id="adminAiUsageSection">
+        <h2>AI Usage</h2>
+        <div class="format-help">Loading…</div>
+      </div>
     `;
     if(!rounds.length){
       html += `<div class="format-help">No online attempts for this account.</div>`;
@@ -7306,6 +7410,7 @@ async function renderAdminUserProgress(targetUserId){
     });
     adminPanel.innerHTML = html;
     document.getElementById('backToAdminBtn').onclick = ()=>{ adminDrilldownUserId = null; renderAdminPanel(); };
+    renderAdminAiUsageSection(targetUserId);
     adminPanel.querySelectorAll('button[data-review-attempt]').forEach(btn=>{
       btn.onclick = ()=>{
         adminReviewFilter = 'missed';
