@@ -992,8 +992,18 @@ if('serviceWorker' in navigator){
   .progress-toolbar-controls .view-mode-switch button{font-size:.85rem;}
   .subsection{border-top:1px solid var(--line);margin-top:18px;padding-top:18px;}
   .lib-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;}
-  .lib-info{display:flex;flex-direction:column;gap:2px;}
-  .lib-title{font-size:1rem;}
+  /* .lib-info had no min-width set, and flex items default to
+     min-width:auto -- meaning it (and .lib-title's text inside it) could
+     never shrink below its own unbroken content width. Harmless for short
+     titles like "Exam 10", but a long unbroken string (an email address is
+     the real-world case that surfaced this -- Admin's account list) forced
+     the whole row wider than its container instead of wrapping, visibly
+     spilling past the card edge on a phone. min-width:0 lets the flex item
+     actually shrink to the row's available width; overflow-wrap on
+     .lib-title then wraps the now-constrained text onto multiple lines
+     instead of clipping or continuing to overflow. */
+  .lib-info{display:flex;flex-direction:column;gap:2px;min-width:0;}
+  .lib-title{font-size:1rem;overflow-wrap:break-word;word-break:break-word;}
   .lib-meta{font-family:system-ui,sans-serif;font-size:.78rem;color:var(--muted);}
   .subsection:first-child{border-top:none;margin-top:0;padding-top:0;}
 
@@ -1390,6 +1400,16 @@ if('serviceWorker' in navigator){
      clean stacked pair at phone width. */
   @media (max-width:480px){
     .auth-links-row{flex-direction:column;gap:8px;align-items:center;}
+  }
+  /* .auth-outer's 40px padding is fine on desktop (plenty of room either
+     side of a 380px-capped card) but on a phone it eats a disproportionate
+     share of the viewport -- at 390px wide, 40px each side leaves only
+     310px for a card whose own max-width is 380px, so the card visibly
+     shrinks well below its intended width instead of the near-full-width
+     card every other screen in this app gets on mobile. Tightened here,
+     mobile-only, so desktop's generous framing is untouched. */
+  @media (max-width:480px){
+    .auth-outer{padding:20px;}
   }
   .auth-brand{display:flex;align-items:center;gap:10px;font-family:var(--font-display);font-weight:800;font-size:1.2rem;letter-spacing:-.02em;margin-bottom:26px;color:var(--ink);}
   .auth-brand .mark{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,#8FA6FF,#5B6BFF);display:flex;align-items:center;justify-content:center;}
@@ -4186,6 +4206,40 @@ function restartRecallSession(){
   renderFlashcard();
 }
 
+/* Flashcard objects (built from missed/flagged answers, the library picker,
+   or a saved set) only ever carry {text, options, correct, explanation,
+   count?} -- no exam/question-number metadata, since that gets discarded at
+   the point they're tallied (see buildFlashcardsFromAttemptIds etc.). Rather
+   than thread that metadata through every one of those build paths, this
+   re-derives it at render time by matching the card's own text back against
+   EXAM_LIBRARY, the same "look the original content back up by its
+   normalized text key" approach the AI-audit admin review list already uses
+   for the same underlying problem (see that code's own comment). A question
+   whose text happens to appear in more than one exam resolves to whichever
+   one is scanned first -- an accepted approximation, not a guaranteed unique
+   answer, matching the caveat that lookup already accepts elsewhere.
+   Index is cached and only rebuilt when EXAM_LIBRARY's own array reference
+   changes (a fresh fetch/reload), not on every single card render. */
+let _flashLocationIndex = null;
+let _flashLocationIndexSource = null;
+function getFlashcardLocationLabel(card){
+  if(!card || !card.text || !EXAM_LIBRARY.length) return '';
+  if(_flashLocationIndexSource !== EXAM_LIBRARY){
+    _flashLocationIndex = new Map();
+    EXAM_LIBRARY.forEach(exam=>{
+      (exam.questions||[]).forEach((q,qi)=>{
+        const key = q.text.trim().toLowerCase();
+        if(!_flashLocationIndex.has(key)){
+          _flashLocationIndex.set(key, { examTitle: exam.title, questionNumber: q.originalNumber || (qi+1) });
+        }
+      });
+    });
+    _flashLocationIndexSource = EXAM_LIBRARY;
+  }
+  const loc = _flashLocationIndex.get(card.text.trim().toLowerCase());
+  return loc ? `${loc.examTitle} · Q${loc.questionNumber}` : '';
+}
+
 function renderFlashcard(){
   saveFlashSessionState();
   /* Same focus-loss problem as renderQuestion()/renderDots() -- flashPanel
@@ -4352,7 +4406,7 @@ function renderFlashcard(){
         ${topRowHtml}
         ${flashRecallMasteredCount>0 ? `<div class="format-help" style="margin-bottom:8px;">${flashRecallMasteredCount} card${flashRecallMasteredCount===1?'':'s'} already mastered from before — hidden. <button class="link-btn" id="flashIncludeMasteredBtn" type="button">Study them too</button></div>` : ''}
         <div class="progress-row" id="flashProgressAnchor">
-          <span>Card ${flashRecallPos+1} of ${total}</span>
+          <span>Card ${flashRecallPos+1} of ${total}${getFlashcardLocationLabel(card) ? ` · ${getFlashcardLocationLabel(card)}` : ''}</span>
           <span>${flashRecallRound>1 ? `Round ${flashRecallRound} — reviewing what you missed` : ''}</span>
         </div>
         <div class="flash-flip-outer recall-flip-outer">
@@ -4402,7 +4456,7 @@ function renderFlashcard(){
     html = `
       ${topRowHtml}
       <div class="progress-row" id="flashProgressAnchor">
-        <span>Card ${flashIndex+1} of ${flashcards.length}</span>
+        <span>Card ${flashIndex+1} of ${flashcards.length}${getFlashcardLocationLabel(card) ? ` · ${getFlashcardLocationLabel(card)}` : ''}</span>
         <span>${card.count !== undefined ? `Missed ${card.count} time${card.count===1?'':'s'}` : ''}</span>
       </div>
       <div class="flash-layout">
@@ -5942,6 +5996,29 @@ function renderProgressPanel(){
      desktop keeps the real user-facing choice via progressViewMode. */
   const isMobileViewport = window.innerWidth <= 900;
   const effectiveViewMode = isMobileViewport ? 'grid' : progressViewMode;
+  /* Sort dropdown + Grid/Stacked toggle + AI-feedback button, split out of
+     the toolbar markup so it can render in two different places depending
+     on viewport: on desktop it stays paired with the stat pills in one
+     combined row (unchanged). On mobile, per direct user feedback, it
+     renders directly above the round-cards stack instead -- previously it
+     sat above the Resume banner along with the stat pills, which put the
+     sort control (and its effect on the stack's order) a whole banner's
+     distance away from the stack it actually controls. */
+  const controlsRowHtml = `
+    ${d.exams.length ? renderDropdown({ id:'progressSort', ariaLabel:'Sort progress list', selected: progressSortMode, options:[
+      {value:'name_asc', label:'Sort: Name (A–Z)'},
+      {value:'name_desc', label:'Sort: Name (Z–A)'},
+      {value:'last', label:'Sort: Last Attempt'},
+      {value:'first', label:'Sort: First Attempt'}
+    ]}) : ''}
+    ${(d.exams.length && !isMobileViewport) ? `
+      <div class="study-mode-switch view-mode-switch" role="group" aria-label="Progress view">
+        <button type="button" data-progress-view="grid" class="${progressViewMode==='grid'?'active':''}">Grid</button>
+        <button type="button" data-progress-view="stacked" class="${progressViewMode==='stacked'?'active':''}">Stacked</button>
+      </div>
+    ` : ''}
+    ${renderProgressAiFeedbackControls()}
+  `;
   let html = `
     <h1>Progress</h1>
     <div class="progress-toolbar">
@@ -5949,23 +6026,9 @@ function renderProgressPanel(){
         <div class="stat-pill">${icon('library')}<strong>${d.exams.length}</strong><span class="stat-label">exam${d.exams.length===1?'':'s'} started</span></div>
         <div class="stat-pill">${icon('check')}<strong>${d.masteredRounds} of ${d.totalRounds}</strong><span class="stat-label">round${d.totalRounds===1?'':'s'} mastered</span></div>
       </div>
-      <div class="progress-toolbar-controls">
-        ${d.exams.length ? renderDropdown({ id:'progressSort', ariaLabel:'Sort progress list', selected: progressSortMode, options:[
-          {value:'name_asc', label:'Sort: Name (A–Z)'},
-          {value:'name_desc', label:'Sort: Name (Z–A)'},
-          {value:'last', label:'Sort: Last Attempt'},
-          {value:'first', label:'Sort: First Attempt'}
-        ]}) : ''}
-        ${(d.exams.length && !isMobileViewport) ? `
-          <div class="study-mode-switch view-mode-switch" role="group" aria-label="Progress view">
-            <button type="button" data-progress-view="grid" class="${progressViewMode==='grid'?'active':''}">Grid</button>
-            <button type="button" data-progress-view="stacked" class="${progressViewMode==='stacked'?'active':''}">Stacked</button>
-          </div>
-        ` : ''}
-        ${renderProgressAiFeedbackControls()}
-      </div>
+      ${isMobileViewport ? '' : `<div class="progress-toolbar-controls">${controlsRowHtml}</div>`}
     </div>
-    ${renderProgressAiFeedbackContent()}
+    ${isMobileViewport ? '' : renderProgressAiFeedbackContent()}
     <div class="msg" id="progressMsg"></div>
   `;
   if(resumable){
@@ -5979,6 +6042,10 @@ function renderProgressPanel(){
   }
   if(!d.exams.length){
     html += `<div class="format-help">No attempts yet — start an exam from the Test Library.</div>`;
+  }
+  if(isMobileViewport && d.exams.length){
+    html += `<div class="progress-toolbar-controls" style="margin-bottom:14px;">${controlsRowHtml}</div>`;
+    html += renderProgressAiFeedbackContent();
   }
   /* Grid mode: one continuous grid across ALL exams, not one grid per
      exam subsection -- an account where most exams have just 1 round
