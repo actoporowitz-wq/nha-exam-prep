@@ -518,11 +518,11 @@ if('serviceWorker' in navigator){
     min-height:calc(100vh - 160px);
   }
   /* Real bug, user-confirmed and root-caused (not the padding/margin one
-     above -- a separate mechanism): on mobile, scrollQuestionIntoView()
-     targets #qnumAnchor specifically, which lives INSIDE this centered
-     block -- justify-content:center means qnumAnchor's natural (pre-scroll)
-     position gets pushed an amount that depends on how much empty space
-     the centering has to distribute, which for a SHORT question inside a
+     above -- a separate mechanism): scrollQuestionIntoView() targets
+     #qnumAnchor specifically, which lives INSIDE this centered block --
+     justify-content:center means qnumAnchor's natural (pre-scroll) position
+     gets pushed an amount that depends on how much empty space the
+     centering has to distribute, which for a SHORT question inside a
      min-height:100vh-160px box can be hundreds of px. The scroll-to-anchor
      math (scrollElementIntoView) needs that same amount of actual
      scrollable overflow to exist in order to pull qnumAnchor up to its
@@ -535,33 +535,68 @@ if('serviceWorker' in navigator){
      when there is enough slack" half of the same report -- different
      questions want a different amount of centering-driven offset, so the
      landing position drifts question to question even when a given one
-     technically has enough room to fully reach 12px. Desktop never had
-     this because its own scroll target (quizPanel, the whole panel) sits
-     BEFORE this centered block entirely, so centering never fights it.
-     Fix, mobile only (desktop's target/behavior is untouched and was never
-     reported broken): drop true centering in favor of a small, fixed
-     top offset capped well below any realistic scrollable range -- gives
-     short questions breathing room instead of jamming flush to the top,
-     without ever demanding more scroll slack than a short question
-     actually has. */
+     technically has enough room to fully reach 12px.
+     Originally fixed mobile-only, since desktop's scroll target used to be
+     quizPanel (the whole panel, sitting BEFORE this centered block, so
+     centering never fought it there) rather than qnumAnchor. The user later
+     asked for full-screen's "auto-load to the right spot" and "lower
+     buttons stay hidden until scrolled" behavior on desktop too, and
+     scrollQuestionIntoView() now targets qnumAnchor in full-screen at any
+     width (see that function) -- so this same fix (drop true centering for
+     a small, fixed, capped top offset) now needs to apply universally
+     whenever full-screen is active, not just under 900px. */
+  #quizView.quiz-fullscreen .quiz-question-block{
+    justify-content:flex-start;min-height:calc(100vh - 40px);padding-top:clamp(8px,6vh,56px);
+  }
+  /* Second half of the same fix: the "Exit Full Screen" link row was
+     still plain in-flow content sitting above .progress-row/.bar/
+     .quiz-question-block, so scrolling qnumAnchor toward the top still
+     had to travel past its height too (confirmed live: ~30-40px of the
+     measured shortfall was this row alone). Taking it out of flow
+     entirely means qnumAnchor's natural position no longer depends on it
+     at all, shrinking the fixed chrome height every question has to
+     scroll past to just .progress-row + .bar, which is small and truly
+     constant regardless of question length.
+     REAL BUG, found via direct measurement after a user report that this
+     made things worse: this was first shipped as position:absolute,
+     which is relative to quizView's PADDING BOX, not the viewport --
+     since quizView is also the scrolling element, an absolutely
+     positioned descendant still scrolls out with the rest of the content
+     (confirmed live: the button's rect.top shifted by exactly the scroll
+     delta). That means the moment you scrolled down at all, the only way
+     to exit full-screen disappeared entirely. position:fixed is what was
+     actually needed -- same treatment .nav-row already uses below, which
+     measurably does stay put across scroll (confirmed: identical rect
+     regardless of scrollTop). quizView being position:fixed itself does
+     NOT make its descendants fixed too; each element's own position
+     property is independent. Universal (not mobile-gated) for the same
+     reason as the block above -- desktop full-screen now scrolls too. */
+  #quizView.quiz-fullscreen .fullscreen-toggle-row{
+    position:fixed;top:max(14px,env(safe-area-inset-top));
+    right:max(16px,env(safe-area-inset-right));margin:0;z-index:16;
+  }
+  /* Clearance for the now-floating toggle button lives on quizView's own
+     top padding instead of a per-row margin -- a margin big enough to
+     clear the button (~40px) would have clawed back almost the entire
+     gain from taking the button out of flow in the first place (measured
+     live: qnumAnchor only improved 176px->126px before this, then right
+     back up toward 166px once clearance was added the naive way). Doing
+     it here instead means it's paid for exactly once, at the very top,
+     rather than compounding with every row that would otherwise need its
+     own clearance. */
+  #quizView.quiz-fullscreen{
+    padding-top:max(60px, calc(env(safe-area-inset-top) + 44px));
+  }
+  /* Flashcards' own "Exit Full Screen" toggle gets the same fixed-pinned
+     treatment, same clearance mechanism, same reasoning -- universal. */
+  #flashPanel.flash-fullscreen .fullscreen-toggle-row{
+    position:fixed;top:max(14px,env(safe-area-inset-top));
+    right:max(16px,env(safe-area-inset-right));margin:0;z-index:16;
+  }
+  #flashPanel.flash-fullscreen{
+    padding-top:max(60px, calc(env(safe-area-inset-top) + 44px));
+  }
   @media (max-width:900px){
-    /* min-height:0 here (an earlier version of this fix) traded one bug for
-       another: it solved the scroll-slack problem but also removed the
-       only thing that was reserving space below a short question, so
-       .extra-actions (Question list/Pause & Save) started showing up
-       immediately instead of requiring a scroll to reveal -- a real
-       regression, confirmed via user report and screenshot. The two goals
-       (reach the anchor near the top consistently, AND keep the buttons
-       requiring a deliberate scroll) aren't actually in conflict once
-       scrollElementIntoView's target offset accounts for the fixed toggle
-       button (see that function) -- the required scroll distance shrank
-       enough that a real reserved min-height no longer starves it. Not
-       centered (justify-content stays flex-start) -- only the ORIGINAL
-       min-height:calc(100vh-160px) combined with centering was the actual
-       problem; min-height alone with content pinned to the top is fine. */
-    #quizView.quiz-fullscreen .quiz-question-block{
-      justify-content:flex-start;min-height:calc(100vh - 40px);padding-top:clamp(8px,6vh,56px);
-    }
     /* Same "not enough scroll slack" mechanism as full-screen above, but
        for the NON-full-screen path -- .quiz-question-block never had any
        min-height at all outside .quiz-fullscreen, so whether a question's
@@ -575,58 +610,10 @@ if('serviceWorker' in navigator){
        real minimum height here removes the dependency on any single
        question's actual length, same fix shape as full-screen's version
        just without a fixed toggle button to clear (topOffset stays 12 here
-       -- see scrollElementIntoView). */
+       -- see scrollElementIntoView). Stays mobile-only -- non-fullscreen
+       desktop was never reported broken and isn't part of this request. */
     #quizView:not(.quiz-fullscreen) .quiz-question-block{
       min-height:calc(100vh - 280px);
-    }
-    /* Second half of the same fix: the "Exit Full Screen" link row was
-       still plain in-flow content sitting above .progress-row/.bar/
-       .quiz-question-block, so scrolling qnumAnchor toward the top still
-       had to travel past its height too (confirmed live: ~30-40px of the
-       measured shortfall was this row alone). Taking it out of flow
-       entirely means qnumAnchor's natural position no longer depends on it
-       at all, shrinking the fixed chrome height every question has to
-       scroll past to just .progress-row + .bar, which is small and truly
-       constant regardless of question length.
-       REAL BUG, found via direct measurement after a user report that this
-       made things worse: this was first shipped as position:absolute,
-       which is relative to quizView's PADDING BOX, not the viewport --
-       since quizView is also the scrolling element, an absolutely
-       positioned descendant still scrolls out with the rest of the content
-       (confirmed live: the button's rect.top shifted by exactly the scroll
-       delta). That means the moment you scrolled down at all, the only way
-       to exit full-screen disappeared entirely. position:fixed is what was
-       actually needed -- same treatment .nav-row already uses below, which
-       measurably does stay put across scroll (confirmed: identical rect
-       regardless of scrollTop). quizView being position:fixed itself does
-       NOT make its descendants fixed too; each element's own position
-       property is independent. */
-    #quizView.quiz-fullscreen .fullscreen-toggle-row{
-      position:fixed;top:max(14px,env(safe-area-inset-top));
-      right:max(16px,env(safe-area-inset-right));margin:0;z-index:16;
-    }
-    /* Clearance for the now-floating toggle button lives on quizView's own
-       top padding instead of a per-row margin -- a margin big enough to
-       clear the button (~40px) would have clawed back almost the entire
-       gain from taking the button out of flow in the first place (measured
-       live: qnumAnchor only improved 176px->126px before this, then right
-       back up toward 166px once clearance was added the naive way). Doing
-       it here instead means it's paid for exactly once, at the very top,
-       rather than compounding with every row that would otherwise need its
-       own clearance. */
-    #quizView.quiz-fullscreen{
-      padding-top:max(60px, calc(env(safe-area-inset-top) + 44px));
-    }
-    /* Flashcards' own "Exit Full Screen" toggle never got this treatment at
-       all until now -- it was still plain in-flow content inside topRowHtml
-       (see renderFlashcard()), same bug class quiz had before the fix
-       above. Same fixed-pinned treatment, same clearance mechanism. */
-    #flashPanel.flash-fullscreen .fullscreen-toggle-row{
-      position:fixed;top:max(14px,env(safe-area-inset-top));
-      right:max(16px,env(safe-area-inset-right));margin:0;z-index:16;
-    }
-    #flashPanel.flash-fullscreen{
-      padding-top:max(60px, calc(env(safe-area-inset-top) + 44px));
     }
   }
 
@@ -2245,11 +2232,18 @@ function scrollElementIntoView(el){
    Desktop keeps scrolling to the panel top (never reported as a problem
    there, and there's more vertical room to spare). */
 function scrollQuestionIntoView(){
-  const target = window.innerWidth <= 900 ? document.getElementById('qnumAnchor') : quizPanel;
+  /* Full-screen now lands on the question itself at any width, not just
+     phone widths -- desktop full-screen used to keep scrolling to quizPanel
+     (already at the top of its own overlay, so effectively a no-op),
+     leaving whatever the .quiz-question-block centering happened to land on
+     as the "auto-loaded" position -- for a short question that's a large
+     blank gap above it, not the question itself. Non-fullscreen desktop is
+     untouched (not reported broken, and there's real room to spare there). */
+  const target = (window.innerWidth <= 900 || quizFullScreen) ? document.getElementById('qnumAnchor') : quizPanel;
   scrollElementIntoView(target || quizPanel);
 }
 function scrollFlashcardIntoView(){
-  const target = window.innerWidth <= 900 ? document.getElementById('flashProgressAnchor') : flashPanel;
+  const target = (window.innerWidth <= 900 || flashFullScreen) ? document.getElementById('flashProgressAnchor') : flashPanel;
   scrollElementIntoView(target || flashPanel);
 }
 
