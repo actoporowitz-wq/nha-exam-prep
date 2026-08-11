@@ -1911,8 +1911,32 @@ setupNavDrawer('mainNavTrigger', 'mainNavDrawer', 'mainNavBackdrop');
    keyboard shortcuts overlay, feedback panel. Everything here is new --
    none of it replaces existing view-rendering logic, it only wraps it. */
 
+/* Device-local (not per-account) record of "a passkey was registered from
+   this browser/device" -- WebAuthn itself gives no way to ask in advance
+   whether a discoverable credential exists here, so the mobile-PWA
+   auto-unlock flow (see PASSKEYS_SUPPORTED and everything below it) needs
+   its own signal to decide whether it's safe to fire a native prompt
+   unprompted on app open, rather than surprising every visitor who's never
+   set one up with a biometric dialog they have to cancel. Declared up here
+   (not down with the rest of the passkey code) specifically so
+   showLanding's own initial value, right below, can use it -- see that
+   variable's own comment for why the ordering matters. */
+const PASSKEY_DEVICE_FLAG_KEY = 'nha_passkey_device_enrolled';
+function markPasskeyEnrolledOnDevice(){ try{ localStorage.setItem(PASSKEY_DEVICE_FLAG_KEY, '1'); }catch(e){} }
+function clearPasskeyEnrolledOnDevice(){ try{ localStorage.removeItem(PASSKEY_DEVICE_FLAG_KEY); }catch(e){} }
+function isPasskeyEnrolledOnDevice(){ try{ return localStorage.getItem(PASSKEY_DEVICE_FLAG_KEY) === '1'; }catch(e){ return false; } }
+
 /* ---- landing page gate ---- */
-let showLanding = true;
+/* A device that already registered a passkey has obviously used this app
+   before and signed in at least once -- the marketing landing page is for
+   first-time visitors, so skip straight past it for a returning device,
+   same as if they'd already clicked through once this session. Without
+   this, the mobile-PWA auto-unlock splash (see shouldShowUnlockSplash())
+   would never actually get a chance to auto-fire on a cold app open --
+   the landing page would sit in front of it every single time, since
+   nothing else in the existing landing-gate logic knew this was a
+   returning device. */
+let showLanding = !isPasskeyEnrolledOnDevice();
 const landingViewEl = document.getElementById('landingView');
 const appLayoutEl = document.getElementById('appLayout');
 function updateLandingGate(){
@@ -4752,6 +4776,65 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_
    as this app's Turnstile-in-WebView workaround for the native Android app)
    would otherwise show buttons that fail every time they're clicked. */
 const PASSKEYS_SUPPORTED = typeof window.PublicKeyCredential !== 'undefined';
+/* Coarse platform sniff, used only to pick which word the enrollment
+   prompt uses ("Face ID" vs "fingerprint" vs "Windows Hello") -- never used
+   to change actual WebAuthn behavior, since the OS (not this app) decides
+   what the real platform authenticator prompt looks like regardless of
+   what we call it. Mac deliberately falls into the generic bucket, not
+   "Touch ID" -- plenty of Macs (Mac mini, iMac without a Touch ID
+   keyboard) don't have it, and there's no reliable way to detect that from
+   the browser. */
+function detectPasskeyPlatform(){
+  const ua = navigator.userAgent || '';
+  if(/iPhone|iPad|iPod/.test(ua)) return 'ios';
+  if(/Android/.test(ua)) return 'android';
+  if(/Windows/.test(ua)) return 'windows';
+  return 'generic';
+}
+const PASSKEY_PROMPT_COPY = {
+  ios: { title: 'Turn on Face ID sign-in?', body: 'Skip typing your password next time — use Face ID instead.' },
+  android: { title: 'Turn on fingerprint sign-in?', body: 'Skip typing your password next time — use your fingerprint instead.' },
+  windows: { title: 'Turn on Windows Hello sign-in?', body: 'Skip typing your password next time — use Windows Hello instead.' },
+  generic: { title: 'Turn on passkey sign-in?', body: 'Skip typing your password next time — use your device’s built-in sign-in instead.' },
+};
+/* PASSKEY_DEVICE_FLAG_KEY and its three helpers now live up near the
+   landing-page gate (search for that name) -- showLanding's own initial
+   value needs isPasskeyEnrolledOnDevice() before this point in the file
+   would otherwise have defined it, and a const declared this far down is
+   in the temporal dead zone until this line actually runs, so calling it
+   from up there would throw. Function declarations hoist fine regardless
+   of source order; the const backing them doesn't. */
+/* Standalone/installed only -- an ordinary mobile browser TAB doesn't get
+   the auto-unlock treatment, per direct user scope ("in mobile pwa only").
+   navigator.standalone is iOS Safari's own (non-standard) flag for "added
+   to home screen"; display-mode:standalone covers Android/Chrome and any
+   other browser that implements the standard media feature. */
+function isStandalonePwa(){
+  return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+}
+function isMobileDevice(){
+  return /Android|iPhone|iPad|iPod/.test(navigator.userAgent || '');
+}
+/* Site-wide admin kill switch (0036_passkey_prompt.sql), layered on top of
+   PASSKEYS_SUPPORTED's pure browser-capability check. Starts true
+   (optimistic default, same convention aiFeatureFlags already uses) and is
+   fetched immediately below -- deliberately NOT awaited before the app
+   renders anything, since the sign-in screen has to be able to paint
+   before any network round-trip resolves. If an admin has genuinely turned
+   this off, there's a brief window (this one load) where the icon could
+   flash before disappearing on next render; an acceptable tradeoff for a
+   toggle nobody flips often, versus blocking the whole sign-in screen's
+   first paint on it. */
+let passkeyFeatureEnabled = true;
+async function loadPasskeyFeatureFlag(){
+  try{
+    const { data, error } = await supabaseClient.rpc('get_passkey_feature_flags');
+    if(!error && data && data.length) passkeyFeatureEnabled = !!data[0].enabled;
+  }catch(e){ /* keep the optimistic default -- server-side is the real gate */ }
+}
+function passkeysActive(){
+  return PASSKEYS_SUPPORTED && passkeyFeatureEnabled;
+}
 /* Shared across the sign-in button and the Settings "Passkeys" dialog --
    the dashboard/API error codes are the same in both places (see
    https://supabase.com/docs/guides/auth/passkeys), just reached via
@@ -4831,10 +4914,41 @@ let currentUser = null;
 let profile = null; // this account's row from `profiles` -- { approved, role, ... } or null
 let libraryLoaded = false;
 let libraryLoading = false;
-let authScreen = 'signin'; // 'signin' | 'signup' | 'forgot' | 'reset-password' | 'verify-notice'
+let authScreen = 'signin'; // 'signin' | 'signup' | 'forgot' | 'reset-password' | 'verify-notice' | 'unlock'
 let authError = '';
 let authMessage = '';
 let turnstileWidgetId = null;
+/* Set right before a real signInWithPassword() call, consumed (and
+   cleared) by maybeShowPasskeyEnrollmentPrompt() once SIGNED_IN actually
+   fires -- onAuthStateChange's SIGNED_IN event doesn't say which method
+   produced it (password vs. passkey vs. a restored session on page load),
+   and the enrollment prompt is only ever appropriate right after a genuine
+   password sign-in (offering a passkey to someone who just used one, or on
+   a plain session restore, would make no sense). */
+let pendingPasswordSignInPrompt = false;
+// See handleSignOut's own comment -- set on a deliberate manual sign-out,
+// consumed (and cleared) the next time applyAccessGate decides whether to
+// show the unlock splash or the plain sign-in form.
+let explicitSignOutJustHappened = false;
+// Guards against re-firing the WebAuthn ceremony on every re-render while
+// still on the 'unlock' screen (Turnstile's own script, among other
+// things, can trigger a re-render that isn't a fresh entry into this
+// screen) -- reset to false only when genuinely (re-)entering 'unlock'.
+let authUnlockAttempted = false;
+
+/* Mobile PWA "glance to unlock": once a passkey has been registered from
+   this exact device (see PASSKEY_DEVICE_FLAG_KEY), opening the installed
+   app with no active session skips the plain sign-in form and goes
+   straight to a biometric challenge instead -- iOS fires it with no tap
+   needed, Android needs one tap on the splash to satisfy Chrome's
+   WebAuthn gesture requirement (see renderAuthView's 'unlock' branch and
+   attemptAutoUnlock()). Scope is deliberately narrow (PWA + mobile only,
+   per direct user request) -- a desktop browser tab or a mobile browser
+   tab that was never installed never gets this treatment, just the
+   password-field icon like everywhere else. */
+function shouldShowUnlockSplash(){
+  return passkeysActive() && isStandalonePwa() && isMobileDevice() && isPasskeyEnrolledOnDevice();
+}
 
 /* True for the length of one page load if the URL looks like a password
    recovery link (Supabase appends the recovery token as a URL hash or
@@ -4914,7 +5028,7 @@ function renderAuthView(){
         <input type="email" id="authEmail" placeholder="Email" autocomplete="email">
         <div class="pw-field">
           <input type="password" id="authPassword" placeholder="Password" autocomplete="current-password">
-          <button type="button" class="pw-toggle" id="authPasswordToggle" aria-label="${PASSKEYS_SUPPORTED ? 'Sign in with a passkey' : 'Show password'}">${PASSKEYS_SUPPORTED ? icon('fingerprint') : icon('eye')}</button>
+          <button type="button" class="pw-toggle" id="authPasswordToggle" aria-label="${passkeysActive() ? 'Sign in with a passkey' : 'Show password'}">${passkeysActive() ? icon('fingerprint') : icon('eye')}</button>
         </div>
         <div class="cf-turnstile" id="turnstileWidget"></div>
         <button class="btn btn-primary" id="authSubmitBtn">Sign In</button>
@@ -4974,12 +5088,38 @@ function renderAuthView(){
       <div class="format-help">We sent a confirmation link to ${escapeHtml(authMessage)}. Click it, then come back here and sign in.</div>
       <button class="btn btn-ghost" id="goSigninBtn">Back to sign in</button>
     `;
+  } else if(authScreen === 'unlock'){
+    /* Mobile PWA "glance to unlock" -- see shouldShowUnlockSplash() for
+       when this screen is reached at all. iOS fires the WebAuthn ceremony
+       immediately (no tap -- Safari 16+ dropped the requirement that
+       WebAuthn needs a fresh user gesture), Android shows a real tap
+       target instead since Chrome still enforces one. Same visual shell
+       either way, so it reads as one consistent "unlock" moment rather
+       than two different screens depending on platform. */
+    const isIos = detectPasskeyPlatform() === 'ios';
+    html = `
+      <div style="text-align:center;padding:20px 10px 4px;">
+        <div style="width:72px;height:72px;border-radius:50%;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;margin:0 auto 20px;color:var(--accent);">
+          <span style="width:36px;height:36px;display:inline-flex;">${icon('fingerprint')}</span>
+        </div>
+        <h2 style="margin:0 0 6px;">Unlock NHA Exam Prep</h2>
+        <div class="format-help" style="margin-bottom:4px;">${isIos ? 'Unlocking…' : 'Tap below to unlock with your fingerprint.'}</div>
+        ${authError ? `<div class="msg err" style="margin-top:14px;text-align:left;">${escapeHtml(authError)}</div>` : ''}
+        <div class="cf-turnstile" id="turnstileWidget" style="margin:18px auto 4px;"></div>
+        ${!isIos ? `<button class="btn btn-primary" id="unlockNowBtn" type="button" style="margin-top:10px;">${icon('fingerprint')}Unlock</button>` : ''}
+        <div style="margin-top:22px;">
+          <button class="text-link" id="unlockUsePasswordBtn">Use password instead</button>
+        </div>
+      </div>
+    `;
   }
   authPanel.innerHTML = html;
   turnstileWidgetId = null;
   /* Supabase's CAPTCHA setting is project-wide across sign-up/sign-in/password-reset — it
-     can't be scoped to sign-up alone, so all three screens carry the widget. */
-  if(authScreen === 'signup' || authScreen === 'signin' || authScreen === 'forgot') renderTurnstileWidget();
+     can't be scoped to sign-up alone, so all three screens carry the widget. 'unlock' needs
+     it for the exact same reason signInWithPasskey() does everywhere else (see
+     attemptPasskeySignIn's own comment). */
+  if(authScreen === 'signup' || authScreen === 'signin' || authScreen === 'forgot' || authScreen === 'unlock') renderTurnstileWidget();
   /* Sign-in's own password field toggle does double duty (see its own
      comment); signup/reset-password's password fields have no existing
      passkey to sign in with, so they keep the plain always-eye version. */
@@ -4993,6 +5133,23 @@ function renderAuthView(){
   if(goForgot) goForgot.onclick = ()=>{ authScreen='forgot'; authError=''; authMessage=''; renderAuthView(); };
   const submitBtn = document.getElementById('authSubmitBtn');
   if(submitBtn) submitBtn.onclick = handleAuthSubmit;
+  if(authScreen === 'unlock'){
+    const usePasswordBtn = document.getElementById('unlockUsePasswordBtn');
+    if(usePasswordBtn) usePasswordBtn.onclick = ()=>{ authScreen='signin'; authError=''; renderAuthView(); };
+    const unlockNowBtn = document.getElementById('unlockNowBtn');
+    if(unlockNowBtn) unlockNowBtn.onclick = ()=>{ unlockNowBtn.disabled = true; attemptAutoUnlock(); };
+    // iOS only, and only the first time this screen is entered (not on
+    // every re-render while still on it -- see authUnlockAttempted's own
+    // comment). Android deliberately does NOT auto-fire here even though
+    // it could technically be called the same way -- Chrome enforces a
+    // real user gesture for WebAuthn, so an unprompted call here would
+    // just fail silently; the visible Unlock button above is what actually
+    // satisfies that requirement on Android.
+    if(detectPasskeyPlatform() === 'ios' && !authUnlockAttempted){
+      authUnlockAttempted = true;
+      attemptAutoUnlock();
+    }
+  }
 }
 
 /* Sign-in's password field toggle is one slot doing two jobs, per direct
@@ -5012,7 +5169,7 @@ function wireAuthPasswordToggle(){
   const input = document.getElementById('authPassword');
   const btn = document.getElementById('authPasswordToggle');
   if(!input || !btn) return;
-  const isPasskeyMode = ()=> PASSKEYS_SUPPORTED && input.value === '';
+  const isPasskeyMode = ()=> passkeysActive() && input.value === '';
   const render = ()=>{
     if(isPasskeyMode()){
       btn.innerHTML = icon('fingerprint');
@@ -5053,6 +5210,7 @@ async function handleAuthSubmit(){
       if(!turnstileToken){ throw new Error('Please complete the CAPTCHA challenge.'); }
       const { error } = await supabaseClient.auth.signInWithPassword({ email, password, options: { captchaToken: turnstileToken } });
       if(error) throw error;
+      pendingPasswordSignInPrompt = true;
       /* onAuthStateChange's SIGNED_IN handler takes it from here */
     } else if(authScreen === 'signup'){
       const email = document.getElementById('authEmail').value.trim();
@@ -5113,26 +5271,72 @@ async function handleAuthSubmit(){
   }
 }
 
-/* CORRECTION: signInWithPasskey() DOES need a Turnstile token, same as
-   handleAuthSubmit's other branches -- an earlier version of this comment
-   assumed the WebAuthn ceremony's own phishing-resistance made a CAPTCHA
-   redundant here, but Supabase's CAPTCHA setting is project-wide across
-   every Auth endpoint (see the standing note on handleAuthSubmit's forgot-
-   password branch), including /auth/v1/passkeys/authentication/options --
-   confirmed live via a real "captcha protection: request disallowed (no
-   captcha_token found)" error before this fix. onAuthStateChange's
-   SIGNED_IN handler takes it from here on success, same as the password
-   path. */
+/* Turnstile resolves asynchronously (a real network round-trip, not
+   instant) -- a single synchronous getResponse() check works fine for a
+   manual click (Turnstile's had the whole time since page load to finish),
+   but the unlock splash calls this the moment it renders, often before
+   Turnstile has had any time at all. Short poll instead of a single check,
+   capped so a genuinely broken/slow Turnstile still fails fast rather than
+   hanging. In practice this resolves on its very first check for a manual
+   click, and near-instantly for the unlock splash too, since Turnstile
+   starts solving the moment its widget mounts -- well before a human
+   reacts to what's on screen, let alone taps anything -- so the real delay
+   this adds is negligible either way. */
+function waitForTurnstileToken(maxMs){
+  return new Promise((resolve)=>{
+    const start = Date.now();
+    (function poll(){
+      const token = (window.turnstile && turnstileWidgetId!==null) ? window.turnstile.getResponse(turnstileWidgetId) : null;
+      if(token || Date.now()-start > maxMs){ resolve(token || null); return; }
+      setTimeout(poll, 150);
+    })();
+  });
+}
+
+/* Shared by the password-field icon, the enrollment prompt is a separate
+   path (registerPasskey(), no CAPTCHA needed -- see its own comment), and
+   the mobile-PWA unlock splash. signInWithPasskey() DOES need a Turnstile
+   token, same as handleAuthSubmit's other branches -- Supabase's CAPTCHA
+   setting is project-wide across every Auth endpoint (see the standing
+   note on handleAuthSubmit's forgot-password branch), including
+   /auth/v1/passkeys/authentication/options -- confirmed live via a real
+   "captcha protection: request disallowed (no captcha_token found)" error
+   before this was first fixed. Throws on any failure (including a missing
+   token); callers decide what to do with that. onAuthStateChange's
+   SIGNED_IN handler takes over from here on success, same as the password
+   path -- nothing else to do in this function once it resolves. */
+async function attemptPasskeySignIn(){
+  const turnstileToken = await waitForTurnstileToken(4000);
+  if(!turnstileToken){ throw new Error('Please complete the CAPTCHA challenge.'); }
+  const { error } = await supabaseClient.auth.signInWithPasskey({ options: { captchaToken: turnstileToken } });
+  if(error) throw error;
+}
+
 async function handlePasskeySignIn(){
   authError = '';
   const btn = document.getElementById('authPasswordToggle');
   if(btn) btn.disabled = true;
   try{
-    const turnstileToken = (window.turnstile && turnstileWidgetId!==null) ? window.turnstile.getResponse(turnstileWidgetId) : null;
-    if(!turnstileToken){ throw new Error('Please complete the CAPTCHA challenge.'); }
-    const { error } = await supabaseClient.auth.signInWithPasskey({ options: { captchaToken: turnstileToken } });
-    if(error) throw error;
+    await attemptPasskeySignIn();
   } catch(err){
+    authError = passkeyErrorMessage(err, 'signin');
+    renderAuthView();
+  }
+}
+
+/* Entry point for the 'unlock' screen -- see its own render branch and
+   shouldShowUnlockSplash() for when this screen is reached at all. Falls
+   back to the plain sign-in form (with the real error shown, same
+   passkeyErrorMessage('signin') friendly-nudge copy as a manual click)
+   rather than leaving the person stuck on a splash that already failed --
+   most commonly because the flag says this device once had a passkey but
+   it's since been removed on this browser (cleared cookies/storage,
+   revoked at the OS level, etc.). */
+async function attemptAutoUnlock(){
+  try{
+    await attemptPasskeySignIn();
+  } catch(err){
+    authScreen = 'signin';
     authError = passkeyErrorMessage(err, 'signin');
     renderAuthView();
   }
@@ -5192,6 +5396,16 @@ async function openPasskeysDialog(){
               if(delErr) throw delErr;
               if(msgEl) msgEl.className = 'msg';
               await refreshList();
+              // Re-arm the enrollment prompt once this account genuinely
+              // has zero passkeys left -- removing one of several
+              // shouldn't reset it, only dropping to none should, per
+              // direct user decision ("if the passkey gets shut off they
+              // will be prompted... again").
+              if(!overlay.querySelector('[data-remove-passkey]')){
+                clearPasskeyEnrolledOnDevice();
+                try{ await supabaseClient.rpc('clear_own_passkey_prompt_dismissal'); }catch(e){}
+                if(profile) profile.passkey_prompt_dismissed_at = null;
+              }
             } catch(err){
               if(msgEl){ msgEl.className = 'msg err'; msgEl.textContent = passkeyErrorMessage(err); }
             }
@@ -5211,6 +5425,7 @@ async function openPasskeysDialog(){
     try{
       const { error } = await supabaseClient.auth.registerPasskey();
       if(error) throw error;
+      markPasskeyEnrolledOnDevice();
       await refreshList();
     } catch(err){
       if(msgEl){ msgEl.className = 'msg err'; msgEl.textContent = passkeyErrorMessage(err); }
@@ -5220,6 +5435,84 @@ async function openPasskeysDialog(){
   };
 
   refreshList();
+}
+
+/* Post-sign-in "Turn on Face ID/fingerprint/Windows Hello sign-in?"
+   interstitial -- replaces the old standing sign-in-screen button as the
+   actual enrollment path, per direct user decision. Fires at most once per
+   (dismissal, feature-enable) pair: see maybeShowPasskeyEnrollmentPrompt()
+   for the real gating logic, this function just renders/wires the dialog
+   once that's already decided to show it. */
+function openPasskeyEnrollmentPrompt(){
+  const copy = PASSKEY_PROMPT_COPY[detectPasskeyPlatform()];
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.innerHTML = `
+    <div class="dialog-card" style="max-width:380px;text-align:center;">
+      <div style="width:56px;height:56px;border-radius:50%;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;color:var(--accent);">
+        <span style="width:28px;height:28px;display:inline-flex;">${icon('fingerprint')}</span>
+      </div>
+      <h3 style="margin:0 0 8px;">${escapeHtml(copy.title)}</h3>
+      <div class="format-help" style="margin-bottom:20px;">${escapeHtml(copy.body)}</div>
+      <div class="msg" id="passkeyPromptMsg"></div>
+      <div class="dialog-actions" style="justify-content:center;">
+        <button class="btn btn-ghost" id="passkeyPromptDismissBtn">Not now</button>
+        <button class="btn btn-primary" id="passkeyPromptEnableBtn">Turn on</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = ()=> overlay.remove();
+  const dismiss = async ()=>{
+    close();
+    try{ await supabaseClient.rpc('mark_own_passkey_prompt_dismissed'); }catch(e){ /* best-effort -- worst case it asks again next sign-in */ }
+    if(profile) profile.passkey_prompt_dismissed_at = new Date().toISOString();
+  };
+  overlay.onclick = (e)=>{ if(e.target === overlay) dismiss(); };
+  overlay.querySelector('#passkeyPromptDismissBtn').onclick = dismiss;
+  overlay.querySelector('#passkeyPromptEnableBtn').onclick = async ()=>{
+    const btn = overlay.querySelector('#passkeyPromptEnableBtn');
+    const msgEl = overlay.querySelector('#passkeyPromptMsg');
+    btn.disabled = true;
+    try{
+      const { error } = await supabaseClient.auth.registerPasskey();
+      if(error) throw error;
+      markPasskeyEnrolledOnDevice();
+      close();
+    } catch(err){
+      msgEl.className = 'msg err';
+      msgEl.textContent = passkeyErrorMessage(err);
+      btn.disabled = false;
+    }
+  };
+}
+
+/* Gate for the prompt above -- called after every genuine password sign-in
+   (see pendingPasswordSignInPrompt's own comment for why it's scoped to
+   just that). Shows it only when all of: WebAuthn is supported, the
+   site-wide feature is on, this account has zero passkeys already, and it
+   hasn't been dismissed since the feature was last (re-)enabled. Never
+   throws or blocks the sign-in it's riding on -- worst case it just
+   doesn't show this one time. */
+async function maybeShowPasskeyEnrollmentPrompt(){
+  if(!passkeysActive()) return;
+  if(!pendingPasswordSignInPrompt) return;
+  pendingPasswordSignInPrompt = false;
+  try{
+    const [{ data: cfgRows, error: cfgErr }, { data: passkeys, error: listErr }] = await Promise.all([
+      supabaseClient.rpc('get_passkey_feature_flags'),
+      supabaseClient.auth.passkey.list(),
+    ]);
+    if(cfgErr || listErr) return;
+    const flags = cfgRows && cfgRows[0];
+    if(!flags || !flags.enabled) return;
+    if(passkeys && passkeys.length) return;
+    const dismissedAt = profile && profile.passkey_prompt_dismissed_at;
+    if(dismissedAt && flags.last_enabled_at && new Date(dismissedAt) >= new Date(flags.last_enabled_at)) return;
+    openPasskeyEnrollmentPrompt();
+  } catch(e){ /* best-effort -- never block sign-in on this */ }
 }
 
 function renderStatusBar(){
@@ -5237,11 +5530,11 @@ function renderStatusBar(){
   document.querySelectorAll('.settings-account-email').forEach(el=> el.textContent = currentUser.email);
   document.querySelectorAll('.account-signout-btn').forEach(btn=> btn.onclick = ()=>{ closeAccountMenus(); handleSignOut(); });
   document.querySelectorAll('.account-delete-btn').forEach(btn=> btn.onclick = ()=>{ closeAccountMenus(); handleDeleteAccount(); });
-  // Hidden by default in the static markup (see PASSKEYS_SUPPORTED) -- only
+  // Hidden by default in the static markup (see passkeysActive()) -- only
   // shown once there's a signed-in account to manage passkeys for AND the
-  // browser can actually do WebAuthn at all.
+  // browser can actually do WebAuthn at all AND the site-wide feature is on.
   document.querySelectorAll('.account-passkeys-btn').forEach(btn=>{
-    btn.style.display = PASSKEYS_SUPPORTED ? '' : 'none';
+    btn.style.display = passkeysActive() ? '' : 'none';
     btn.onclick = ()=>{ closeAccountMenus(); openPasskeysDialog(); };
   });
   tabProgress.style.display = '';
@@ -5377,6 +5670,13 @@ async function handleDeleteAccount(){
 
 async function handleSignOut(reason){
   showLanding = false; // sign-out should land on the sign-in form, not send an already-oriented user back to the marketing page
+  // A deliberate "Sign Out" click (no reason) shouldn't immediately shove a
+  // biometric re-entry prompt at someone who just chose to leave -- skip
+  // the auto-unlock splash for exactly one next transition into the auth
+  // view. An inactivity timeout is the opposite case (that's the actual
+  // "locked, glance to get back in" moment this feature is for), so it
+  // does NOT set this flag.
+  if(!reason) explicitSignOutJustHappened = true;
   stopInactivityWatch();
   await supabaseClient.auth.signOut();
   currentUser = null;
@@ -5569,7 +5869,13 @@ async function applyAccessGate(authEvent){
        showing right above the sign-in form. */
     examTitle.textContent = 'Exam Practice Tool';
     examSub.textContent = '';
-    if(authScreen !== 'reset-password'){ authScreen = 'signin'; authError=''; authMessage=''; }
+    if(authScreen !== 'reset-password'){
+      const skipUnlock = explicitSignOutJustHappened;
+      explicitSignOutJustHappened = false;
+      authScreen = (!skipUnlock && shouldShowUnlockSplash()) ? 'unlock' : 'signin';
+      authUnlockAttempted = false;
+      authError=''; authMessage='';
+    }
     showView('auth');
     return;
   }
@@ -5661,8 +5967,13 @@ async function applyAccessGate(authEvent){
     renderEmptyState();
     showView(initialView || 'quiz', initialView ? { fromPopState: true } : undefined);
     loadAiFeatureFlags();
+    maybeShowPasskeyEnrollmentPrompt();
   }
 }
+
+// Fired off immediately, not awaited -- see passkeyFeatureEnabled's own
+// comment for why the sign-in screen can't block its first paint on this.
+loadPasskeyFeatureFlag();
 
 supabaseClient.auth.onAuthStateChange((event, session) => {
   currentUser = session ? session.user : null;
@@ -7594,6 +7905,57 @@ function renderAdminAiView(){
   document.getElementById('aiAuditStopBtn').onclick = ()=>{ aiAuditState.stop = true; };
 }
 
+/* Site-wide kill switch for the passkey enrollment prompt + sign-in
+   affordance -- backs 0036_passkey_prompt.sql's passkey_feature_config.
+   Turning it back on after being off bumps last_enabled_at server-side,
+   which re-arms every account's "already dismissed" state (see
+   maybeShowPasskeyEnrollmentPrompt), per direct user decision. */
+async function renderPasskeyFeatureConfigSection(){
+  const section = document.getElementById('passkeyFeatureConfigSection');
+  if(!section) return;
+  try{
+    const { data, error } = await supabaseClient.rpc('get_passkey_feature_flags');
+    if(error) throw error;
+    const flags = (data && data[0]) || { enabled: true };
+    section.innerHTML = `
+      <h2>Passkey Sign-In</h2>
+      <div class="format-help">Controls the fingerprint/Face ID/Windows Hello sign-in option (the icon in the password field) and the post-sign-in "turn this on?" prompt. Turning this back on after being off re-offers the prompt to every account, even ones that previously dismissed it.</div>
+      <div style="display:flex;flex-direction:column;gap:14px;max-width:420px;font-family:system-ui,sans-serif;margin-top:10px;">
+        <label style="display:flex;align-items:center;gap:10px;">
+          <input type="checkbox" id="passkeyEnabledInput" ${flags.enabled ? 'checked' : ''}>
+          Passkey sign-in enabled
+        </label>
+        <button class="btn btn-primary" id="savePasskeyFeatureConfigBtn" style="align-self:flex-start;">Save</button>
+        <div class="msg" id="passkeyFeatureConfigResult"></div>
+      </div>
+    `;
+    document.getElementById('savePasskeyFeatureConfigBtn').onclick = async ()=>{
+      const resultEl = document.getElementById('passkeyFeatureConfigResult');
+      resultEl.className = 'msg';
+      resultEl.textContent = '';
+      const newEnabled = document.getElementById('passkeyEnabledInput').checked;
+      try{
+        const { error: saveErr } = await supabaseClient.rpc('admin_set_passkey_feature_enabled', { new_enabled: newEnabled });
+        if(saveErr) throw saveErr;
+        // Updates this admin's own session immediately (their own sign-in
+        // screen reflects it without needing to reload), same as
+        // renderAiFeatureConfigSection's own save handler -- and matches
+        // its choice to update the message in place rather than
+        // re-rendering the whole section, which would just immediately
+        // wipe the "Saved." confirmation back out.
+        passkeyFeatureEnabled = newEnabled;
+        resultEl.className = 'msg ok';
+        resultEl.textContent = 'Saved.';
+      } catch(err){
+        resultEl.className = 'msg err';
+        resultEl.textContent = 'Could not save: ' + err.message;
+      }
+    };
+  } catch(err){
+    section.innerHTML = `<h2>Passkey Sign-In</h2><div class="msg err">Could not load settings: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
 function renderAdminToolsView(){
   const sub = document.getElementById('adminSubPanel');
   sub.innerHTML = `
@@ -7622,7 +7984,12 @@ function renderAdminToolsView(){
       </div>
       <div class="msg" id="revokeAdminResult"></div>
     </div>
+    <div class="subsection" id="passkeyFeatureConfigSection">
+      <h2>Passkey Sign-In</h2>
+      <div class="format-help">Loading current settings…</div>
+    </div>
   `;
+  renderPasskeyFeatureConfigSection();
   document.getElementById('decodeWatermarkBtn').onclick = ()=>{
     document.getElementById('watermarkResult').textContent = decodeWatermark(document.getElementById('watermarkInput').value, adminData.profiles);
   };
