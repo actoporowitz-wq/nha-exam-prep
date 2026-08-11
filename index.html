@@ -5065,18 +5065,24 @@ async function handleAuthSubmit(){
   }
 }
 
-/* No Turnstile/CAPTCHA token needed here, unlike handleAuthSubmit's other
-   branches -- signInWithPasskey() doesn't take one, and the WebAuthn
-   ceremony itself (a real hardware/biometric prompt, phishing-resistant by
-   design) is already a much stronger bot-resistance signal than a CAPTCHA
-   checkbox. onAuthStateChange's SIGNED_IN handler takes it from here on
-   success, same as the password path. */
+/* CORRECTION: signInWithPasskey() DOES need a Turnstile token, same as
+   handleAuthSubmit's other branches -- an earlier version of this comment
+   assumed the WebAuthn ceremony's own phishing-resistance made a CAPTCHA
+   redundant here, but Supabase's CAPTCHA setting is project-wide across
+   every Auth endpoint (see the standing note on handleAuthSubmit's forgot-
+   password branch), including /auth/v1/passkeys/authentication/options --
+   confirmed live via a real "captcha protection: request disallowed (no
+   captcha_token found)" error before this fix. onAuthStateChange's
+   SIGNED_IN handler takes it from here on success, same as the password
+   path. */
 async function handlePasskeySignIn(){
   authError = '';
   const btn = document.getElementById('authPasskeyBtn');
   if(btn) btn.disabled = true;
   try{
-    const { error } = await supabaseClient.auth.signInWithPasskey();
+    const turnstileToken = (window.turnstile && turnstileWidgetId!==null) ? window.turnstile.getResponse(turnstileWidgetId) : null;
+    if(!turnstileToken){ throw new Error('Please complete the CAPTCHA challenge.'); }
+    const { error } = await supabaseClient.auth.signInWithPasskey({ options: { captchaToken: turnstileToken } });
     if(error) throw error;
   } catch(err){
     authError = passkeyErrorMessage(err);
