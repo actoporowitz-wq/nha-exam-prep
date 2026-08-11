@@ -1413,6 +1413,12 @@ if('serviceWorker' in navigator){
   }
   .auth-brand{display:flex;align-items:center;gap:10px;font-family:var(--font-display);font-weight:800;font-size:1.2rem;letter-spacing:-.02em;margin-bottom:26px;color:var(--ink);}
   .auth-brand .mark{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,#8FA6FF,#5B6BFF);display:flex;align-items:center;justify-content:center;}
+  /* Sits between the password form and the passkey sign-in button -- a
+     plain centered "or" with a rule on each side, same shape most auth
+     screens use for this, kept minimal since it's just separating two
+     equally-valid ways to do the same thing rather than promoting one. */
+  .auth-divider{display:flex;align-items:center;gap:10px;max-width:340px;margin:14px 0;font-family:system-ui,sans-serif;font-size:.78rem;color:var(--muted);}
+  .auth-divider::before,.auth-divider::after{content:'';flex:1;height:1px;background:var(--line);}
 
   /* Auth form inputs had no styling anywhere -- raw browser-default text
      fields (inset border, Arial, the works), clashing hard with the rest
@@ -1566,6 +1572,7 @@ if('serviceWorker' in navigator){
         <button class="settings-menu-btn open-feedback-btn" type="button" style="margin-top:10px;"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5h15a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H10l-4 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></svg>Send feedback</button>
         <div class="settings-label" style="margin-top:12px;">Account</div>
         <div class="settings-account-email"></div>
+        <button class="settings-menu-btn account-passkeys-btn" type="button" style="display:none;">Passkeys</button>
         <button class="settings-menu-btn account-signout-btn" type="button">Sign Out</button>
         <button class="settings-menu-btn account-delete-btn" type="button" style="color:#FB7185;">Delete Account</button>
       </div>
@@ -1591,6 +1598,7 @@ if('serviceWorker' in navigator){
     <button class="open-feedback-btn" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5h15a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H10l-4 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></svg>Send feedback</button>
     <div class="settings-label" style="padding:10px 10px 2px;">Account</div>
     <div class="settings-account-email" style="padding:0 10px 4px;"></div>
+    <button class="account-passkeys-btn" type="button" style="display:none;">Passkeys</button>
     <button class="account-signout-btn" type="button">Sign Out</button>
     <button class="account-delete-btn" type="button" style="color:#FB7185;">Delete Account</button>
   </div>
@@ -3162,7 +3170,8 @@ const ICONS = {
   chevronDown: '<polyline points="6,9 12,15 18,9"/>',
   send: '<line x1="4" y1="20" x2="20" y2="4"/><polyline points="9,4 20,4 20,15"/>',
   pin: '<path d="M8 4h8v5l-4 3-4-3z"/><line x1="12" y1="12" x2="12" y2="21"/>',
-  play: '<path d="M8 5l11 7-11 7z"/>'
+  play: '<path d="M8 5l11 7-11 7z"/>',
+  key: '<circle cx="7.5" cy="15.5" r="4"/><line x1="10.5" y1="12.5" x2="20" y2="3"/><line x1="16" y1="7" x2="19" y2="10"/><line x1="13" y1="10" x2="15.5" y2="12.5"/>'
 };
 function icon(name, opts){
   opts = opts || {};
@@ -4732,7 +4741,48 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
    and localhost in the Cloudflare dashboard. */
 const TURNSTILE_SITE_KEY = '0x4AAAAAAD2sW9Vf3k0VKwOZ';
 
-const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+/* Passkey (WebAuthn) sign-in is a Supabase Auth beta feature as of this
+   writing -- the API surface (registerPasskey/signInWithPasskey/passkey.*)
+   only exists on the client at all once this opt-in flag is set, and only
+   actually works once the project has Passkeys enabled with a matching
+   Relying Party ID/Origins in the Supabase dashboard (Authentication →
+   Passkeys). The flag is harmless to leave on if the dashboard side isn't
+   configured yet -- calls just fail with a clear passkey_disabled error
+   instead of the methods not existing. */
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { experimental: { passkey: true } }
+});
+/* Feature-detect WebAuthn itself (not Supabase's own opt-in above) -- gates
+   whether any passkey UI renders at all. A browser/device with no
+   PublicKeyCredential support (or a WebView missing it, same class of gap
+   as this app's Turnstile-in-WebView workaround for the native Android app)
+   would otherwise show buttons that fail every time they're clicked. */
+const PASSKEYS_SUPPORTED = typeof window.PublicKeyCredential !== 'undefined';
+/* Shared across the sign-in button and the Settings "Passkeys" dialog --
+   the dashboard/API error codes are the same in both places (see
+   https://supabase.com/docs/guides/auth/passkeys), just reached via
+   different user actions. */
+function passkeyErrorMessage(error){
+  const code = error && (error.code || (error.context && error.context.code));
+  const byCode = {
+    passkey_disabled: 'Passkeys aren\'t turned on for this site yet.',
+    too_many_passkeys: 'You\'ve reached the limit on how many passkeys can be saved to this account.',
+    webauthn_credential_exists: 'That passkey is already registered.',
+    webauthn_credential_not_found: 'That passkey isn\'t registered with this account.',
+    webauthn_challenge_not_found: 'That passkey request expired -- please try again.',
+    webauthn_challenge_expired: 'That passkey request expired -- please try again.',
+    webauthn_verification_failed: 'Couldn\'t verify that passkey -- please try again.',
+    email_not_confirmed: 'Please confirm your email before signing in.',
+    phone_not_confirmed: 'Please confirm your phone number before signing in.',
+    user_banned: 'This account has been suspended.',
+  };
+  if(code && byCode[code]) return byCode[code];
+  // NotAllowedError is what the browser itself throws (not a Supabase error
+  // object) when the user cancels the native passkey prompt or it times out
+  // -- worth a specific, calmer message rather than a raw browser error.
+  if(error && error.name === 'NotAllowedError') return 'Passkey request was cancelled.';
+  return (error && error.message) || 'Something went wrong with that passkey request.';
+}
 
 /* Best-effort client error logging -- the only way to learn about a
    production JS error today is the affected person describing it, or
@@ -4863,6 +4913,12 @@ function renderAuthView(){
         <div class="cf-turnstile" id="turnstileWidget"></div>
         <button class="btn btn-primary" id="authSubmitBtn">Sign In</button>
       </div>
+      ${PASSKEYS_SUPPORTED ? `
+        <div class="auth-divider">or</div>
+        <div style="max-width:340px;">
+          <button class="btn btn-ghost" id="authPasskeyBtn" type="button" style="width:100%;">${icon('key')}Sign in with a passkey</button>
+        </div>
+      ` : ''}
       <div class="auth-links-row" style="margin-top:14px;font-family:system-ui,sans-serif;font-size:.85rem;display:flex;gap:16px;flex-wrap:wrap;">
         <button class="text-link" id="goSignupBtn">Request early access</button>
         <button class="text-link" id="goForgotBtn">Forgot password?</button>
@@ -4934,6 +4990,8 @@ function renderAuthView(){
   if(goForgot) goForgot.onclick = ()=>{ authScreen='forgot'; authError=''; authMessage=''; renderAuthView(); };
   const submitBtn = document.getElementById('authSubmitBtn');
   if(submitBtn) submitBtn.onclick = handleAuthSubmit;
+  const passkeyBtn = document.getElementById('authPasskeyBtn');
+  if(passkeyBtn) passkeyBtn.onclick = handlePasskeySignIn;
 }
 
 async function handleAuthSubmit(){
@@ -5008,6 +5066,109 @@ async function handleAuthSubmit(){
   }
 }
 
+/* No Turnstile/CAPTCHA token needed here, unlike handleAuthSubmit's other
+   branches -- signInWithPasskey() doesn't take one, and the WebAuthn
+   ceremony itself (a real hardware/biometric prompt, phishing-resistant by
+   design) is already a much stronger bot-resistance signal than a CAPTCHA
+   checkbox. onAuthStateChange's SIGNED_IN handler takes it from here on
+   success, same as the password path. */
+async function handlePasskeySignIn(){
+  authError = '';
+  const btn = document.getElementById('authPasskeyBtn');
+  if(btn) btn.disabled = true;
+  try{
+    const { error } = await supabaseClient.auth.signInWithPasskey();
+    if(error) throw error;
+  } catch(err){
+    authError = passkeyErrorMessage(err);
+    renderAuthView();
+  }
+}
+
+/* Settings -> "Passkeys" -- lets a signed-in user add a passkey to their
+   account (registerPasskey(), a WebAuthn ceremony run right here, not a
+   separate screen) and see/remove the ones they've already added
+   (auth.passkey.list()/.delete()). Same dialog-overlay/dialog-card pattern
+   as openAiAccountOverrideDialog and the rest of this app's modals. Only
+   ever reachable when PASSKEYS_SUPPORTED gated the button that opens it. */
+async function openPasskeysDialog(){
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.innerHTML = `
+    <div class="dialog-card scrollable" style="max-width:420px;">
+      <h3 style="margin:0 0 4px;">Passkeys</h3>
+      <div class="format-help">Sign in with Face ID, Touch ID, Windows Hello, or a security key instead of typing your password. Passkeys are a newer, experimental feature -- your password still works as before.</div>
+      <div id="passkeysListWrap" style="margin-top:14px;"><div class="format-help">Loading…</div></div>
+      <div class="msg" id="passkeysMsg"></div>
+      <div class="dialog-actions" style="margin-top:16px;">
+        <button class="btn btn-ghost" id="passkeysCloseBtn">Done</button>
+        <button class="btn btn-primary" id="passkeysAddBtn">${icon('plus')}Add a passkey</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = ()=> overlay.remove();
+  overlay.onclick = (e)=>{ if(e.target === overlay) close(); };
+  overlay.querySelector('#passkeysCloseBtn').onclick = close;
+
+  async function refreshList(){
+    const wrap = overlay.querySelector('#passkeysListWrap');
+    if(!wrap) return; // dialog closed mid-fetch
+    try{
+      const { data, error } = await supabaseClient.auth.passkey.list();
+      if(error) throw error;
+      const passkeys = data || [];
+      wrap.innerHTML = passkeys.length ? passkeys.map(pk => `
+        <div class="lib-row">
+          <div class="lib-info">
+            <div class="lib-title">${escapeHtml(pk.friendly_name || 'Passkey')}</div>
+            <div class="lib-meta">Added ${new Date(pk.created_at).toLocaleDateString()}</div>
+          </div>
+          <button class="link-btn danger" data-remove-passkey="${escapeHtml(pk.id)}">Remove</button>
+        </div>
+      `).join('') : `<div class="format-help">No passkeys saved yet.</div>`;
+      wrap.querySelectorAll('[data-remove-passkey]').forEach(btn=>{
+        btn.onclick = ()=>{
+          const passkeyId = btn.dataset.removePasskey;
+          showConfirmDialog('Remove this passkey? You\'ll need another way to sign in on whatever device used it.', async ()=>{
+            const msgEl = overlay.querySelector('#passkeysMsg');
+            try{
+              const { error: delErr } = await supabaseClient.auth.passkey.delete({ passkeyId });
+              if(delErr) throw delErr;
+              if(msgEl) msgEl.className = 'msg';
+              await refreshList();
+            } catch(err){
+              if(msgEl){ msgEl.className = 'msg err'; msgEl.textContent = passkeyErrorMessage(err); }
+            }
+          }, 'Remove', true);
+        };
+      });
+    } catch(err){
+      wrap.innerHTML = `<div class="msg err">${escapeHtml(passkeyErrorMessage(err))}</div>`;
+    }
+  }
+
+  overlay.querySelector('#passkeysAddBtn').onclick = async ()=>{
+    const addBtn = overlay.querySelector('#passkeysAddBtn');
+    const msgEl = overlay.querySelector('#passkeysMsg');
+    addBtn.disabled = true;
+    if(msgEl){ msgEl.className = 'msg'; msgEl.textContent = ''; }
+    try{
+      const { error } = await supabaseClient.auth.registerPasskey();
+      if(error) throw error;
+      await refreshList();
+    } catch(err){
+      if(msgEl){ msgEl.className = 'msg err'; msgEl.textContent = passkeyErrorMessage(err); }
+    } finally{
+      addBtn.disabled = false;
+    }
+  };
+
+  refreshList();
+}
+
 function renderStatusBar(){
   if(appMode !== 'online' || !currentUser){
     statusBar.innerHTML = '';
@@ -5023,6 +5184,13 @@ function renderStatusBar(){
   document.querySelectorAll('.settings-account-email').forEach(el=> el.textContent = currentUser.email);
   document.querySelectorAll('.account-signout-btn').forEach(btn=> btn.onclick = ()=>{ closeAccountMenus(); handleSignOut(); });
   document.querySelectorAll('.account-delete-btn').forEach(btn=> btn.onclick = ()=>{ closeAccountMenus(); handleDeleteAccount(); });
+  // Hidden by default in the static markup (see PASSKEYS_SUPPORTED) -- only
+  // shown once there's a signed-in account to manage passkeys for AND the
+  // browser can actually do WebAuthn at all.
+  document.querySelectorAll('.account-passkeys-btn').forEach(btn=>{
+    btn.style.display = PASSKEYS_SUPPORTED ? '' : 'none';
+    btn.onclick = ()=>{ closeAccountMenus(); openPasskeysDialog(); };
+  });
   tabProgress.style.display = '';
   syncMobileNavVisibility();
 }
