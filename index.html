@@ -1215,6 +1215,15 @@ if('serviceWorker' in navigator){
 
   .main-content{flex:1;min-width:0;}
   .main-content .wrap{max-width:820px;}
+  /* Progress specifically, not every view -- 820px is a deliberate cap for
+     views built around reading (quiz questions, flashcard text), but
+     Progress is a grid/list of compact cards with no comparable line-length
+     concern, and the fixed cap just wastes space on a wide monitor instead
+     (confirmed live: 1920px viewport, content stopping under half the
+     screen with the rest sitting empty, most noticeable right at the top
+     where the eye lands first). Wider, not unbounded, so cards don't end
+     up spread unnecessarily thin on an ultrawide display either. */
+  body[data-view="progress"] .main-content .wrap{max-width:1200px;}
 
   /* The quiz "Choose a test to begin" empty state and the flashcard
      homescreen (no deck loaded yet) both used to just sit at the top of
@@ -2066,6 +2075,11 @@ const VIEW_FOR_PATH = { '/': 'quiz', '/library': 'library', '/flashcards': 'flas
 
 function showView(v, opts){
   opts = opts || {};
+  /* Tracks the active view on <body> so view-specific CSS can key off it
+     without a resize listener or per-view wrapper element -- first use is
+     .wrap's max-width below, but this is generically useful for any future
+     view-specific style. */
+  document.body.dataset.view = v;
   quizView.style.display = v==='quiz' && !submitted ? 'block':'none';
   resultsView.style.display = v==='quiz' && submitted ? 'block':'none';
   /* "Exam Practice Tool" / exam title+question-count / "No test loaded"
