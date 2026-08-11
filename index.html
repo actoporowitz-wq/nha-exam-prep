@@ -914,17 +914,35 @@ if('serviceWorker' in navigator){
   .stat-pill .icon{color:var(--accent);flex-shrink:0;}
   .stat-pill strong{font-size:.95rem;color:var(--ink);font-weight:700;}
   .stat-pill .stat-label{font-size:.78rem;color:var(--muted);}
-  /* Progress toolbar: stat pills + sort dropdown + AI-feedback button(s) all
-     share one flex-wrap row instead of stacking as separate rows -- used to
-     be three: stat-row, a standalone "Get AI Feedback" row, and a sort +
-     Grid/Stacked-toggle row, each full-width chrome before any real content
-     (worse on desktop, which has plenty of horizontal room to combine them
-     instead). The Grid/Stacked toggle is gone entirely (see the round-grid
-     comment above), which is what freed the sort control to move in here
-     rather than needing a row of its own. */
+  /* Progress toolbar: stat pills + sort dropdown + Grid/Stacked toggle
+     (desktop only, see the round-grid comment above) + AI-feedback
+     button(s) all share one flex-wrap row instead of stacking as separate
+     rows -- used to be up to four: stat-row, a standalone "Get AI Feedback"
+     row, and a sort + toggle row, each full-width chrome before any real
+     content (worse on desktop, which has plenty of horizontal room to
+     combine them instead). */
   .progress-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:14px;}
   .progress-toolbar .stat-row{margin-bottom:0;}
   .progress-toolbar-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-family:system-ui,sans-serif;font-size:.85rem;color:var(--muted);}
+  /* Same bug class already fixed once before for flashcards' mode-switch +
+     toggle row (see the .study-mode-switch margin-bottom note elsewhere in
+     this file) -- .view-mode-switch reuses .study-mode-switch's own
+     margin-bottom:14px, meant for when that pill sits standalone above
+     content, not sharing a row with other controls. Left un-zeroed here,
+     it inflates the toggle's margin box and throws off align-items:center
+     against the Sort dropdown/Get AI Feedback button next to it (confirmed
+     via measurement: toggle top=195 vs dropdown top=200, a real 5px
+     vertical offset, not a rendering artifact). The three controls also had
+     three different natural heights (dropdown 44px fixed, toggle ~40px,
+     link-btn ~33px) -- unified to the dropdown's existing 44px so the row
+     reads as one deliberate control cluster instead of three mismatched
+     pieces. */
+  .progress-toolbar-controls .view-mode-switch{margin-bottom:0;}
+  .progress-toolbar-controls .dd-trigger,
+  .progress-toolbar-controls .view-mode-switch,
+  .progress-toolbar-controls .link-btn{
+    height:44px;box-sizing:border-box;
+  }
   .subsection{border-top:1px solid var(--line);margin-top:18px;padding-top:18px;}
   .lib-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;}
   .lib-info{display:flex;flex-direction:column;gap:2px;}
