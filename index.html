@@ -1413,12 +1413,6 @@ if('serviceWorker' in navigator){
   }
   .auth-brand{display:flex;align-items:center;gap:10px;font-family:var(--font-display);font-weight:800;font-size:1.2rem;letter-spacing:-.02em;margin-bottom:26px;color:var(--ink);}
   .auth-brand .mark{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,#8FA6FF,#5B6BFF);display:flex;align-items:center;justify-content:center;}
-  /* Sits between the password form and the passkey sign-in button -- a
-     plain centered "or" with a rule on each side, same shape most auth
-     screens use for this, kept minimal since it's just separating two
-     equally-valid ways to do the same thing rather than promoting one. */
-  .auth-divider{display:flex;align-items:center;gap:10px;max-width:340px;margin:14px 0;font-family:system-ui,sans-serif;font-size:.78rem;color:var(--muted);}
-  .auth-divider::before,.auth-divider::after{content:'';flex:1;height:1px;background:var(--line);}
 
   /* Auth form inputs had no styling anywhere -- raw browser-default text
      fields (inset border, Arial, the works), clashing hard with the rest
@@ -4913,15 +4907,10 @@ function renderAuthView(){
         <div class="cf-turnstile" id="turnstileWidget"></div>
         <button class="btn btn-primary" id="authSubmitBtn">Sign In</button>
       </div>
-      ${PASSKEYS_SUPPORTED ? `
-        <div class="auth-divider">or</div>
-        <div style="max-width:340px;">
-          <button class="btn btn-ghost" id="authPasskeyBtn" type="button" style="width:100%;">${icon('key')}Sign in with a passkey</button>
-        </div>
-      ` : ''}
       <div class="auth-links-row" style="margin-top:14px;font-family:system-ui,sans-serif;font-size:.85rem;display:flex;gap:16px;flex-wrap:wrap;">
         <button class="text-link" id="goSignupBtn">Request early access</button>
         <button class="text-link" id="goForgotBtn">Forgot password?</button>
+        ${PASSKEYS_SUPPORTED ? `<button class="text-link" id="authPasskeyBtn">Sign in with a passkey</button>` : ''}
       </div>
     `;
   } else if(authScreen === 'signup'){
