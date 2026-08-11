@@ -5912,15 +5912,32 @@ function renderProgressPanel(){
   if(!d.exams.length){
     html += `<div class="format-help">No attempts yet — start an exam from the Test Library.</div>`;
   }
+  /* Grid mode: one continuous grid across ALL exams, not one grid per
+     exam subsection -- an account where most exams have just 1 round
+     (common once you've worked through most of the library) used to mean
+     every "grid" only ever had a single item in it, reading as a plain
+     stacked list of boxes rather than an actual grid, even though the CSS
+     itself was correctly laying out multi-item sections. Confirmed via a
+     real account's data (13 exams, mostly 1 round each) before deciding to
+     restructure rather than tweak spacing. User's explicit choice over the
+     alternative (keep per-exam headers, just cap single-item row width) --
+     this one actually packs rounds side by side regardless of how many any
+     one exam has. Each card names its own exam directly (no heading to
+     group under anymore); Stacked mode keeps the per-exam headers/grouping
+     as before, unaffected -- it doesn't have this problem since a thin row
+     doesn't look empty/isolated the way a padded card does. */
+  let gridHtml = '';
   sortProgressExams(d.exams, progressSortMode).forEach(ex=>{
     /* Test-level cue, separate from the per-round "Mastered" badge below --
        lets someone scanning the whole list see which tests are done
        without expanding each one. A test counts once any of its rounds
        has hit the cumulative mastery threshold, even if a newer round for
-       the same test is still in progress. */
-    const examMastered = ex.rounds.some(r=>r.status==='mastered');
-    html += `<div class="subsection"><h2>${escapeHtml(ex.examTitle)}${examMastered ? ` <span class="mastery-badge" title="Mastered — reached 98%+ cumulative on at least one round">${icon('check')}Mastered</span>` : ''}</h2>`;
-    let gridHtml = '';
+       the same test is still in progress. Stacked-only now -- grid mode
+       has no per-exam heading for this badge to sit next to. */
+    if(effectiveViewMode !== 'grid'){
+      const examMastered = ex.rounds.some(r=>r.status==='mastered');
+      html += `<div class="subsection"><h2>${escapeHtml(ex.examTitle)}${examMastered ? ` <span class="mastery-badge" title="Mastered — reached 98%+ cumulative on at least one round">${icon('check')}Mastered</span>` : ''}</h2>`;
+    }
     ex.rounds.forEach(r=>{
       /* Mastery badge fires only on the round's cumulative funnel score, never a single attempt's raw score */
       const masteryBadge = r.status==='mastered' ? '<span class="lib-badge verified" style="margin-left:8px;">Mastered</span>' : '';
@@ -5953,7 +5970,7 @@ function renderProgressPanel(){
           <div class="round-card ${r.status==='mastered'?'mastered':''} ${r.status==='abandoned'?'abandoned':''}">
             <div class="round-card-top" data-round-toggle="${r.id}">
               <div>
-                <div class="round-card-name">Round ${r.round_number}</div>
+                <div class="round-card-name">${escapeHtml(ex.examTitle)} — Round ${r.round_number}</div>
                 <div class="round-card-tag">${r.status==='mastered'?'Mastered':r.status==='abandoned'?'Abandoned':'In progress'}</div>
               </div>
               ${renderProgressRing(masteredPctNum, r.status==='mastered')}
@@ -5985,9 +6002,9 @@ function renderProgressPanel(){
         if(expanded) html += renderRoundAttemptsHtml(r);
       }
     });
-    if(effectiveViewMode === 'grid') html += `<div class="round-grid">${gridHtml}</div>`;
-    html += `</div>`;
+    if(effectiveViewMode !== 'grid') html += `</div>`;
   });
+  if(effectiveViewMode === 'grid' && gridHtml) html += `<div class="round-grid">${gridHtml}</div>`;
   progressPanel.innerHTML = html;
   wireProgressAiFeedbackBlock();
   wireDropdown('progressSort', (value)=>{ progressSortMode = value; renderProgressPanel(); }, renderProgressPanel);
