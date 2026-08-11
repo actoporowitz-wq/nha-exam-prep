@@ -933,8 +933,14 @@ if('serviceWorker' in navigator){
      rows -- used to be up to four: stat-row, a standalone "Get AI Feedback"
      row, and a sort + toggle row, each full-width chrome before any real
      content (worse on desktop, which has plenty of horizontal room to
-     combine them instead). */
-  .progress-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:14px;}
+     combine them instead). justify-content:flex-start, not space-between --
+     space-between looked fine at the old 820px cap but once Progress's own
+     .wrap got widened to 1200px (see that CSS elsewhere), stretching the
+     stat pills and the sort/toggle/AI-feedback controls to opposite edges
+     left a large, oddly empty gap in the middle of the row. flex-start
+     keeps both groups sitting together on the left with their normal gap,
+     same as every other row in this panel. */
+  .progress-toolbar{display:flex;align-items:center;justify-content:flex-start;gap:14px;flex-wrap:wrap;margin-bottom:14px;}
   .progress-toolbar .stat-row{margin-bottom:0;}
   .progress-toolbar-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-family:system-ui,sans-serif;font-size:.85rem;color:var(--muted);}
   /* Same bug class already fixed once before for flashcards' mode-switch +
@@ -5615,7 +5621,7 @@ window.addEventListener('beforeunload', (e)=>{
 let progressData = null;
 let progressExpandedRoundId = null;
 let progressAttemptView = null; // { questions, answersMap } while drilled into one attempt's review
-let progressSortMode = 'name'; // 'name' | 'last' | 'first'
+let progressSortMode = 'name_asc'; // 'name_asc' | 'name_desc' | 'last' | 'first'
 /* Grid (card + ring per round) vs Stacked (compact list) -- user-facing
    choice on desktop, where there's room to spare either way. On mobile this
    is always forced to 'grid' regardless of what's stored here (see the
@@ -5640,9 +5646,14 @@ function sortProgressExams(exams, mode){
   const sorted = exams.slice();
   if(mode === 'last') sorted.sort((a,b)=> b.lastAttemptAt - a.lastAttemptAt);
   else if(mode === 'first') sorted.sort((a,b)=> a.firstAttemptAt - b.firstAttemptAt);
-  /* 'name': numeric-aware so "Exam 2" sorts before "Exam 11" -- a plain
+  /* Name: numeric-aware so "Exam 2" sorts before "Exam 11" -- a plain
      string sort would otherwise order every exam past 9 lexicographically
-     ("Exam 1", "Exam 11", "Exam 12", ..., "Exam 2", "Exam 9"). */
+     ("Exam 1", "Exam 11", "Exam 12", ..., "Exam 2", "Exam 9"). Split into
+     explicit ascending/descending options per direct user request (used to
+     be a single "Sort: Name" entry, always ascending, with no way to
+     reverse it) -- same comparator, just swapped operands for descending
+     rather than a second near-duplicate sort implementation. */
+  else if(mode === 'name_desc') sorted.sort((a,b)=> b.examTitle.localeCompare(a.examTitle, undefined, { numeric: true, sensitivity: 'base' }));
   else sorted.sort((a,b)=> a.examTitle.localeCompare(b.examTitle, undefined, { numeric: true, sensitivity: 'base' }));
   return sorted;
 }
@@ -5912,7 +5923,8 @@ function renderProgressPanel(){
       </div>
       <div class="progress-toolbar-controls">
         ${d.exams.length ? renderDropdown({ id:'progressSort', ariaLabel:'Sort progress list', selected: progressSortMode, options:[
-          {value:'name', label:'Sort: Name'},
+          {value:'name_asc', label:'Sort: Name (A–Z)'},
+          {value:'name_desc', label:'Sort: Name (Z–A)'},
           {value:'last', label:'Sort: Last Attempt'},
           {value:'first', label:'Sort: First Attempt'}
         ]}) : ''}
