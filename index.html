@@ -933,14 +933,17 @@ if('serviceWorker' in navigator){
      rows -- used to be up to four: stat-row, a standalone "Get AI Feedback"
      row, and a sort + toggle row, each full-width chrome before any real
      content (worse on desktop, which has plenty of horizontal room to
-     combine them instead). justify-content:flex-start, not space-between --
-     space-between looked fine at the old 820px cap but once Progress's own
-     .wrap got widened to 1200px (see that CSS elsewhere), stretching the
-     stat pills and the sort/toggle/AI-feedback controls to opposite edges
-     left a large, oddly empty gap in the middle of the row. flex-start
-     keeps both groups sitting together on the left with their normal gap,
-     same as every other row in this panel. */
-  .progress-toolbar{display:flex;align-items:center;justify-content:flex-start;gap:14px;flex-wrap:wrap;margin-bottom:14px;}
+     combine them instead). justify-content:space-between -- an earlier pass
+     tried flex-start (keeping both groups left-packed) specifically to avoid
+     a gap opening up in the row, but at Progress's own 1200px .wrap width
+     that just relocated the empty space to a large blank strip along the
+     whole right edge instead, which read worse (a "why does this row stop
+     partway across the screen" dead zone) than a single gap between the two
+     control clusters. space-between pins the stat pills to the left edge and
+     the sort/toggle/AI-feedback cluster to the right edge, closing that
+     right-edge gap; the mobile block below makes each cluster full-width on
+     its own line instead, where left/right edges are the same thing. */
+  .progress-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:14px;}
   .progress-toolbar .stat-row{margin-bottom:0;}
   .progress-toolbar-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-family:system-ui,sans-serif;font-size:.85rem;color:var(--muted);}
   /* Same bug class already fixed once before for flashcards' mode-switch +
@@ -969,6 +972,24 @@ if('serviceWorker' in navigator){
     height:44px;box-sizing:border-box;
   }
   .progress-toolbar-controls .view-mode-switch button{font-size:.85rem;}
+  /* Mobile dead-space fix: below 900px (same breakpoint isMobileViewport
+     uses -- Grid/Stacked toggle is hidden entirely there, see renderProgressPanel),
+     .stat-row and .progress-toolbar-controls each wrap onto their own line
+     since there's no longer room for both side by side, but as plain
+     flex-wrap items they only claim as much width as their content needs --
+     leaving a large blank strip to the right of a narrow "15 exams started"
+     pill or a narrow "Sort: Name" dropdown, on an otherwise-empty line. Forcing
+     each group to width:100% (so it fills its own line) and stretching its
+     children to share that width evenly closes that gap without changing
+     anything about desktop, where both groups already share one row. */
+  @media (max-width:900px){
+    .progress-toolbar .stat-row,
+    .progress-toolbar-controls{ width:100%; }
+    .progress-toolbar .stat-row .stat-pill{ flex:1; justify-content:center; }
+    .progress-toolbar-controls .dd{ flex:1 1 140px; }
+    .progress-toolbar-controls .dd-trigger{ width:100%; justify-content:space-between; }
+    .progress-toolbar-controls .link-btn{ flex:1 1 140px; justify-content:center; }
+  }
   .subsection{border-top:1px solid var(--line);margin-top:18px;padding-top:18px;}
   .lib-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;}
   .lib-info{display:flex;flex-direction:column;gap:2px;}
@@ -3280,7 +3301,12 @@ async function loadFlashOnlineAttempts(){
         totalQuestions: a.total_questions
       };
     }).sort((a,b)=> a.examTitle.localeCompare(b.examTitle) || a.roundNumber - b.roundNumber || a.attemptNumber - b.attemptNumber);
-    flashSelectedAttemptIds = new Set(flashOnlineAttempts.map(a=>a.attemptId));
+    // Defaults to none selected -- picking specific attempts is the whole
+    // point of this picker (vs. "Add all missed questions" elsewhere), and
+    // starting fully pre-checked meant most users' first action was
+    // deselecting everything they didn't want rather than picking what they
+    // did. "Select all N" is still one click away per-exam.
+    flashSelectedAttemptIds = new Set();
   } catch(err){
     flashOnlineAttempts = [];
     flashProgressMsg = { text: 'Could not load your attempts: ' + err.message, ok:false };
@@ -3546,14 +3572,16 @@ function renderOnlineFlashGeneratorHtml(){
       <span class="txt"><strong>Your missed questions</strong><span>from your most recent attempt in each round — what you're still missing right now</span></span>
       <span class="go">Start →</span>
     </button>
-    <button class="link-btn" id="flashHomeMenuToggleBtn" type="button">${flashHomeMenuOpen ? icon('close')+'Hide other options' : icon('more')+'More ways to build a set'}</button>
+    <div class="btn-row" style="margin-top:10px;">
+      <button class="link-btn" id="flashHomeMenuToggleBtn" type="button">${flashHomeMenuOpen ? icon('close')+'Hide other options' : icon('more')+'More ways to build a set'}</button>
+      <button class="link-btn" id="flashSavedSetsToggleBtn" type="button">${flashSavedSetsOpen ? icon('close')+'Hide saved sets' : icon('save')+`Saved sets${savedCount ? ` (${savedCount})` : ''}`}</button>
+    </div>
     ${flashHomeMenuOpen ? `
     <div class="set-menu" style="margin-top:10px;">
       <button id="flashGenerateAllBtn" type="button">${icon('funnel')}All-time misses</button>
       <button id="flashGenerateFlaggedBtn" type="button">${icon('flag')}Flagged questions</button>
       <button id="flashTogglePickBtn" type="button">${flashPickOpen ? icon('close')+'Hide attempt picker' : icon('library')+'Pick specific attempts'}</button>
       <button id="flashNewCustomSetBtn" type="button">${flashLibPickOpen ? icon('close')+'Cancel' : icon('plus')+'Build your own'}</button>
-      <button id="flashSavedSetsToggleBtn" type="button">${flashSavedSetsOpen ? icon('close')+'Hide saved sets' : icon('save')+`Saved sets${savedCount ? ` (${savedCount})` : ''}`}</button>
     </div>
     ` : ''}
   ` : `
