@@ -413,15 +413,22 @@ if('serviceWorker' in navigator){
   .dd-menu button:hover{background:var(--surface-2);}
   .dd-menu button[aria-selected="true"]{background:var(--accent-soft);color:var(--accent);font-weight:600;}
 
-  /* Progress: one round-card per round (ring + name/status side by side,
-     meta line, actions row), auto-filling into columns on wide screens and
-     a single column on mobile via the same minmax(220px,1fr) track --
-     deliberately the ONLY layout now. A separate "Stacked" list mode used
-     to exist behind a toggle, but on mobile its flex-wrap row (title+bar
-     stacked over a button-group that itself wrapped onto its own lines)
-     produced a squished, everything-on-top-of-itself result -- removed
-     rather than fixed, since this card layout already handles both narrow
-     and wide viewports cleanly without needing a second mode to maintain. */
+  /* Progress: a visual bar for each round's funnel completion, alongside
+     the existing percentage text -- same underlying numbers already
+     computed (masteredSoFar/originalTotal), just given a glance-able
+     visual instead of text-only. Used by the Stacked list view only. */
+  .funnel-bar{height:6px;background:var(--line);border-radius:4px;overflow:hidden;margin:8px 0 2px;}
+  .funnel-bar-fill{height:100%;background:var(--accent);}
+
+  /* Progress grid view -- card-per-round alternative to the stacked .lib-row
+     list above, toggleable on desktop (see .view-mode-switch). Mobile always
+     forces grid regardless of the stored preference (see isMobileViewport in
+     renderProgressPanel) -- Stacked's flex-wrap row (title+bar stacked over
+     a button-group that itself wrapped onto its own lines) produced a
+     squished, everything-on-top-of-itself result at phone widths, but the
+     desktop version was never broken and the user explicitly wants the
+     choice kept there. An earlier pass removed the toggle for ALL viewports,
+     which was a mis-scoped over-correction -- restored for desktop only. */
   .round-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:8px;}
   .round-card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;}
   .round-card.mastered{border-color:var(--good);}
@@ -440,6 +447,7 @@ if('serviceWorker' in navigator){
   .round-card-meta{font-family:system-ui,sans-serif;font-size:.76rem;color:var(--muted);margin-bottom:12px;}
   .round-card-actions{display:flex;gap:8px;flex-wrap:wrap;}
   .round-card-actions .btn, .round-card-actions .link-btn{flex:1;justify-content:center;text-align:center;}
+  .view-mode-switch{margin-left:auto;}
 
   /* Loading skeletons -- shape-matched placeholders for the Progress panel
      (the one real, frequently-hit loading gap; Admin's plain "Loading…"
@@ -5561,6 +5569,16 @@ let progressData = null;
 let progressExpandedRoundId = null;
 let progressAttemptView = null; // { questions, answersMap } while drilled into one attempt's review
 let progressSortMode = 'name'; // 'name' | 'last' | 'first'
+/* Grid (card + ring per round) vs Stacked (compact list) -- user-facing
+   choice on desktop, where there's room to spare either way. On mobile this
+   is always forced to 'grid' regardless of what's stored here (see the
+   isMobileViewport check in renderProgressPanel) -- Stacked's flex-wrap row
+   (title+bar stacked over a button-group that itself wrapped onto its own
+   lines) produced a squished, everything-on-top-of-itself result at phone
+   widths. An earlier pass removed this toggle entirely for ALL viewports,
+   which was a mis-scoped over-correction -- the user only asked for mobile,
+   and explicitly wanted the desktop choice back afterward. */
+let progressViewMode = localStorage.getItem('nha_progress_view_mode') === 'stacked' ? 'stacked' : 'grid';
 // AI progress feedback (Feature 3 of the original AI roadmap, corrected
 // scope) -- on-demand, inline in the main Progress screen, not a separate
 // sub-view. No persistence across visits: renderProgressView() clears it
@@ -5831,6 +5849,13 @@ function renderProgressPanel(){
   if(progressAttemptView){ renderProgressAttemptDetail(); return; }
   const d = progressData;
   const resumable = d.exams.length ? findMostRecentResumableRound(d) : null;
+  /* Same 900px breakpoint the rest of the app already uses for mobile vs
+     desktop behavior (see scrollFlashcardIntoView etc.) -- mobile always
+     gets the round-card grid regardless of a stored 'stacked' preference,
+     since Stacked's mobile layout is the thing that was actually broken;
+     desktop keeps the real user-facing choice via progressViewMode. */
+  const isMobileViewport = window.innerWidth <= 900;
+  const effectiveViewMode = isMobileViewport ? 'grid' : progressViewMode;
   let html = `
     <h1>Progress</h1>
     <div class="progress-toolbar">
@@ -5844,6 +5869,12 @@ function renderProgressPanel(){
           {value:'last', label:'Sort: Last Attempt'},
           {value:'first', label:'Sort: First Attempt'}
         ]}) : ''}
+        ${(d.exams.length && !isMobileViewport) ? `
+          <div class="study-mode-switch view-mode-switch" role="group" aria-label="Progress view">
+            <button type="button" data-progress-view="grid" class="${progressViewMode==='grid'?'active':''}">Grid</button>
+            <button type="button" data-progress-view="stacked" class="${progressViewMode==='stacked'?'active':''}">Stacked</button>
+          </div>
+        ` : ''}
         ${renderProgressAiFeedbackControls()}
       </div>
     </div>
@@ -5872,6 +5903,8 @@ function renderProgressPanel(){
     html += `<div class="subsection"><h2>${escapeHtml(ex.examTitle)}${examMastered ? ` <span class="mastery-badge" title="Mastered — reached 98%+ cumulative on at least one round">${icon('check')}Mastered</span>` : ''}</h2>`;
     let gridHtml = '';
     ex.rounds.forEach(r=>{
+      /* Mastery badge fires only on the round's cumulative funnel score, never a single attempt's raw score */
+      const masteryBadge = r.status==='mastered' ? '<span class="lib-badge verified" style="margin-left:8px;">Mastered</span>' : '';
       const expanded = progressExpandedRoundId === r.id;
       const masteredSoFar = r.original_total - r.funnel_missed_count;
       const masteredPctNum = (masteredSoFar / r.original_total) * 100;
@@ -5896,29 +5929,56 @@ function renderProgressPanel(){
       const latestAttempt = r.attempts.length ? r.attempts.reduce((a,b)=> a.attempt_number > b.attempt_number ? a : b) : null;
       const canContinue = (r.status==='in_progress' || r.status==='abandoned') && latestAttempt &&
         (latestAttempt.status==='in_progress' || (latestAttempt.hasAnswers && r.funnel_missed_count > 0));
-      gridHtml += `
-        <div class="round-card ${r.status==='mastered'?'mastered':''} ${r.status==='abandoned'?'abandoned':''}">
-          <div class="round-card-top" data-round-toggle="${r.id}">
-            <div>
-              <div class="round-card-name">Round ${r.round_number}</div>
-              <div class="round-card-tag">${r.status==='mastered'?'Mastered':r.status==='abandoned'?'Abandoned':'In progress'}</div>
+      if(effectiveViewMode === 'grid'){
+        gridHtml += `
+          <div class="round-card ${r.status==='mastered'?'mastered':''} ${r.status==='abandoned'?'abandoned':''}">
+            <div class="round-card-top" data-round-toggle="${r.id}">
+              <div>
+                <div class="round-card-name">Round ${r.round_number}</div>
+                <div class="round-card-tag">${r.status==='mastered'?'Mastered':r.status==='abandoned'?'Abandoned':'In progress'}</div>
+              </div>
+              ${renderProgressRing(masteredPctNum, r.status==='mastered')}
             </div>
-            ${renderProgressRing(masteredPctNum, r.status==='mastered')}
+            <div class="round-card-meta">${masteredSoFar} of ${r.original_total} mastered${r.status!=='mastered' ? ` · ${r.original_total - masteredSoFar} left` : ''} · ${r.attempts.length} attempt(s)</div>
+            <div class="round-card-actions">
+              ${canContinue ? `<button class="btn btn-ghost" data-continue-round="${r.id}">Continue</button>` : ''}
+              <button class="link-btn" data-round-toggle="${r.id}">${expanded ? 'Hide' : 'Show'} attempts</button>
+            </div>
+            ${expanded ? renderRoundAttemptsHtml(r) : ''}
           </div>
-          <div class="round-card-meta">${masteredSoFar} of ${r.original_total} mastered${r.status!=='mastered' ? ` · ${r.original_total - masteredSoFar} left` : ''} · ${r.attempts.length} attempt(s)</div>
-          <div class="round-card-actions">
-            ${canContinue ? `<button class="btn btn-ghost" data-continue-round="${r.id}">Continue</button>` : ''}
-            <button class="link-btn" data-round-toggle="${r.id}">${expanded ? 'Hide' : 'Show'} attempts</button>
+        `;
+      } else {
+        html += `
+          <div class="lib-row" style="flex-direction:column;align-items:stretch;">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;width:100%;cursor:pointer;" data-round-toggle="${r.id}">
+              <div class="lib-info" style="flex:1;min-width:220px;">
+                <div class="lib-title">Round ${r.round_number}${masteryBadge}${r.status==='abandoned' ? ' <span class="lib-badge" style="margin-left:8px;">Abandoned</span>' : ''}</div>
+                <div class="funnel-bar"><div class="funnel-bar-fill" style="width:${masteredPct}%;"></div></div>
+                <div class="lib-meta">${masteredPct}% — ${masteredSoFar} of ${r.original_total} mastered so far${r.status!=='mastered' ? ` · ${r.original_total - masteredSoFar} left` : ''} · ${r.attempts.length} attempt(s)</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                ${canContinue ? `<button class="btn btn-ghost" data-continue-round="${r.id}" style="padding:4px 10px;font-size:.8rem;">Continue (Missed Only)</button>` : ''}
+                <span class="link-btn">${expanded ? 'Hide' : 'Show'} attempts</span>
+              </div>
+            </div>
           </div>
-          ${expanded ? renderRoundAttemptsHtml(r) : ''}
-        </div>
-      `;
+        `;
+        if(expanded) html += renderRoundAttemptsHtml(r);
+      }
     });
-    html += `<div class="round-grid">${gridHtml}</div></div>`;
+    if(effectiveViewMode === 'grid') html += `<div class="round-grid">${gridHtml}</div>`;
+    html += `</div>`;
   });
   progressPanel.innerHTML = html;
   wireProgressAiFeedbackBlock();
   wireDropdown('progressSort', (value)=>{ progressSortMode = value; renderProgressPanel(); }, renderProgressPanel);
+  progressPanel.querySelectorAll('[data-progress-view]').forEach(btn=>{
+    btn.onclick = ()=>{
+      progressViewMode = btn.dataset.progressView;
+      localStorage.setItem('nha_progress_view_mode', progressViewMode);
+      renderProgressPanel();
+    };
+  });
   progressPanel.querySelectorAll('[data-round-toggle]').forEach(el=>{
     el.onclick = ()=>{
       const id = el.dataset.roundToggle;
