@@ -352,19 +352,28 @@ if('serviceWorker' in navigator){
      width tap target, description text) already says "tap this" without
      the label, so dropping it here is the fix, not further squeezing. */
   @media (max-width:480px){ .flash-hero .go{display:none;} }
-  /* Progress's own Resume banner, scoped narrowly (not the shared base
-     class -- flashcards' two other .flash-hero buttons sit in a narrower
-     single-column setup screen where the 520px cap is still the right
-     call). Two things fixed here per direct user feedback: (1) the 520px
-     cap left it looking like a leftover narrow box with a large dead gap
-     next to it on a wide desktop screen, when everything else in Progress
-     (toolbar, round cards) already spans the full available width -- removed
-     the cap for this instance. (2) "Continue ->" was a plain colored text
-     label, easy to miss as an actual actionable button even though the
-     whole card is clickable -- given a real filled-pill treatment so it
-     reads as the clear call-to-action it is. */
+  /* Progress's own Resume banner. Two things fixed here per direct user
+     feedback: (1) the 520px cap left it looking like a leftover narrow box
+     with a large dead gap next to it on a wide desktop screen, when
+     everything else in Progress (toolbar, round cards) already spans the
+     full available width -- removed the cap for this instance. (2)
+     "Continue ->" was a plain colored text label, easy to miss as an
+     actual actionable button even though the whole card is clickable --
+     given a real filled-pill treatment so it reads as the clear
+     call-to-action it is. */
   #progressResumeBtn{max-width:none;}
   #progressResumeBtn .go{background:var(--accent);color:var(--accent-ink);padding:9px 16px;border-radius:8px;}
+  /* Flashcards homescreen's two hero buttons ("Your missed questions" /
+     "Build your first set") had the same 520px-cap-next-to-full-width-
+     sibling mismatch as Progress's Resume banner above -- the "More ways to
+     build a set" / "Saved sets" button row right below it has no such cap
+     and spans the whole panel width, so the hero card stopped visibly short
+     of that same right edge, reading as dead space in the upper-right of
+     the panel. Same fix, same reasoning: uncapped here too. Harmless on
+     narrow/mobile screens since the container is already narrower than
+     520px there, so this only changes anything once there's real width to
+     fill. */
+  #flashGenerateFinalBtn, #flashNewCustomSetBtn{max-width:none;}
   .flash-quiet{font-family:system-ui,sans-serif;font-size:.85rem;color:var(--muted);margin-bottom:4px;}
   .flash-quiet .link-btn{font-size:inherit;}
   .flash-quiet-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:4px;font-family:system-ui,sans-serif;font-size:.85rem;color:var(--muted);}
