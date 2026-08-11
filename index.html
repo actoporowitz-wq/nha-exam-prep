@@ -933,19 +933,25 @@ if('serviceWorker' in navigator){
      rows -- used to be up to four: stat-row, a standalone "Get AI Feedback"
      row, and a sort + toggle row, each full-width chrome before any real
      content (worse on desktop, which has plenty of horizontal room to
-     combine them instead). justify-content:space-between -- an earlier pass
-     tried flex-start (keeping both groups left-packed) specifically to avoid
-     a gap opening up in the row, but at Progress's own 1200px .wrap width
-     that just relocated the empty space to a large blank strip along the
-     whole right edge instead, which read worse (a "why does this row stop
-     partway across the screen" dead zone) than a single gap between the two
-     control clusters. space-between pins the stat pills to the left edge and
-     the sort/toggle/AI-feedback cluster to the right edge, closing that
-     right-edge gap; the mobile block below makes each cluster full-width on
-     its own line instead, where left/right edges are the same thing. */
-  .progress-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:14px;}
-  .progress-toolbar .stat-row{margin-bottom:0;}
-  .progress-toolbar-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-family:system-ui,sans-serif;font-size:.85rem;color:var(--muted);}
+     combine them instead). Two earlier passes both left a real blank strip
+     somewhere: justify-content:flex-start packed both groups left and left
+     the whole right edge empty; justify-content:space-between then closed
+     that but opened an equally-empty gap in the middle between the two
+     groups instead -- neither actually removes the dead space, just moves
+     it. The only way to have NONE is for the controls themselves to occupy
+     the freed-up width rather than leaving a gap for it: .stat-row and
+     .progress-toolbar-controls both get flex:1 so they split the row's full
+     width between them, and their own children (each stat-pill, the sort
+     dropdown, the Grid/Stacked toggle, the AI-feedback button) get flex:1
+     too so they in turn stretch to fill whatever share of the row their
+     parent group claimed. Applies at every width, not just mobile -- the
+     old mobile-only version of this same stretch treatment is folded in
+     here instead of living in a separate @media block now that it's the
+     universal behavior, not a small-screen-only fix. */
+  .progress-toolbar{display:flex;align-items:center;justify-content:flex-start;gap:14px;flex-wrap:wrap;margin-bottom:14px;}
+  .progress-toolbar .stat-row{margin-bottom:0;flex:1 1 220px;}
+  .progress-toolbar .stat-row .stat-pill{flex:1;justify-content:center;}
+  .progress-toolbar-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-family:system-ui,sans-serif;font-size:.85rem;color:var(--muted);flex:1 1 220px;}
   /* Same bug class already fixed once before for flashcards' mode-switch +
      toggle row (see the .study-mode-switch margin-bottom note elsewhere in
      this file) -- .view-mode-switch reuses .study-mode-switch's own
@@ -965,31 +971,16 @@ if('serviceWorker' in navigator){
      an identical box height the toggle read as the "small" control in the
      row. Bumped to match here, scoped narrowly so flashcards' own mode
      switch is untouched. */
-  .progress-toolbar-controls .view-mode-switch{margin-bottom:0;}
+  .progress-toolbar-controls .view-mode-switch{margin-bottom:0;flex:1 1 140px;}
+  .progress-toolbar-controls .dd{flex:1 1 140px;}
   .progress-toolbar-controls .dd-trigger,
   .progress-toolbar-controls .view-mode-switch,
   .progress-toolbar-controls .link-btn{
     height:44px;box-sizing:border-box;
   }
+  .progress-toolbar-controls .dd-trigger{width:100%;justify-content:space-between;}
+  .progress-toolbar-controls .link-btn{flex:1 1 140px;justify-content:center;}
   .progress-toolbar-controls .view-mode-switch button{font-size:.85rem;}
-  /* Mobile dead-space fix: below 900px (same breakpoint isMobileViewport
-     uses -- Grid/Stacked toggle is hidden entirely there, see renderProgressPanel),
-     .stat-row and .progress-toolbar-controls each wrap onto their own line
-     since there's no longer room for both side by side, but as plain
-     flex-wrap items they only claim as much width as their content needs --
-     leaving a large blank strip to the right of a narrow "15 exams started"
-     pill or a narrow "Sort: Name" dropdown, on an otherwise-empty line. Forcing
-     each group to width:100% (so it fills its own line) and stretching its
-     children to share that width evenly closes that gap without changing
-     anything about desktop, where both groups already share one row. */
-  @media (max-width:900px){
-    .progress-toolbar .stat-row,
-    .progress-toolbar-controls{ width:100%; }
-    .progress-toolbar .stat-row .stat-pill{ flex:1; justify-content:center; }
-    .progress-toolbar-controls .dd{ flex:1 1 140px; }
-    .progress-toolbar-controls .dd-trigger{ width:100%; justify-content:space-between; }
-    .progress-toolbar-controls .link-btn{ flex:1 1 140px; justify-content:center; }
-  }
   .subsection{border-top:1px solid var(--line);margin-top:18px;padding-top:18px;}
   .lib-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;}
   .lib-info{display:flex;flex-direction:column;gap:2px;}
@@ -6477,11 +6468,12 @@ function openAiAccountOverrideDialog(userId, email){
     </select>`;
   overlay.innerHTML = `
     <div class="dialog-card scrollable" style="max-width:420px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
-        <h3 style="margin:0;">AI settings — ${escapeHtml(email)}</h3>
-        <div id="adminAiUsageMasterToggleWrap"></div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
+        <h3 style="margin:0;flex:1 1 200px;">AI settings — ${escapeHtml(email)}</h3>
+        <div id="adminAiUsageMasterToggleWrap" style="flex-shrink:0;"></div>
       </div>
-      <div class="format-help">Overrides apply to this one account only, on top of the site-wide default in Admin → Tools → AI Features. Leave a field on "Inherit" to just use that default.</div>
+      <div class="subsection" id="adminAiUsageSection"></div>
+      <div class="format-help" style="margin-top:10px;">Overrides apply to this one account only, on top of the site-wide default in Admin → Tools → AI Features. Leave a field on "Inherit" to just use that default.</div>
       <div style="display:flex;flex-direction:column;gap:14px;font-family:system-ui,sans-serif;margin-top:4px;">
         <label>AI explanations ${boolField('ovExplainEnabled', existing.explain_enabled)}</label>
         <label>Follow-up chat ${boolField('ovChatEnabled', existing.chat_enabled)}</label>
@@ -6493,7 +6485,6 @@ function openAiAccountOverrideDialog(userId, email){
         </label>
       </div>
       <div class="msg" id="ovResult"></div>
-      <div class="subsection" id="adminAiUsageSection" style="margin-top:14px;"></div>
       <div class="dialog-actions" style="margin-top:16px;">
         <button class="btn btn-ghost" id="ovCancelBtn">Cancel</button>
         <button class="btn btn-primary" id="ovSaveBtn">Save</button>
@@ -7438,7 +7429,7 @@ async function renderAdminSecurityEvents(targetUserId){
     }).join('') : `<div class="format-help">No security events recorded for this account.</div>`;
     adminPanel.innerHTML = `
       <h1>Admin — Security events for ${escapeHtml(label)}</h1>
-      <button class="link-btn" id="backToAdminBtn">← Back to Admin</button>
+      <button class="link-btn" id="backToAdminBtn" style="margin-top:6px;">← Back to Admin</button>
       <div class="format-help" style="margin-top:12px;">Most recent 200 events, newest first — the evidence behind the device/rate flags.</div>
       ${rowsHtml}
     `;
@@ -7447,7 +7438,7 @@ async function renderAdminSecurityEvents(targetUserId){
     adminPanel.innerHTML = `
       <h1>Admin</h1>
       <div class="msg err">Could not load security events: ${escapeHtml(err.message)}</div>
-      <button class="link-btn" id="backToAdminBtn">← Back to Admin</button>
+      <button class="link-btn" id="backToAdminBtn" style="margin-top:6px;">← Back to Admin</button>
     `;
     document.getElementById('backToAdminBtn').onclick = ()=>{ adminSecurityEventsUserId = null; renderAdminPanel(); };
   }
@@ -7726,7 +7717,7 @@ async function renderAdminUserProgress(targetUserId){
     }
     let html = `
       <h1>Admin — Progress for ${escapeHtml(label)}</h1>
-      <button class="link-btn" id="backToAdminBtn">← Back to Admin</button>
+      <button class="link-btn" id="backToAdminBtn" style="margin-top:6px;margin-bottom:18px;">← Back to Admin</button>
     `;
     if(!rounds.length){
       html += `<div class="format-help">No online attempts for this account.</div>`;
@@ -7748,7 +7739,7 @@ async function renderAdminUserProgress(targetUserId){
     adminPanel.innerHTML = `
       <h1>Admin</h1>
       <div class="msg err">Could not load progress: ${escapeHtml(err.message)}</div>
-      <button class="link-btn" id="backToAdminBtn">← Back to Admin</button>
+      <button class="link-btn" id="backToAdminBtn" style="margin-top:6px;">← Back to Admin</button>
     `;
     document.getElementById('backToAdminBtn').onclick = ()=>{ adminDrilldownUserId = null; renderAdminPanel(); };
   }
@@ -7780,7 +7771,7 @@ async function renderAdminAttemptReview(reviewCtx){
     const indices = adminReviewFilter==='all' ? questions.map((_,i)=>i) : missed;
     adminPanel.innerHTML = `
       <h1>Admin — ${escapeHtml(reviewCtx.label)}</h1>
-      <button class="link-btn" id="backToUserProgressBtn">← Back</button>
+      <button class="link-btn" id="backToUserProgressBtn" style="margin-top:6px;">← Back</button>
       <div class="toplinks" style="margin-top:14px;">
         <button id="adminReviewMissedBtn" class="${adminReviewFilter==='missed'?'active':''}">Review Missed Only</button>
         <button id="adminReviewAllBtn" class="${adminReviewFilter==='all'?'active':''}">Review All</button>
@@ -7795,7 +7786,7 @@ async function renderAdminAttemptReview(reviewCtx){
     adminPanel.innerHTML = `
       <h1>Admin</h1>
       <div class="msg err">Could not load attempt: ${escapeHtml(err.message)}</div>
-      <button class="link-btn" id="backToUserProgressBtn">← Back</button>
+      <button class="link-btn" id="backToUserProgressBtn" style="margin-top:6px;">← Back</button>
     `;
     document.getElementById('backToUserProgressBtn').onclick = ()=>{ adminReviewAttempt = null; renderAdminPanel(); };
   }
