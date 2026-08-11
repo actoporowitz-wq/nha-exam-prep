@@ -15,7 +15,7 @@
    listener existing at all (the page never reloaded itself even once a new
    SW DID activate), this is the real reason "reload twice" repeatedly
    failed to show a genuinely new deploy across multiple rounds of testing. */
-const CACHE_NAME = 'nha-exam-prep-shell-v23';
+const CACHE_NAME = 'nha-exam-prep-shell-v24';
 const SHELL_URLS = [
   '/',
   '/index.html',

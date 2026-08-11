@@ -1413,14 +1413,6 @@ if('serviceWorker' in navigator){
   }
   .auth-brand{display:flex;align-items:center;gap:10px;font-family:var(--font-display);font-weight:800;font-size:1.2rem;letter-spacing:-.02em;margin-bottom:26px;color:var(--ink);}
   .auth-brand .mark{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,#8FA6FF,#5B6BFF);display:flex;align-items:center;justify-content:center;}
-  /* Icon-only, no label -- per direct user feedback, sits right beside the
-     primary Sign In button rather than as its own labeled row, matching how
-     most sites present a passkey/biometric option today (a small icon next
-     to the main submit action, not a second full-width button). Square and
-     the same height as .btn-primary next to it so the pair reads as one
-     deliberate row, not two mismatched controls. */
-  .auth-passkey-icon-btn{flex:none;width:44px;padding:0;display:flex;align-items:center;justify-content:center;}
-  .auth-passkey-icon-btn .icon{width:20px;height:20px;}
 
   /* Auth form inputs had no styling anywhere -- raw browser-default text
      fields (inset border, Arial, the works), clashing hard with the rest
@@ -4764,7 +4756,7 @@ const PASSKEYS_SUPPORTED = typeof window.PublicKeyCredential !== 'undefined';
    the dashboard/API error codes are the same in both places (see
    https://supabase.com/docs/guides/auth/passkeys), just reached via
    different user actions. */
-function passkeyErrorMessage(error){
+function passkeyErrorMessage(error, context){
   const code = error && (error.code || (error.context && error.context.code));
   const byCode = {
     passkey_disabled: 'Passkeys aren\'t turned on for this site yet.',
@@ -4780,9 +4772,21 @@ function passkeyErrorMessage(error){
   };
   if(code && byCode[code]) return byCode[code];
   // NotAllowedError is what the browser itself throws (not a Supabase error
-  // object) when the user cancels the native passkey prompt or it times out
-  // -- worth a specific, calmer message rather than a raw browser error.
-  if(error && error.name === 'NotAllowedError') return 'Passkey request was cancelled.';
+  // object) when the user cancels the native passkey prompt -- including
+  // the case where nothing was ever registered and the browser just shows
+  // an empty picker with nothing to pick. WebAuthn deliberately gives no
+  // way to tell those two apart (the same privacy reasoning that keeps a
+  // site from being able to enumerate which accounts have a passkey), so
+  // one message has to cover both. On the sign-in screen specifically
+  // (context==='signin'), most clicks here really are a curious first
+  // touch with nothing set up yet, so the friendlier assumption -- point
+  // them at how to actually turn it on -- is usually the right one, per
+  // direct user feedback ("just say sign in to turn on etc, not some random
+  // error message"). Elsewhere (already signed in, mid-setup in Settings)
+  // that assumption doesn't hold, so it keeps the neutral message instead.
+  if(error && error.name === 'NotAllowedError'){
+    return context === 'signin' ? 'Sign in with your password to turn on passkey sign-in.' : 'Passkey request was cancelled.';
+  }
   return (error && error.message) || 'Something went wrong with that passkey request.';
 }
 
@@ -4910,13 +4914,10 @@ function renderAuthView(){
         <input type="email" id="authEmail" placeholder="Email" autocomplete="email">
         <div class="pw-field">
           <input type="password" id="authPassword" placeholder="Password" autocomplete="current-password">
-          <button type="button" class="pw-toggle" id="authPasswordToggle" aria-label="Show password">${icon('eye')}</button>
+          <button type="button" class="pw-toggle" id="authPasswordToggle" aria-label="${PASSKEYS_SUPPORTED ? 'Sign in with a passkey' : 'Show password'}">${PASSKEYS_SUPPORTED ? icon('fingerprint') : icon('eye')}</button>
         </div>
         <div class="cf-turnstile" id="turnstileWidget"></div>
-        <div style="display:flex;gap:8px;">
-          <button class="btn btn-primary" id="authSubmitBtn" style="flex:1;">Sign In</button>
-          ${PASSKEYS_SUPPORTED ? `<button class="btn btn-ghost auth-passkey-icon-btn" id="authPasskeyBtn" type="button" aria-label="Sign in with a passkey" title="Sign in with a passkey">${icon('fingerprint')}</button>` : ''}
-        </div>
+        <button class="btn btn-primary" id="authSubmitBtn">Sign In</button>
       </div>
       <div class="auth-links-row" style="margin-top:14px;font-family:system-ui,sans-serif;font-size:.85rem;display:flex;gap:16px;flex-wrap:wrap;">
         <button class="text-link" id="goSignupBtn">Request early access</button>
@@ -4979,7 +4980,10 @@ function renderAuthView(){
   /* Supabase's CAPTCHA setting is project-wide across sign-up/sign-in/password-reset — it
      can't be scoped to sign-up alone, so all three screens carry the widget. */
   if(authScreen === 'signup' || authScreen === 'signin' || authScreen === 'forgot') renderTurnstileWidget();
-  wirePasswordToggle('authPassword', 'authPasswordToggle');
+  /* Sign-in's own password field toggle does double duty (see its own
+     comment); signup/reset-password's password fields have no existing
+     passkey to sign in with, so they keep the plain always-eye version. */
+  if(authScreen === 'signin') wireAuthPasswordToggle(); else wirePasswordToggle('authPassword', 'authPasswordToggle');
   wirePasswordToggle('authNewPassword', 'authNewPasswordToggle');
   const goSignup = document.getElementById('goSignupBtn');
   if(goSignup) goSignup.onclick = ()=>{ authScreen='signup'; authError=''; authMessage=''; renderAuthView(); };
@@ -4989,8 +4993,52 @@ function renderAuthView(){
   if(goForgot) goForgot.onclick = ()=>{ authScreen='forgot'; authError=''; authMessage=''; renderAuthView(); };
   const submitBtn = document.getElementById('authSubmitBtn');
   if(submitBtn) submitBtn.onclick = handleAuthSubmit;
-  const passkeyBtn = document.getElementById('authPasskeyBtn');
-  if(passkeyBtn) passkeyBtn.onclick = handlePasskeySignIn;
+}
+
+/* Sign-in's password field toggle is one slot doing two jobs, per direct
+   user feedback ("until the user starts typing it will show the biometric
+   icon, once any text is in the field it changes to the eye-icon"): an
+   empty field offers passkey sign-in (fingerprint icon, click runs
+   handlePasskeySignIn()); the moment there's any text, it swaps to the
+   ordinary show/hide-password eye instead, since at that point the person
+   has committed to typing a password and wants visibility control, not a
+   passkey prompt. Clearing the field back to empty swaps it back. Replaces
+   the earlier design (a separate icon-only button next to Sign In) --
+   this reuses the one slot the eye toggle already had rather than adding a
+   second control competing for space. Only ever shows the passkey side of
+   this when PASSKEYS_SUPPORTED; unsupported browsers just get the plain
+   eye toggle, unchanged from before passkeys existed. */
+function wireAuthPasswordToggle(){
+  const input = document.getElementById('authPassword');
+  const btn = document.getElementById('authPasswordToggle');
+  if(!input || !btn) return;
+  const isPasskeyMode = ()=> PASSKEYS_SUPPORTED && input.value === '';
+  const render = ()=>{
+    if(isPasskeyMode()){
+      btn.innerHTML = icon('fingerprint');
+      btn.setAttribute('aria-label', 'Sign in with a passkey');
+    } else {
+      const showing = input.type === 'text';
+      btn.innerHTML = icon(showing ? 'eyeOff' : 'eye');
+      btn.setAttribute('aria-label', showing ? 'Hide password' : 'Show password');
+    }
+  };
+  btn.onclick = ()=>{
+    if(isPasskeyMode()){ handlePasskeySignIn(); return; }
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    render();
+    input.focus();
+  };
+  // 'change' too, not just 'input' -- a browser autofilling the field
+  // (rather than the user typing into it) doesn't reliably fire 'input' in
+  // every browser, and this is exactly the case where showing a stale
+  // fingerprint icon over an already-filled password field would be most
+  // visibly wrong. Also called once immediately below, for the bfcache/
+  // already-filled-on-render case neither event would catch.
+  input.oninput = render;
+  input.onchange = render;
+  render();
 }
 
 async function handleAuthSubmit(){
@@ -5077,7 +5125,7 @@ async function handleAuthSubmit(){
    path. */
 async function handlePasskeySignIn(){
   authError = '';
-  const btn = document.getElementById('authPasskeyBtn');
+  const btn = document.getElementById('authPasswordToggle');
   if(btn) btn.disabled = true;
   try{
     const turnstileToken = (window.turnstile && turnstileWidgetId!==null) ? window.turnstile.getResponse(turnstileWidgetId) : null;
@@ -5085,7 +5133,7 @@ async function handlePasskeySignIn(){
     const { error } = await supabaseClient.auth.signInWithPasskey({ options: { captchaToken: turnstileToken } });
     if(error) throw error;
   } catch(err){
-    authError = passkeyErrorMessage(err);
+    authError = passkeyErrorMessage(err, 'signin');
     renderAuthView();
   }
 }
