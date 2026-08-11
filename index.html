@@ -396,12 +396,9 @@ if('serviceWorker' in navigator){
   .dd-trigger[aria-expanded="true"] .icon{transform:rotate(180deg);}
   /* Same collapsed/expanded chevron convention as .dd-trigger above --
      collapsed (aria-expanded="false") points down (default), expanded
-     points up. */
-  #progressAiFeedbackToggleBtn .icon{transition:transform .15s ease;}
-  #progressAiFeedbackToggleBtn[aria-expanded="true"] .icon{transform:rotate(180deg);}
-  /* Same convention, generalized as a reusable class instead of a new
-     per-ID rule each time -- used by the admin AI Usage section's two
-     independent collapse toggles (summary numbers / raw call history). */
+     points up. Shared by every collapse toggle in the app (Progress-tab AI
+     feedback card, admin AI Usage's sub-toggles, per-exam blocks) rather
+     than a per-ID rule each place needed one. */
   .collapse-toggle-btn .icon{transition:transform .15s ease;}
   .collapse-toggle-btn[aria-expanded="true"] .icon{transform:rotate(180deg);}
   /* Same story for the open menu's own option rows -- a long exam-title
@@ -1365,17 +1362,21 @@ if('serviceWorker' in navigator){
   /* ===== dialogs (shortcuts help / feedback) ===== */
   .dialog-overlay{position:fixed;inset:0;background:rgba(6,8,12,.55);display:flex;align-items:center;justify-content:center;z-index:95;}
   .dialog-overlay[hidden]{display:none;}
-  /* max-height/overflow-y added alongside the AI Settings dialog's new AI
-     Usage section -- .dialog-overlay (the fixed, full-viewport backdrop)
-     has no overflow handling of its own, so a dialog-card taller than the
-     viewport used to render its top and bottom off-screen with no way to
-     scroll to either -- title bar and Cancel/Save both unreachable. Every
-     other dialog using this shared class was short enough to never trigger
-     it, so this went unnoticed until a dialog with real expandable content
-     needed it. Scoping the scroll to the card itself (not the overlay)
-     keeps the backdrop static while the content scrolls, the usual modal
-     pattern. */
-  .dialog-card{background:var(--surface);border-radius:14px;padding:26px 28px;max-width:360px;width:90%;max-height:90vh;overflow-y:auto;}
+  .dialog-card{background:var(--surface);border-radius:14px;padding:26px 28px;max-width:360px;width:90%;}
+  /* max-height/overflow-y is an opt-in modifier, NOT on the base class --
+     .dialog-overlay (the fixed, full-viewport backdrop) has no overflow
+     handling of its own, so a dialog-card taller than the viewport used to
+     render its top and bottom off-screen with no way to scroll to either
+     (title bar and Cancel/Save both unreachable -- first hit by the AI
+     Settings dialog once its AI Usage section could grow tall). But
+     overflow:auto on an ancestor also clips any absolutely-positioned
+     descendant that visually extends past its box, even when the
+     ancestor's own in-flow content doesn't need scrolling -- and the
+     feedback dialog's Category picker (a .dd-menu, position:absolute)
+     lives inside this same shared class. Applying scroll unconditionally
+     to every .dialog-card would risk clipping that dropdown on a short
+     viewport. Scoped to just the dialogs that actually grow tall instead. */
+  .dialog-card.scrollable{max-height:90vh;overflow-y:auto;}
   .dialog-card label{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:.9rem;}
   .dialog-card label .ai-override-select, .dialog-card label input[type="number"]{
     border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--surface);color:var(--ink);font:inherit;width:150px;
@@ -5747,7 +5748,7 @@ function renderProgressAiFeedbackControls(){
   let html = '';
   if(progressAiFeedback){
     html += `
-      <button type="button" class="link-btn" id="progressAiFeedbackToggleBtn" aria-expanded="${!progressAiFeedbackCollapsed}">
+      <button type="button" class="link-btn collapse-toggle-btn" id="progressAiFeedbackToggleBtn" aria-expanded="${!progressAiFeedbackCollapsed}">
         ${icon('chevronDown')}${progressAiFeedbackCollapsed ? 'Show AI Feedback' : 'Hide AI Feedback'}
       </button>
     `;
@@ -6311,7 +6312,7 @@ function openAiAccountOverrideDialog(userId, email){
       <option value="false" ${current===false?'selected':''}>Off</option>
     </select>`;
   overlay.innerHTML = `
-    <div class="dialog-card" style="max-width:420px;">
+    <div class="dialog-card scrollable" style="max-width:420px;">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
         <h3 style="margin:0;">AI settings — ${escapeHtml(email)}</h3>
         <div id="adminAiUsageMasterToggleWrap"></div>
@@ -6833,9 +6834,15 @@ async function renderAiFeatureConfigSection(){
    (one DB lookup, no Claude call), so this is naturally idempotent and
    safe to re-run on a partially-completed or previously-run library.
 
-   Deduped by question_key before running -- the cache is keyed by content,
-   not by which exam/round a question happens to sit in, so an identical
-   question appearing in multiple exams only needs generating once.
+   Deduped by (question_key, content signature) before running -- the cache
+   is keyed by (question_key, content_hash), not just question_key, since
+   the server hashes the full content (stem + options + correct answer +
+   bank explanation) so an edit to any of those is treated as new content
+   needing its own explanation. Deduping on question_key alone would let a
+   duplicate-text question whose options/correct-answer/explanation differ
+   silently get skipped -- both pregeneration and the Layer 3 audit need
+   every distinct (question_key, content_hash) pair, not every distinct
+   question_key.
 
    Concurrency-limited (worker-pool pattern, not one giant Promise.all) to
    avoid hammering the Anthropic API past its rate limits and to keep this
@@ -6845,12 +6852,24 @@ let aiPregenState = { running: false, stop: false, total: 0, processed: 0, gener
 const AI_PREGEN_CONCURRENCY = 4;
 const AI_PREGEN_AVG_COST_USD = 0.0055; // matches the documented $0.005-0.0065 real range from hand-testing
 
+// Client-side stand-in for the server's computeContentHash (ai-explain/index.ts)
+// -- doesn't need to be a real hash, just needs to distinguish content the
+// same way the server's content_hash does, since this only feeds a JS Set.
+function questionContentSignature(q){
+  return JSON.stringify({
+    q: q.text.trim(),
+    o: (q.options||[]).map(o=>o.trim()),
+    c: q.correct,
+    e: (q.explanation||'').trim(),
+  });
+}
+
 function getUniqueLibraryQuestions(){
   const seen = new Set();
   const unique = [];
   EXAM_LIBRARY.forEach(exam=>{
     (exam.questions||[]).forEach(q=>{
-      const key = q.text.trim().toLowerCase();
+      const key = q.text.trim().toLowerCase() + '::' + questionContentSignature(q);
       if(seen.has(key)) return;
       seen.add(key);
       unique.push(q);
@@ -7313,13 +7332,14 @@ function decodeWatermark(text, profiles){
    already computed from the complete set.
 
    The whole section sits behind a master toggle (a small corner link next
-   to "Back to Admin", not a full heading -- present and discoverable, but
-   not competing with the exam-history content below it for attention by
-   default) -- see renderAdminAiUsageMasterToggle() and its own wiring in
-   renderAdminUserProgress(). Inside, the permissions/limits standing, the
-   $ spend tiles, and the raw per-call history are each further collapsed
-   behind their own toggle -- all default collapsed, all peers, none
-   privileged over the others now that the whole section is opt-in. */
+   to the AI Settings dialog's own title, not a full heading -- present and
+   discoverable, but not competing with the overrides/limits form below it
+   for attention by default) -- see renderAdminAiUsageMasterToggle() and its
+   own wiring in openAiAccountOverrideDialog(). Inside, the permissions/
+   limits standing, the $ spend tiles, and the raw per-call history are each
+   further collapsed behind their own toggle -- all default collapsed, all
+   peers, none privileged over the others now that the whole section is
+   opt-in. */
 let adminAiUsageMasterCollapsed = true;
 let adminAiUsagePermissionsCollapsed = true;
 let adminAiUsageStatsCollapsed = true;
