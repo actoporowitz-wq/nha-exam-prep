@@ -1233,6 +1233,13 @@ if('serviceWorker' in navigator){
   .recall-rate-btn{font-family:system-ui,sans-serif;font-size:.88rem;font-weight:600;border-radius:10px;padding:10px 18px;cursor:pointer;display:inline-flex;align-items:center;border:1px solid var(--line);background:var(--surface);color:var(--ink);}
   .recall-rate-btn.knew{border-color:var(--good);color:var(--good);}
   .recall-rate-btn.didnt{border-color:var(--bad);color:var(--bad);}
+  /* Quiz-taking's recall questions (unlike flashcards' own True Recall,
+     which never revisits a card mid-round) can be navigated back to after
+     already being self-rated -- .selected fills in whichever button was
+     picked so returning to the question shows the prior choice, matching
+     .opt.selected/.opt.correct's filled-background treatment for MC. */
+  .recall-rate-btn.knew.selected{background:var(--good-bg);}
+  .recall-rate-btn.didnt.selected{background:var(--bad-bg);}
   .recall-round-tag{font-family:system-ui,sans-serif;font-size:.72rem;color:var(--muted);}
   .settings-menu-btn{width:100%;text-align:left;background:none;border:none;color:#B7BECC;font-family:var(--font-display);font-size:.82rem;padding:8px 10px;border-radius:8px;cursor:pointer;margin-top:6px;}
   .settings-menu-btn:hover{background:rgba(255,255,255,.06);}
@@ -1787,6 +1794,19 @@ function saveFlashSessionState(){
 let instantFeedback = false;
 try{ instantFeedback = localStorage.getItem('nha_instant_feedback') === 'true'; }catch(e){ /* fine, defaults to off */ }
 
+/* Recall-type exams (Exam 26 onward) show the same nav-row toggle spot as
+   instantFeedback above, but it drives AI Explanation instead of "show
+   answers instantly" -- that concept doesn't really apply to a format
+   where revealing the answer IS the whole interaction, on every question,
+   every time. Same persisted-boolean pattern as instantFeedback. */
+let recallAiToggle = false;
+try{ recallAiToggle = localStorage.getItem('nha_recall_ai_toggle') === 'true'; }catch(e){ /* fine, defaults to off */ }
+/* Which recall-type questions have had "Show Answer" clicked this attempt
+   (independent of answers{} -- a question can be revealed without a
+   self-rating chosen yet). Reset alongside answers/flags wherever those
+   are, never needs resetting on its own. */
+let recallRevealedSet = new Set();
+
 /* ================= elements ================= */
 const quizPanel = document.getElementById('quizPanel');
 const dotsPanel = document.getElementById('dotsPanel');
@@ -2255,7 +2275,7 @@ function renderLibrary(){
     btn.onclick = async ()=>{
       const e = EXAM_LIBRARY[parseInt(btn.dataset.idx,10)];
       try{
-        await beginOnlineAttempt({ title: e.title, questions: e.questions, examKey: 'lib:' + slugify(e.title) });
+        await beginOnlineAttempt({ title: e.title, questions: e.questions, examKey: 'lib:' + slugify(e.title), type: e.type });
       } catch(err){
         alert('Could not start this exam online: ' + err.message);
       }
@@ -2267,7 +2287,7 @@ function renderLibrary(){
    Only set explicitly when the exam was reconstructed from an uploaded answer-sheet PDF. */
 function loadExam(examData, attemptNumber){
   exam = examData;
-  answers = {}; flags = {}; current = 0; submitted = false;
+  answers = {}; flags = {}; recallRevealedSet = new Set(); current = 0; submitted = false;
   currentAttempt = attemptNumber || 1;
   examTitle.textContent = exam.title;
   examSub.textContent = (exam.subtitle ? exam.subtitle + " · " : "") + exam.questions.length + " questions";
@@ -2702,6 +2722,12 @@ function renderQuestion(){
   const answeredCount = Object.keys(answers).length;
   const letters = ['1','2','3','4','5','6'];
   const qNum = q.originalNumber || (current+1);
+  // exam.type is the authoritative signal (threaded through every
+  // fresh-start/resume/retake construction path -- see loadExam() callers)
+  // -- q.options.length===1 is a belt-and-suspenders fallback for any path
+  // that isn't caught, since a single-option question never legitimately
+  // occurs outside this recall shoehorn (see renderReviewList's own note).
+  const isRecall = exam.type === 'recall' || (q.options && q.options.length === 1);
 
   /* This progress line is "how far through THIS session am I" (position,
      bounded by total), separate from the "qnum" div below it which is the
@@ -2724,33 +2750,61 @@ function renderQuestion(){
     <div class="quiz-question-block">
     <div class="qnum-row" id="qnumAnchor">
       <div class="qnum">Question ${qNum}</div>
-      <button type="button" class="icon-btn instant-toggle" id="instantFeedbackToggle" aria-pressed="${instantFeedback}" aria-label="Show answers instantly" title="Show answers instantly">${icon(instantFeedback?'eye':'eyeOff')}<span class="nav-label" aria-hidden="true">Show answers instantly</span></button>
+      ${isRecall
+        ? `<button type="button" class="icon-btn instant-toggle" id="recallAiToggleBtn" aria-pressed="${recallAiToggle}" aria-label="AI Explanation" title="AI Explanation">${icon(recallAiToggle?'eye':'eyeOff')}<span class="nav-label" aria-hidden="true">AI Explanation</span></button>`
+        : `<button type="button" class="icon-btn instant-toggle" id="instantFeedbackToggle" aria-pressed="${instantFeedback}" aria-label="Show answers instantly" title="Show answers instantly">${icon(instantFeedback?'eye':'eyeOff')}<span class="nav-label" aria-hidden="true">Show answers instantly</span></button>`}
     </div>
     <div class="qtext">${escapeHtml(q.text)}</div>
   `;
 
   /* Purely visual -- which option is "selected" for scoring/resume purposes
      is unaffected either way, this only changes what renderQuestion() paints
-     on top of it. */
-  const showFeedback = instantFeedback && answers[current] !== undefined;
-  q.options.forEach((opt, i) => {
-    const sel = answers[current] === i;
-    let cls = sel ? 'selected' : '';
-    let tag = '';
-    if(showFeedback){
-      if(i === q.correct){ cls = 'correct'; tag = ' ✓'; }
-      else if(sel){ cls = 'incorrect'; tag = ' — not correct'; }
+     on top of it. Recall-type exams (Exam 26 onward -- direct Q&A "True
+     Recall"-style content, not real multiple-choice) skip this branch
+     entirely and use their own reveal/self-rate flow below; they still
+     carry options:[answerText]/correct:0 under the hood so scoring, DB
+     persistence, and AI Explain/chat all work completely unchanged --
+     see the exam-visibility migration's own comments for why. */
+  let showFeedback = false;
+  let recallRevealed = false;
+  if(isRecall){
+    recallRevealed = recallRevealedSet.has(current) || answers[current] !== undefined;
+    const selfRating = answers[current]; // 0 = "got it right" (matches correct:0), -1 = "got it wrong", undefined = not yet rated
+    if(!recallRevealed){
+      html += `<button type="button" class="btn btn-primary" id="recallShowAnswerBtn" style="margin-top:6px;">${icon('eye')}Show Answer</button>`;
+    } else {
+      html += `
+        <div class="recall-answer">${escapeHtml(q.options[0])}</div>
+        <div class="recall-rate-row">
+          <button type="button" class="recall-rate-btn didnt ${selfRating===-1?'selected':''}" id="quizRecallDidntBtn">${icon('close')}Got it wrong</button>
+          <button type="button" class="recall-rate-btn knew ${selfRating===0?'selected':''}" id="quizRecallKnewBtn">${icon('check')}Got it right</button>
+        </div>
+      `;
+      if(recallAiToggle && aiFeatureFlags.explain_enabled){
+        html += `<div class="review-explanation" id="aiExplainBlock"><em>Loading explanation…</em></div>`;
+      }
     }
-    html += `<button type="button" class="opt ${cls}" data-i="${i}" aria-pressed="${sel}">
-      <span class="letter">${letters[i]}</span><span>${escapeHtml(opt)}${tag}</span>
-    </button>`;
-  });
-  // Filled in below, after quizPanel.innerHTML is set -- the fetch itself
-  // (cached or not) can't complete before that innerHTML assignment runs,
-  // so this always starts as a loading placeholder, never a flash of
-  // stale content from the previous question.
-  if(showFeedback && aiFeatureFlags.explain_enabled){
-    html += `<div class="review-explanation" id="aiExplainBlock"><em>Loading explanation…</em></div>`;
+  } else {
+    showFeedback = instantFeedback && answers[current] !== undefined;
+    q.options.forEach((opt, i) => {
+      const sel = answers[current] === i;
+      let cls = sel ? 'selected' : '';
+      let tag = '';
+      if(showFeedback){
+        if(i === q.correct){ cls = 'correct'; tag = ' ✓'; }
+        else if(sel){ cls = 'incorrect'; tag = ' — not correct'; }
+      }
+      html += `<button type="button" class="opt ${cls}" data-i="${i}" aria-pressed="${sel}">
+        <span class="letter">${letters[i]}</span><span>${escapeHtml(opt)}${tag}</span>
+      </button>`;
+    });
+    // Filled in below, after quizPanel.innerHTML is set -- the fetch itself
+    // (cached or not) can't complete before that innerHTML assignment runs,
+    // so this always starts as a loading placeholder, never a flash of
+    // stale content from the previous question.
+    if(showFeedback && aiFeatureFlags.explain_enabled){
+      html += `<div class="review-explanation" id="aiExplainBlock"><em>Loading explanation…</em></div>`;
+    }
   }
   html += `</div>`; // closes .quiz-question-block
 
@@ -2787,7 +2841,10 @@ function renderQuestion(){
 
   quizPanel.innerHTML = html;
 
-  if(showFeedback && aiFeatureFlags.explain_enabled){
+  const aiExplainShouldFetch = isRecall
+    ? (recallRevealed && recallAiToggle && aiFeatureFlags.explain_enabled)
+    : (showFeedback && aiFeatureFlags.explain_enabled);
+  if(aiExplainShouldFetch){
     // current can change (nav, or another renderQuestion() re-run from an
     // unrelated click) before this resolves -- re-check before writing, and
     // look the element up fresh at resolution time rather than capturing a
@@ -2807,11 +2864,26 @@ function renderQuestion(){
 
   document.getElementById('dotsToggleBtn').onclick = ()=>{ dotsExpanded = !dotsExpanded; renderQuestion(); renderDots(); };
   document.getElementById('pauseExamBtn').onclick = ()=> showView('progress');
-  document.getElementById('instantFeedbackToggle').onclick = ()=>{
-    instantFeedback = !instantFeedback;
-    try{ localStorage.setItem('nha_instant_feedback', String(instantFeedback)); }catch(err){ /* fine, just won't persist */ }
-    renderQuestion();
-  };
+  if(isRecall){
+    const aiToggleBtn = document.getElementById('recallAiToggleBtn');
+    if(aiToggleBtn) aiToggleBtn.onclick = ()=>{
+      recallAiToggle = !recallAiToggle;
+      try{ localStorage.setItem('nha_recall_ai_toggle', String(recallAiToggle)); }catch(err){ /* fine, just won't persist */ }
+      renderQuestion();
+    };
+    const showAnswerBtn = document.getElementById('recallShowAnswerBtn');
+    if(showAnswerBtn) showAnswerBtn.onclick = ()=>{ recallRevealedSet.add(current); renderQuestion(); };
+    const knewBtn = document.getElementById('quizRecallKnewBtn');
+    if(knewBtn) knewBtn.onclick = ()=>{ answers[current] = 0; syncOnlineAnswer(current); renderQuestion(); renderDots(); };
+    const didntBtn = document.getElementById('quizRecallDidntBtn');
+    if(didntBtn) didntBtn.onclick = ()=>{ answers[current] = -1; syncOnlineAnswer(current); renderQuestion(); renderDots(); };
+  } else {
+    document.getElementById('instantFeedbackToggle').onclick = ()=>{
+      instantFeedback = !instantFeedback;
+      try{ localStorage.setItem('nha_instant_feedback', String(instantFeedback)); }catch(err){ /* fine, just won't persist */ }
+      renderQuestion();
+    };
+  }
   quizPanel.querySelectorAll('.opt').forEach(el=>{
     el.onclick = ()=>{ answers[current] = parseInt(el.dataset.i); syncOnlineAnswer(current); renderQuestion(); renderDots(); };
   });
@@ -2890,13 +2962,19 @@ document.addEventListener('keydown', (e)=>{
   if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) return;
   if(!shortcutsOverlayEl.hidden || !feedbackOverlayEl.hidden) return;
   const total = exam.questions.length;
-  if(['1','2','3','4','5','6'].includes(e.key)){
+  // Recall-type exams have no clickable .opt options -- answering happens
+  // via Show Answer + a self-rating, not a number-key pick, so this whole
+  // shortcut is skipped rather than misfiring against a 1-item options array.
+  if(exam.type === 'recall'){
+    // fall through to arrow-key navigation only
+  } else if(['1','2','3','4','5','6'].includes(e.key)){
     const i = parseInt(e.key, 10) - 1;
     if(i < exam.questions[current].options.length){
       e.preventDefault();
       answers[current] = i; syncOnlineAnswer(current); renderQuestion(); renderDots();
     }
-  } else if(e.key === 'ArrowRight' && current < total-1){
+  }
+  if(e.key === 'ArrowRight' && current < total-1){
     e.preventDefault(); current++; renderQuestion(); renderDots(); scrollQuestionIntoView();
   } else if(e.key === 'ArrowLeft' && current > 0){
     e.preventDefault(); current--; renderQuestion(); renderDots(); scrollQuestionIntoView();
@@ -2987,7 +3065,7 @@ function renderResults(){
         activeOnlineRound = round;
         activeOnlineAttempt = await onlineStore.createAttemptWithQuestions(round.id, 1, 'full', null, exam.questions);
       }
-      answers = {}; flags = {}; current = 0; submitted = false; showView('quiz'); renderQuestion(); renderDots(); scrollQuestionIntoView();
+      answers = {}; flags = {}; recallRevealedSet = new Set(); current = 0; submitted = false; showView('quiz'); renderQuestion(); renderDots(); scrollQuestionIntoView();
     } catch(err){
       alert('Could not start the retake: ' + err.message);
     }
@@ -3003,7 +3081,7 @@ function renderResults(){
           nextAttemptNumber = (activeOnlineAttempt ? activeOnlineAttempt.attempt_number : 0) + 1;
           activeOnlineAttempt = await onlineStore.createAttemptWithQuestions(activeOnlineRound.id, nextAttemptNumber, 'missed_retake', sourceAttemptId, missedQs);
         }
-        loadExam({ title: "Retake — Missed Questions", subtitle: "from " + exam.title, questions: missedQs, examKey: exam.examKey }, nextAttemptNumber);
+        loadExam({ title: "Retake — Missed Questions", subtitle: "from " + exam.title, questions: missedQs, examKey: exam.examKey, type: exam.type }, nextAttemptNumber);
       } catch(err){
         alert('Could not start the retake: ' + err.message);
       }
@@ -3028,15 +3106,36 @@ function renderReviewList(indices, questions, answersMap){
     const userAns = answersMap[i];
     html += `<div class="review-item">
       <div class="review-q">${q.originalNumber || (i+1)}. ${escapeHtml(q.text)}</div>`;
-    q.options.forEach((opt, oi)=>{
-      let cls = '';
-      let tag = '';
-      if(oi === q.correct){ cls = 'correct-line'; tag = ' ✓ correct answer'; }
-      else if(oi === userAns){ cls = 'wrong-line'; tag = ' — your answer'; }
-      html += `<div class="review-line ${cls}">${letters[oi]}) ${escapeHtml(opt)}${tag}</div>`;
-    });
-    if(userAns===undefined){
-      html += `<div class="review-line wrong-line">Not answered</div>`;
+    if(q.options.length === 1){
+      // A single-option question is uniquely a recall-type question's
+      // signature in this data model (options:[answerText], correct:0
+      // under the hood) -- real multiple-choice content never has fewer
+      // than 2 options anywhere in this app's library. Checking option
+      // count directly (rather than a separate recall/type flag) survives
+      // every reconstruction path, including round-trips through
+      // exam_attempt_answers, which has no column to carry a flag like
+      // that through. There are no real distractors to list here, so show
+      // the answer once plus what the student self-reported instead of
+      // iterating options as if they were real choices.
+      html += `<div class="review-line correct-line">${escapeHtml(q.options[0])} ✓ answer</div>`;
+      if(userAns === 0){
+        html += `<div class="review-line">You reported: Got it right</div>`;
+      } else if(userAns === -1){
+        html += `<div class="review-line wrong-line">You reported: Got it wrong</div>`;
+      } else {
+        html += `<div class="review-line wrong-line">Not answered</div>`;
+      }
+    } else {
+      q.options.forEach((opt, oi)=>{
+        let cls = '';
+        let tag = '';
+        if(oi === q.correct){ cls = 'correct-line'; tag = ' ✓ correct answer'; }
+        else if(oi === userAns){ cls = 'wrong-line'; tag = ' — your answer'; }
+        html += `<div class="review-line ${cls}">${letters[oi]}) ${escapeHtml(opt)}${tag}</div>`;
+      });
+      if(userAns===undefined){
+        html += `<div class="review-line wrong-line">Not answered</div>`;
+      }
     }
     // data-role="explain-text" is filled in by wireReviewList()'s toggle
     // handler -- rendered here as either the bank explanation (unchanged
@@ -6153,8 +6252,8 @@ async function resumeOnlineAttempt(round, attempt, examData){
   const questions = rows.map(r=>({ text: r.question_text, options: r.options, correct: r.correct_option, explanation: r.explanation || '', originalNumber: r.original_number }));
   activeOnlineRound = round;
   activeOnlineAttempt = attempt;
-  exam = { title: examData.title, subtitle: examData.subtitle, questions, examKey: examData.examKey };
-  answers = {}; flags = {};
+  exam = { title: examData.title, subtitle: examData.subtitle, questions, examKey: examData.examKey, type: examData.type };
+  answers = {}; flags = {}; recallRevealedSet = new Set();
   rows.forEach((r,i)=>{
     if(r.selected_option!==null && r.selected_option!==undefined) answers[i] = r.selected_option;
     if(r.flagged) flags[i] = true;
@@ -6809,9 +6908,18 @@ async function continueRoundFromProgress(round){
     const latest = await onlineStore.findAttemptByNumber(round.id, maxNum);
     if(!latest) throw new Error('No attempts to continue from.');
 
+    // round.exam_key alone doesn't carry exam.type (it's just 'lib:'+slug(title))
+    // -- look the live library entry back up by the same key so resuming or
+    // retaking a paused recall-type exam (e.g. Exam 26) doesn't silently
+    // lose its recall rendering and fall back to a broken plain-MC view.
+    // Deliberately tolerant of no match (exam removed from the library
+    // since the round started, or a pre-recall-feature round) -- falls
+    // back to undefined, same as if this lookup didn't exist at all.
+    const libExam = EXAM_LIBRARY.find(e => 'lib:' + slugify(e.title) === round.exam_key);
+
     if(latest.status === 'in_progress'){
       await resumeOnlineAttempt(round, latest, {
-        title: round.exam_title, subtitle: "from " + round.exam_title, examKey: round.exam_key
+        title: round.exam_title, subtitle: "from " + round.exam_title, examKey: round.exam_key, type: libExam ? libExam.type : undefined
       });
       return;
     }
@@ -6832,7 +6940,7 @@ async function continueRoundFromProgress(round){
     const nextAttemptNumber = maxNum + 1;
     activeOnlineRound = round;
     activeOnlineAttempt = await onlineStore.createAttemptWithQuestions(round.id, nextAttemptNumber, 'missed_retake', latest.id, missedQs);
-    loadExam({ title: "Retake — Missed Questions", subtitle: "from " + round.exam_title, questions: missedQs, examKey: round.exam_key }, nextAttemptNumber);
+    loadExam({ title: "Retake — Missed Questions", subtitle: "from " + round.exam_title, questions: missedQs, examKey: round.exam_key, type: libExam ? libExam.type : undefined }, nextAttemptNumber);
   } catch(err){
     if(msg){ msg.textContent = 'Could not continue: ' + err.message; msg.className = 'msg err'; }
   }
@@ -7181,6 +7289,100 @@ function openAiAccountOverrideDialog(userId, email){
   };
 }
 
+/* Per-account exam-visibility overrides (migration 0041). Same
+   dialog-overlay/dialog-card pattern as openAiAccountOverrideDialog()
+   just above -- one tri-state select per exam (Inherit site default / On
+   / Off), reusing .ai-override-select's styling even though it's not an
+   AI setting, since the shape (three-state, blank = inherit) is
+   identical. The exam list itself comes from admin_list_exam_visibility()
+   (also what drives the Tools -> Exam Visibility section) rather than a
+   separate "list of exam titles" RPC -- one source of truth for what
+   exams exist, and it already carries the global enabled state each
+   select's "Inherit" option needs to show. */
+async function openExamAccessDialog(userId, email){
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.innerHTML = `
+    <div class="dialog-card scrollable" style="max-width:460px;">
+      <h3 style="margin:0 0 6px;">Exam access — ${escapeHtml(email)}</h3>
+      <div class="format-help">Override which exams this account can see, independent of the site-wide default in Admin → Tools → Exam Visibility. Leave "Inherit" to just use that default.</div>
+      <div id="examAccessList" style="margin-top:12px;font-family:system-ui,sans-serif;">Loading…</div>
+      <div class="msg" id="examAccessResult"></div>
+      <div class="dialog-actions" style="margin-top:16px;">
+        <button class="btn btn-ghost" id="examAccessCancelBtn">Cancel</button>
+        <button class="btn btn-primary" id="examAccessSaveBtn">Save</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = ()=>{ overlay.remove(); };
+  overlay.onclick = (e)=>{ if(e.target === overlay) close(); };
+  overlay.querySelector('#examAccessCancelBtn').onclick = close;
+
+  const listEl = overlay.querySelector('#examAccessList');
+  let overridesByTitle = {};
+  try{
+    const [{ data: visData, error: visErr }, { data: ovData, error: ovErr }] = await Promise.all([
+      supabaseClient.rpc('admin_list_exam_visibility'),
+      supabaseClient.rpc('admin_list_exam_user_overrides', { target_user_id: userId }),
+    ]);
+    if(visErr) throw visErr;
+    if(ovErr) throw ovErr;
+    const exams = visData || [];
+    (ovData || []).forEach(o=>{ overridesByTitle[o.exam_title] = o.enabled; });
+    listEl.innerHTML = exams.map(e=>{
+      const has = Object.prototype.hasOwnProperty.call(overridesByTitle, e.exam_title);
+      const current = has ? overridesByTitle[e.exam_title] : null;
+      return `
+        <label style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);">
+          <span>${escapeHtml(e.exam_title)}</span>
+          <select data-exam-access-title="${escapeHtml(e.exam_title)}" class="ai-override-select">
+            <option value="">Inherit (site: ${e.enabled ? 'on' : 'off'})</option>
+            <option value="true" ${current===true?'selected':''}>On</option>
+            <option value="false" ${current===false?'selected':''}>Off</option>
+          </select>
+        </label>`;
+    }).join('') || `<div class="format-help">No exams in the library yet.</div>`;
+  } catch(err){
+    listEl.innerHTML = `<div class="msg err">Could not load: ${escapeHtml(err.message)}</div>`;
+    return;
+  }
+
+  overlay.querySelector('#examAccessSaveBtn').onclick = async ()=>{
+    const resultEl = overlay.querySelector('#examAccessResult');
+    resultEl.className = 'msg';
+    resultEl.textContent = 'Saving…';
+    const selects = Array.from(listEl.querySelectorAll('select[data-exam-access-title]'));
+    try{
+      for(const sel of selects){
+        const title = sel.dataset.examAccessTitle;
+        const val = sel.value;
+        const had = Object.prototype.hasOwnProperty.call(overridesByTitle, title);
+        if(val === ''){
+          if(had){
+            const { error } = await supabaseClient.rpc('admin_clear_exam_user_override', { target_user_id: userId, target_exam_title: title });
+            if(error) throw error;
+          }
+        } else {
+          const newEnabled = val === 'true';
+          if(!had || overridesByTitle[title] !== newEnabled){
+            const { error } = await supabaseClient.rpc('admin_set_exam_user_override', { target_user_id: userId, target_exam_title: title, new_enabled: newEnabled });
+            if(error) throw error;
+          }
+        }
+      }
+      resultEl.className = 'msg ok';
+      resultEl.textContent = 'Saved.';
+      setTimeout(close, 500);
+    } catch(err){
+      resultEl.className = 'msg err';
+      resultEl.textContent = 'Could not save: ' + err.message;
+    }
+  };
+}
+
 function renderAdminAccountsView(){
   const sub = document.getElementById('adminSubPanel');
 
@@ -7247,6 +7449,7 @@ function renderAdminAccountsView(){
           <button class="link-btn" data-view-user="${p.user_id}">View Progress</button>
           <button class="link-btn" data-view-events="${p.user_id}">View Security Events</button>
           <button class="link-btn" data-ai-settings-user="${p.user_id}" data-ai-settings-email="${escapeHtml(p.email)}">AI Settings</button>
+          <button class="link-btn" data-exam-access-user="${p.user_id}" data-exam-access-email="${escapeHtml(p.email)}">Exam Access</button>
           ${isSelf ? '' : isProtected ? `
             <span class="lib-badge" style="background:var(--chip);" title="Suspend/delete/role-change are blocked server-side for this account">Protected account</span>
           ` : `
@@ -7319,6 +7522,9 @@ function renderAdminAccountsView(){
   });
   sub.querySelectorAll('button[data-ai-settings-user]').forEach(btn=>{
     btn.onclick = ()=>{ openAiAccountOverrideDialog(btn.dataset.aiSettingsUser, btn.dataset.aiSettingsEmail); };
+  });
+  sub.querySelectorAll('button[data-exam-access-user]').forEach(btn=>{
+    btn.onclick = ()=>{ openExamAccessDialog(btn.dataset.examAccessUser, btn.dataset.examAccessEmail); };
   });
   sub.querySelectorAll('button[data-dismiss-user]').forEach(btn=>{
     btn.onclick = async ()=>{
@@ -7956,6 +8162,65 @@ async function renderPasskeyFeatureConfigSection(){
   }
 }
 
+/* Global per-exam on/off (migration 0041) -- site-wide default is "on"
+   for every exam (no config row = enabled, see the migration's own
+   comment), so this list only ever needs to show/change exams an admin
+   has actually touched, not maintain a row per exam up front. Each
+   checkbox saves immediately on change (no separate Save button) --
+   unlike the AI Features form above, this is a list of ~2 dozen+
+   independent toggles, not one small form, so a per-row save with inline
+   feedback reads better than a single "Save" covering every row at once.
+   Per-account exceptions are a separate surface (openExamAccessDialog(),
+   reached via "Exam Access" on each Accounts row) -- this section is
+   deliberately just the global default. */
+async function renderExamVisibilityConfigSection(){
+  const section = document.getElementById('examVisibilitySection');
+  if(!section) return;
+  try{
+    const { data, error } = await supabaseClient.rpc('admin_list_exam_visibility');
+    if(error) throw error;
+    const exams = data || [];
+    const rows = exams.map((e, i)=>`
+      <label style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);">
+        <input type="checkbox" data-exam-vis-index="${i}" ${e.enabled ? 'checked' : ''}>
+        <span style="flex:1;">${escapeHtml(e.exam_title)}</span>
+        ${e.override_count ? `<span class="format-help">${e.override_count} account${e.override_count>1?'s':''} overridden</span>` : ''}
+        <span class="msg" id="examVisResult-${i}"></span>
+      </label>
+    `).join('') || `<div class="format-help">No exams in the library yet.</div>`;
+    section.innerHTML = `
+      <h2>Exam Visibility</h2>
+      <div class="format-help">Turn any exam on or off for everyone. Default is on. To override for just one account, use "Exam Access" on that account's row in Accounts.</div>
+      <div style="max-width:520px;margin-top:10px;">${rows}</div>
+    `;
+    section.querySelectorAll('input[data-exam-vis-index]').forEach(cb=>{
+      cb.onchange = async ()=>{
+        const idx = parseInt(cb.dataset.examVisIndex, 10);
+        const title = exams[idx].exam_title;
+        const resultEl = document.getElementById('examVisResult-' + idx);
+        cb.disabled = true;
+        try{
+          const { error: saveErr } = await supabaseClient.rpc('admin_set_exam_visibility', { target_exam_title: title, new_enabled: cb.checked });
+          if(saveErr) throw saveErr;
+          exams[idx].enabled = cb.checked;
+          if(resultEl){
+            resultEl.className = 'msg ok';
+            resultEl.textContent = 'Saved.';
+            setTimeout(()=>{ if(resultEl) resultEl.textContent = ''; }, 1500);
+          }
+        } catch(err){
+          cb.checked = !cb.checked;
+          if(resultEl){ resultEl.className = 'msg err'; resultEl.textContent = err.message; }
+        } finally {
+          cb.disabled = false;
+        }
+      };
+    });
+  } catch(err){
+    section.innerHTML = `<h2>Exam Visibility</h2><div class="msg err">Could not load: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
 function renderAdminToolsView(){
   const sub = document.getElementById('adminSubPanel');
   sub.innerHTML = `
@@ -7988,8 +8253,13 @@ function renderAdminToolsView(){
       <h2>Passkey Sign-In</h2>
       <div class="format-help">Loading current settings…</div>
     </div>
+    <div class="subsection" id="examVisibilitySection">
+      <h2>Exam Visibility</h2>
+      <div class="format-help">Loading current settings…</div>
+    </div>
   `;
   renderPasskeyFeatureConfigSection();
+  renderExamVisibilityConfigSection();
   document.getElementById('decodeWatermarkBtn').onclick = ()=>{
     document.getElementById('watermarkResult').textContent = decodeWatermark(document.getElementById('watermarkInput').value, adminData.profiles);
   };
@@ -8464,7 +8734,7 @@ function renderEmptyState(){
   quizPanel.innerHTML = `
     <div class="empty-state-block" style="text-align:center;padding:34px 10px;">
       <div class="qtext" style="margin-bottom:10px;">Choose a test to begin</div>
-      <div class="sub" style="margin-bottom:22px;">Pick one of the 25 exams in the Test Library.</div>
+      <div class="sub" style="margin-bottom:22px;">Pick one of the ${EXAM_LIBRARY.length || 25} exams in the Test Library.</div>
       <button class="btn btn-primary" id="goToLibraryBtn">Test Library</button>
     </div>
   `;
