@@ -6625,7 +6625,7 @@ function renderRoundAttemptsHtml(r){
       ? `<span class="lib-meta" style="font-size:.78rem;">from an uploaded PDF — no detailed review available</span>` : '';
     html += `
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;padding:6px 0;font-family:system-ui,sans-serif;font-size:.85rem;">
-        <span>Attempt ${a.attempt_number} (${a.attempt_scope==='full'?'full exam':'missed-only retake'}) — ${a.status==='completed' ? `${a.correct_count}/${a.total_questions} (${cumulativePct}% cumulative)` : `${a.answeredCount} of ${a.total_questions} answered · paused`}</span>
+        <span>Attempt ${a.attempt_number} (${a.attempt_scope==='full'?'full exam':'missed-only retake'}) — ${a.status==='completed' ? `${a.correct_count}/${a.total_questions} (${cumulativePct}% cumulative)` : `${Math.min(a.answeredCount, a.total_questions)} of ${a.total_questions} answered · paused`}</span>
         <span style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
           ${noReviewNote}
           ${(a.status==='completed' && a.hasAnswers) ? `<button class="link-btn" data-review-attempt="${a.id}" data-exam-key="${escapeHtml(r.exam_key)}">Review</button>` : ''}
@@ -6887,9 +6887,19 @@ function renderProgressPanel(){
          canContinue's own in_progress branch above) previously had no
          at-a-glance sign of how far in you were without expanding "Show
          attempts" -- the summary line only ever talked about mastery
-         across completed attempts. */
+         across completed attempts.
+         Math.min(...) guards against a real, separate data anomaly found
+         live on a real account while building this: some in-progress
+         attempts have more exam_attempt_answers rows than their own
+         total_questions (e.g. "325 of 164"), despite this table's
+         unique(attempt_id, question_index) constraint, which should make
+         that impossible for a single attempt. Root cause not chased down
+         here -- likely legacy data from an earlier pause/resume bug, not
+         something this display change caused -- but the UI shouldn't show
+         a number that reads as "answered more than exist" regardless of
+         why the underlying count is off. */
       const pausedNote = (latestAttempt && latestAttempt.status==='in_progress')
-        ? ` · Paused — ${latestAttempt.answeredCount} of ${latestAttempt.total_questions} answered`
+        ? ` · Paused — ${Math.min(latestAttempt.answeredCount, latestAttempt.total_questions)} of ${latestAttempt.total_questions} answered`
         : '';
       if(effectiveViewMode === 'grid'){
         gridHtml += `
