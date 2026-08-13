@@ -797,6 +797,13 @@ if('serviceWorker' in navigator){
   .msg{font-family:system-ui,sans-serif;font-size:.85rem;margin-top:10px;}
   .msg.err{color:var(--bad);}
   .msg.ok{color:var(--good);}
+  /* For the passkey "nothing registered yet" nudge specifically -- it's
+     not a failure (WebAuthn can't even tell a cancel from "nothing to
+     pick"), just a redirect to the normal password path, so red/--bad
+     reads as more alarming than the message actually is. Plain --ink
+     (normal body text) rather than a literal black, so it still resolves
+     correctly in dark mode. */
+  .msg.neutral{color:var(--ink);}
 
   h2{font-size:1.05rem;margin:0 0 12px;}
   h3{font-size:.95rem;margin:0 0 10px;font-family:system-ui,sans-serif;}
@@ -807,6 +814,17 @@ if('serviceWorker' in navigator){
   .review-line.correct-line{color:var(--good);}
   .review-line.wrong-line{color:var(--bad);}
   .review-explanation{font-size:.85rem;margin-top:6px;padding:8px 10px;background:var(--chip);border-radius:6px;color:var(--muted);}
+  /* Three-dot "thinking" indicator for the AI explanation's loading state --
+     was static "Loading explanation…" text with no motion at all, easy to
+     mistake for a stalled/dead request during the couple of real seconds a
+     fresh (uncached) generation takes. Staggered opacity pulse, not a
+     bounce/scale, so it doesn't fight the surrounding text's baseline. */
+  .loading-dots{display:inline-block;}
+  .loading-dots span{animation:loadingDotPulse 1.4s infinite both;}
+  .loading-dots span:nth-child(2){animation-delay:.2s;}
+  .loading-dots span:nth-child(3){animation-delay:.4s;}
+  @keyframes loadingDotPulse{0%,80%,100%{opacity:.25;}40%{opacity:1;}}
+  @media (prefers-reduced-motion: reduce){ .loading-dots span{animation:none;opacity:1;} }
   .review-explain-row{margin-top:6px;}
   .review-explain-row .ai-explain-btn{margin-top:6px;}
   .review-explain-row .ai-chat-open-btn{margin-top:6px;margin-left:14px;}
@@ -853,7 +871,20 @@ if('serviceWorker' in navigator){
       margin-right:min(420px,100vw);
       transition:margin-right .15s ease;
     }
+    /* Desktop-only "expand to full screen" option, per direct user
+       feedback -- mobile's panel is already a full-screen takeover (see
+       the max-width:900px block below), so there's nothing to expand
+       there; the button itself is hidden under 900px for the same reason.
+       Overrides the docked width/positioning to match mobile's own
+       full-screen values instead of duplicating them. */
+    .ai-chat-panel.expanded{width:100vw;left:0;border-left:none;}
   }
+  /* .ai-chat-header-actions prefix, not a bare .ai-chat-expand-btn selector
+     -- .icon-btn's own display:inline-flex rule (defined later in this
+     stylesheet, same 0,1,0 specificity as a bare class selector here) would
+     otherwise win the cascade on source order alone and silently un-hide
+     this on mobile. */
+  @media (max-width:900px){ .ai-chat-header-actions .ai-chat-expand-btn{display:none;} }
   .ai-chat-header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line);}
   .ai-chat-header h3{margin:0;font-size:1rem;}
   .ai-chat-header-actions{display:flex;gap:2px;flex:none;}
@@ -980,7 +1011,18 @@ if('serviceWorker' in navigator){
      an identical box height the toggle read as the "small" control in the
      row. Bumped to match here, scoped narrowly so flashcards' own mode
      switch is untouched. */
-  .progress-toolbar-controls .view-mode-switch{margin-bottom:0;flex:1 1 140px;}
+  /* .view-mode-switch grows to fill its share of the row (flex:1 1 140px
+     below) but the base .study-mode-switch is display:inline-flex with no
+     justify-content set on itself -- its two buttons stayed content-sized
+     and left-aligned inside the now-wider box, leaving real dead space on
+     the right (the box grew, its contents didn't). Same fix
+     .study-mode-switch.full-width already uses elsewhere, just scoped to
+     this specific instance instead of adding a class: make the pill itself
+     stretch (display:flex) and let its buttons split the width evenly and
+     center their own label within that share, so the pill's visible edge
+     matches its actual box edge with nothing sticking out. */
+  .progress-toolbar-controls .view-mode-switch{margin-bottom:0;flex:1 1 140px;display:flex;}
+  .progress-toolbar-controls .view-mode-switch button{flex:1;justify-content:center;}
   .progress-toolbar-controls .dd{flex:1 1 140px;}
   .progress-toolbar-controls .dd-trigger,
   .progress-toolbar-controls .view-mode-switch,
@@ -990,6 +1032,22 @@ if('serviceWorker' in navigator){
   .progress-toolbar-controls .dd-trigger{width:100%;justify-content:space-between;}
   .progress-toolbar-controls .link-btn{flex:1 1 140px;justify-content:center;}
   .progress-toolbar-controls .view-mode-switch button{font-size:.85rem;}
+  /* Mobile-only reorder, per direct user feedback: the sort dropdown's own
+     label text ("Sort: Name (A–Z)") doesn't shrink below its content width
+     (no explicit min-width:0, and .dd is display:inline-block), so on a
+     phone-width row it always claims a full line and pushes the AI-feedback
+     button to wrap onto its own line below rather than sharing the row --
+     confirmed via measurement, not assumed (both ended up 300px wide,
+     stacked, at 390px viewport width). Reordering with flex `order` (not
+     touching controlsRowHtml's actual markup order, which desktop's own
+     single-row layout still relies on unchanged) puts the AI-feedback
+     button first and the sort dropdown second/below it, on mobile only --
+     this media query only matches <=900px, same breakpoint
+     isMobileViewport already uses server-side, so desktop's row is
+     untouched either way. */
+  @media (max-width:900px){
+    .progress-toolbar-controls .dd{order:2;}
+  }
   .subsection{border-top:1px solid var(--line);margin-top:18px;padding-top:18px;}
   .lib-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;}
   /* .lib-info had no min-width set, and flex items default to
@@ -2483,6 +2541,10 @@ let aiChatEl = null;
 // session doesn't silently carry over and confuse "click elsewhere did
 // nothing" into looking like a bug next time the panel opens.
 let aiChatPinned = false;
+// Desktop-only (mobile's panel is already a full-screen takeover, nothing
+// to expand there -- the toggle button itself is hidden under 900px, same
+// convention as aiChatPinned's own reset-on-close rule below.
+let aiChatExpanded = false;
 
 function ensureAiChatPanel(){
   if(aiChatEl) return aiChatEl;
@@ -2500,6 +2562,7 @@ function ensureAiChatPanel(){
         <div class="ai-chat-qtext" id="aiChatQtext"></div>
       </div>
       <div class="ai-chat-header-actions">
+        <button type="button" class="icon-btn ai-chat-expand-btn" id="aiChatExpandBtn" aria-label="Expand chat to full screen" aria-pressed="false" title="Expand to full screen">${icon('expand')}</button>
         <button type="button" class="icon-btn ai-chat-pin-btn" id="aiChatPinBtn" aria-label="Pin chat open" aria-pressed="false" title="Keep chat open when clicking elsewhere">${icon('pin')}</button>
         <button type="button" class="icon-btn" id="aiChatCloseBtn" aria-label="Close chat">${icon('close')}</button>
       </div>
@@ -2517,6 +2580,7 @@ function ensureAiChatPanel(){
   document.body.appendChild(panel);
   panel.querySelector('#aiChatCloseBtn').onclick = closeAiChat;
   panel.querySelector('#aiChatPinBtn').onclick = toggleAiChatPin;
+  panel.querySelector('#aiChatExpandBtn').onclick = toggleAiChatExpand;
   panel.querySelector('#aiChatSendBtn').onclick = sendAiChatMessage;
   panel.querySelector('#aiChatInput').addEventListener('keydown', (e)=>{
     if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendAiChatMessage(); }
@@ -2572,11 +2636,28 @@ function closeAiChat(){
   aiChatCurrentQuestion = null;
   aiChatPinned = false;
   updateAiChatPinUI();
+  aiChatExpanded = false;
+  updateAiChatExpandUI();
 }
 
 function toggleAiChatPin(){
   aiChatPinned = !aiChatPinned;
   updateAiChatPinUI();
+}
+
+function toggleAiChatExpand(){
+  aiChatExpanded = !aiChatExpanded;
+  updateAiChatExpandUI();
+}
+
+function updateAiChatExpandUI(){
+  if(!aiChatEl) return;
+  aiChatEl.panel.classList.toggle('expanded', aiChatExpanded);
+  const btn = aiChatEl.panel.querySelector('#aiChatExpandBtn');
+  btn.innerHTML = icon(aiChatExpanded ? 'collapse' : 'expand');
+  btn.setAttribute('aria-pressed', String(aiChatExpanded));
+  btn.setAttribute('aria-label', aiChatExpanded ? 'Collapse chat back to side panel' : 'Expand chat to full screen');
+  btn.title = aiChatExpanded ? 'Back to side panel' : 'Expand to full screen';
 }
 
 function updateAiChatPinUI(){
@@ -2720,7 +2801,6 @@ function renderQuestion(){
   const q = exam.questions[current];
   const total = exam.questions.length;
   const answeredCount = Object.keys(answers).length;
-  const letters = ['1','2','3','4','5','6'];
   const qNum = q.originalNumber || (current+1);
   // exam.type is the authoritative signal (threaded through every
   // fresh-start/resume/retake construction path -- see loadExam() callers)
@@ -2781,7 +2861,7 @@ function renderQuestion(){
         </div>
       `;
       if(recallAiToggle && aiFeatureFlags.explain_enabled){
-        html += `<div class="review-explanation" id="aiExplainBlock"><em>Loading explanation…</em></div>`;
+        html += `<div class="review-explanation" id="aiExplainBlock">${loadingDotsHtml('Loading explanation')}</div>`;
       }
     }
   } else {
@@ -2795,7 +2875,7 @@ function renderQuestion(){
         else if(sel){ cls = 'incorrect'; tag = ' — not correct'; }
       }
       html += `<button type="button" class="opt ${cls}" data-i="${i}" aria-pressed="${sel}">
-        <span class="letter">${letters[i]}</span><span>${escapeHtml(opt)}${tag}</span>
+        <span class="letter">${optionLabel(i)}</span><span>${escapeHtml(opt)}${tag}</span>
       </button>`;
     });
     // Filled in below, after quizPanel.innerHTML is set -- the fetch itself
@@ -2803,7 +2883,7 @@ function renderQuestion(){
     // so this always starts as a loading placeholder, never a flash of
     // stale content from the previous question.
     if(showFeedback && aiFeatureFlags.explain_enabled){
-      html += `<div class="review-explanation" id="aiExplainBlock"><em>Loading explanation…</em></div>`;
+      html += `<div class="review-explanation" id="aiExplainBlock">${loadingDotsHtml('Loading explanation')}</div>`;
     }
   }
   html += `</div>`; // closes .quiz-question-block
@@ -3096,7 +3176,6 @@ function renderResults(){
 function renderReviewList(indices, questions, answersMap){
   questions = questions || exam.questions;
   answersMap = answersMap || answers;
-  const letters = ['1','2','3','4','5','6'];
   if(indices.length===0){
     return `<div class="all-correct">${icon('check')}<span>Perfect score — nothing to review.</span></div>`;
   }
@@ -3131,7 +3210,7 @@ function renderReviewList(indices, questions, answersMap){
         let tag = '';
         if(oi === q.correct){ cls = 'correct-line'; tag = ' ✓ correct answer'; }
         else if(oi === userAns){ cls = 'wrong-line'; tag = ' — your answer'; }
-        html += `<div class="review-line ${cls}">${letters[oi]}) ${escapeHtml(opt)}${tag}</div>`;
+        html += `<div class="review-line ${cls}">${optionLabel(oi)}) ${escapeHtml(opt)}${tag}</div>`;
       });
       if(userAns===undefined){
         html += `<div class="review-line wrong-line">Not answered</div>`;
@@ -3203,7 +3282,7 @@ function wireReviewList(container, questions){
       btn.setAttribute('aria-pressed','true');
       btn.disabled = true;
       textEl.hidden = false;
-      textEl.innerHTML = '<em>Loading explanation…</em>';
+      textEl.innerHTML = loadingDotsHtml('Loading explanation');
       fetchAiExplanation(q).then(explanation=>{
         textEl.innerHTML = `<strong>Explanation:</strong> ${escapeHtml(explanation)}`;
         btn.disabled = false;
@@ -3251,6 +3330,26 @@ function escapeHtml(s){
   return (s||'').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 
+/* Numeric option label (1, 2, 3, ...) for a given zero-based option index.
+   Used to be a fixed `const letters = ['1','2','3','4','5','6']` array,
+   independently duplicated at three render sites -- broke silently
+   (rendered "undefined", not an error) on any question with more than 6
+   options, which real exam content actually has: the verified library has
+   real questions with up to 11 options (Exams 7, 14, 21-25 specifically).
+   Computed, so there's no cap to run into ever again. */
+function optionLabel(i){
+  return String(i + 1);
+}
+
+/* Shared "still working on it" markup for the AI explanation's loading
+   state -- three spans, staggered via .loading-dots' own CSS animation
+   (see its declaration for why: was static, easy to mistake for a stalled
+   request). One helper instead of copy-pasting the same three spans at
+   each of the three places an explanation can be loading. */
+function loadingDotsHtml(label){
+  return `<em>${escapeHtml(label)}<span class="loading-dots"><span>.</span><span>.</span><span>.</span></span></em>`;
+}
+
 /* ================= icon system =================
    Site-wide replacement for the emoji glyphs (⚙ 💾 🔀 🗑 etc.) that used
    to stand in for real icons -- one consistent stroke-icon set instead,
@@ -3270,6 +3369,7 @@ const ICONS = {
   progress: '<line x1="5" y1="19" x2="5" y2="13"/><line x1="12" y1="19" x2="12" y2="8"/><line x1="19" y1="19" x2="19" y2="4"/>',
   more: '<circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/>',
   expand: '<path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/>',
+  collapse: '<path d="M9 4v5H4"/><path d="M15 4v5h5"/><path d="M9 20v-5H4"/><path d="M15 20v-5h5"/>',
   close: '<line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/>',
   check: '<path d="M4 12.5l5 5L20 6.5"/>',
   flag: '<line x1="6" y1="4" x2="6" y2="20"/><path d="M6 5h11l-3 4 3 4H6z"/>',
@@ -4562,18 +4662,17 @@ function renderFlashcard(){
       `;
     }
   } else {
-    const letters = ['1','2','3','4','5','6'];
     const card = flashcards[flashIndex];
     let frontOptsHtml = '', backOptsHtml = '';
     card.options.forEach((opt,oi)=>{
       frontOptsHtml += `<button type="button" class="opt" data-flash-opt="${oi}">
-        <span class="letter">${letters[oi]}</span><span>${escapeHtml(opt)}</span>
+        <span class="letter">${optionLabel(oi)}</span><span>${escapeHtml(opt)}</span>
       </button>`;
       let cls = '', tag = '';
       if(oi===card.correct){ cls = 'correct'; tag = ' ✓'; }
       else if(oi===flashSelectedOption){ cls = 'incorrect'; tag = ' — your answer'; }
       backOptsHtml += `<button type="button" class="opt ${cls}" disabled>
-        <span class="letter">${letters[oi]}</span><span>${escapeHtml(opt)}${tag}</span>
+        <span class="letter">${optionLabel(oi)}</span><span>${escapeHtml(opt)}${tag}</span>
       </button>`;
     });
     const explanationHtml = (answered && card.explanation)
@@ -4801,7 +4900,15 @@ function libraryExplanationLookup(examKey){
   entry.questions.forEach(q=>{ if(q.explanation) map.set(q.text, q.explanation); });
   return map;
 }
-const MASTERY_THRESHOLD = 0.98;
+/* 0.975, not 0.98 -- per direct user feedback. The grid view's progress
+   ring displays Math.round(pct)% (renderProgressRing), so a raw 97.5%
+   round already visibly reads as "98%" on screen; requiring a true 0.98
+   to actually flip mastered=true meant a round could sit at "98%" in the
+   UI while the underlying data said not-yet-mastered -- confusing, and
+   arguably just wrong once the display already rounds that high. 0.975
+   is the exact point Math.round starts returning 98, so "shows 98%" and
+   "is mastered" now agree in both directions. */
+const MASTERY_THRESHOLD = 0.975;
 const funnelEngine = {
   startRound(examKey, examTitle, originalTotal, existingRounds){
     const priorNumbers = existingRounds.filter(r=>r.examKey===examKey).map(r=>r.roundNumber);
@@ -5015,6 +5122,13 @@ let libraryLoaded = false;
 let libraryLoading = false;
 let authScreen = 'signin'; // 'signin' | 'signup' | 'forgot' | 'reset-password' | 'verify-notice' | 'unlock'
 let authError = '';
+/* True only while authError holds passkeyErrorMessage()'s friendly
+   "sign in to turn this on" nudge (handlePasskeySignIn/attemptAutoUnlock's
+   catch blocks) -- every other authError assignment sets this back to
+   false alongside it, so a real password/signup/reset failure always
+   renders with the normal --bad red regardless of what was on screen
+   right before it. */
+let authErrorIsPasskeyNudge = false;
 let authMessage = '';
 let turnstileWidgetId = null;
 /* Set right before a real signInWithPassword() call, consumed (and
@@ -5072,15 +5186,22 @@ function renderTurnstileWidget(){
   const container = document.getElementById('turnstileWidget');
   if(!container) return;
   if(window.turnstile){
-    /* size:'compact' (150x140, narrower/taller) instead of the 300px-wide
-       default -- the default doesn't fit inside the auth card's usable
-       width on a phone once the card's own padding is subtracted, and
-       Cloudflare's iframe doesn't shrink to its container on its own,
-       so it was visually breaking out past the card edge. Compact fits
-       comfortably at any real phone width; the CSS below is a second,
-       defensive layer of containment in case a future/rare challenge
-       state ever renders wider than that. */
-    turnstileWidgetId = window.turnstile.render(container, { sitekey: TURNSTILE_SITE_KEY, size: 'compact' });
+    /* size:'flexible' -- was 'compact' (a fixed ~150x140 square block),
+       chosen at the time over the 300px-wide 'normal' because normal
+       overflowed the auth card on a phone. Compact fixed that overflow but
+       traded it for a different awkwardness, per direct user feedback: a
+       squarish, fairly tall block that doesn't read as part of the same
+       form as the email/password fields above it, on desktop OR mobile.
+       'flexible' is Cloudflare's actual answer to this -- it sizes to its
+       container's own width (auto-stretches to match the email/password
+       inputs above it, same flex column, same effective width) at a slim
+       ~65px height instead of a separate fixed-size block, so it reads as
+       one more row in the form rather than a foreign element dropped into
+       it. No container-width CSS needed for this to work: the auth form's
+       already flex-direction:column with default align-items:stretch, so
+       #turnstileWidget already stretches to the column's full width the
+       same way the input fields do. */
+    turnstileWidgetId = window.turnstile.render(container, { sitekey: TURNSTILE_SITE_KEY, size: 'flexible' });
   } else {
     setTimeout(renderTurnstileWidget, 200);
   }
@@ -5118,10 +5239,15 @@ function renderAuthView(){
     return;
   }
   let html = '';
+  // Real password/signup/reset failures render red (msg err); the
+  // passkey "nothing registered yet" nudge renders as normal body text
+  // (msg neutral) since it isn't actually a failure -- see
+  // authErrorIsPasskeyNudge's own declaration for why.
+  const authErrorClass = authErrorIsPasskeyNudge ? 'msg neutral' : 'msg err';
   if(authScreen === 'signin'){
     html = `
       <h2>Sign In</h2>
-      ${authError ? `<div class="msg err">${escapeHtml(authError)}</div>` : ''}
+      ${authError ? `<div class="${authErrorClass}">${escapeHtml(authError)}</div>` : ''}
       ${authMessage ? `<div class="msg ok">${escapeHtml(authMessage)}</div>` : ''}
       <div style="display:flex;flex-direction:column;gap:10px;font-family:system-ui,sans-serif;max-width:340px;">
         <input type="email" id="authEmail" placeholder="Email" autocomplete="email">
@@ -5141,7 +5267,7 @@ function renderAuthView(){
     html = `
       <h2>Request Early Access</h2>
       <div class="format-help" style="margin-bottom:12px;">New accounts are reviewed by an admin before you can sign in — this creates your account and puts it in the queue.</div>
-      ${authError ? `<div class="msg err">${escapeHtml(authError)}</div>` : ''}
+      ${authError ? `<div class="${authErrorClass}">${escapeHtml(authError)}</div>` : ''}
       <div style="display:flex;flex-direction:column;gap:10px;font-family:system-ui,sans-serif;max-width:340px;">
         <input type="email" id="authEmail" placeholder="Email" autocomplete="email">
         <div class="pw-field">
@@ -5158,7 +5284,7 @@ function renderAuthView(){
   } else if(authScreen === 'forgot'){
     html = `
       <h2>Reset Password</h2>
-      ${authError ? `<div class="msg err">${escapeHtml(authError)}</div>` : ''}
+      ${authError ? `<div class="${authErrorClass}">${escapeHtml(authError)}</div>` : ''}
       ${authMessage ? `<div class="msg ok">${escapeHtml(authMessage)}</div>` : ''}
       <div style="display:flex;flex-direction:column;gap:10px;font-family:system-ui,sans-serif;max-width:340px;">
         <input type="email" id="authEmail" placeholder="Email" autocomplete="email">
@@ -5172,7 +5298,7 @@ function renderAuthView(){
   } else if(authScreen === 'reset-password'){
     html = `
       <h2>Choose a New Password</h2>
-      ${authError ? `<div class="msg err">${escapeHtml(authError)}</div>` : ''}
+      ${authError ? `<div class="${authErrorClass}">${escapeHtml(authError)}</div>` : ''}
       <div style="display:flex;flex-direction:column;gap:10px;font-family:system-ui,sans-serif;max-width:340px;">
         <div class="pw-field">
           <input type="password" id="authNewPassword" placeholder="New password (min 6 characters)" autocomplete="new-password">
@@ -5203,7 +5329,7 @@ function renderAuthView(){
         </div>
         <h2 style="margin:0 0 6px;">Unlock NHA Exam Prep</h2>
         <div class="format-help" style="margin-bottom:4px;">${isIos ? 'Unlocking…' : 'Tap below to unlock with your fingerprint.'}</div>
-        ${authError ? `<div class="msg err" style="margin-top:14px;text-align:left;">${escapeHtml(authError)}</div>` : ''}
+        ${authError ? `<div class="${authErrorClass}" style="margin-top:14px;text-align:left;">${escapeHtml(authError)}</div>` : ''}
         <div class="cf-turnstile" id="turnstileWidget" style="margin:18px auto 4px;"></div>
         ${!isIos ? `<button class="btn btn-primary" id="unlockNowBtn" type="button" style="margin-top:10px;">${icon('fingerprint')}Unlock</button>` : ''}
         <div style="margin-top:22px;">
@@ -5225,16 +5351,16 @@ function renderAuthView(){
   if(authScreen === 'signin') wireAuthPasswordToggle(); else wirePasswordToggle('authPassword', 'authPasswordToggle');
   wirePasswordToggle('authNewPassword', 'authNewPasswordToggle');
   const goSignup = document.getElementById('goSignupBtn');
-  if(goSignup) goSignup.onclick = ()=>{ authScreen='signup'; authError=''; authMessage=''; renderAuthView(); };
+  if(goSignup) goSignup.onclick = ()=>{ authScreen='signup'; authError=''; authErrorIsPasskeyNudge=false; authMessage=''; renderAuthView(); };
   const goSignin = document.getElementById('goSigninBtn');
-  if(goSignin) goSignin.onclick = ()=>{ authScreen='signin'; authError=''; authMessage=''; renderAuthView(); };
+  if(goSignin) goSignin.onclick = ()=>{ authScreen='signin'; authError=''; authErrorIsPasskeyNudge=false; authMessage=''; renderAuthView(); };
   const goForgot = document.getElementById('goForgotBtn');
-  if(goForgot) goForgot.onclick = ()=>{ authScreen='forgot'; authError=''; authMessage=''; renderAuthView(); };
+  if(goForgot) goForgot.onclick = ()=>{ authScreen='forgot'; authError=''; authErrorIsPasskeyNudge=false; authMessage=''; renderAuthView(); };
   const submitBtn = document.getElementById('authSubmitBtn');
   if(submitBtn) submitBtn.onclick = handleAuthSubmit;
   if(authScreen === 'unlock'){
     const usePasswordBtn = document.getElementById('unlockUsePasswordBtn');
-    if(usePasswordBtn) usePasswordBtn.onclick = ()=>{ authScreen='signin'; authError=''; renderAuthView(); };
+    if(usePasswordBtn) usePasswordBtn.onclick = ()=>{ authScreen='signin'; authError=''; authErrorIsPasskeyNudge=false; renderAuthView(); };
     const unlockNowBtn = document.getElementById('unlockNowBtn');
     if(unlockNowBtn) unlockNowBtn.onclick = ()=>{ unlockNowBtn.disabled = true; attemptAutoUnlock(); };
     // iOS only, and only the first time this screen is entered (not on
@@ -5299,6 +5425,7 @@ function wireAuthPasswordToggle(){
 
 async function handleAuthSubmit(){
   authError = '';
+  authErrorIsPasskeyNudge = false;
   const submitBtn = document.getElementById('authSubmitBtn');
   submitBtn.disabled = true;
   try{
@@ -5366,6 +5493,7 @@ async function handleAuthSubmit(){
     }
   } catch(err){
     authError = err.message;
+    authErrorIsPasskeyNudge = false;
     renderAuthView();
   }
 }
@@ -5413,12 +5541,14 @@ async function attemptPasskeySignIn(){
 
 async function handlePasskeySignIn(){
   authError = '';
+  authErrorIsPasskeyNudge = false;
   const btn = document.getElementById('authPasswordToggle');
   if(btn) btn.disabled = true;
   try{
     await attemptPasskeySignIn();
   } catch(err){
     authError = passkeyErrorMessage(err, 'signin');
+    authErrorIsPasskeyNudge = true;
     renderAuthView();
   }
 }
@@ -5437,6 +5567,7 @@ async function attemptAutoUnlock(){
   } catch(err){
     authScreen = 'signin';
     authError = passkeyErrorMessage(err, 'signin');
+    authErrorIsPasskeyNudge = true;
     renderAuthView();
   }
 }
@@ -5973,7 +6104,7 @@ async function applyAccessGate(authEvent){
       explicitSignOutJustHappened = false;
       authScreen = (!skipUnlock && shouldShowUnlockSplash()) ? 'unlock' : 'signin';
       authUnlockAttempted = false;
-      authError=''; authMessage='';
+      authError=''; authErrorIsPasskeyNudge=false; authMessage='';
     }
     showView('auth');
     return;
@@ -6078,7 +6209,7 @@ supabaseClient.auth.onAuthStateChange((event, session) => {
   currentUser = session ? session.user : null;
   if(event === 'PASSWORD_RECOVERY'){
     pendingPasswordRecovery = false;
-    authScreen = 'reset-password'; authError=''; authMessage='';
+    authScreen = 'reset-password'; authError=''; authErrorIsPasskeyNudge=false; authMessage='';
     setShellChromeVisible(false);
     showView('auth');
     return;
@@ -6401,7 +6532,7 @@ async function renderProgressView(){
       const roundAttempts = attempts.filter(a=>a.round_id===r.id)
         .map(a=>{
           const answerCount = answerCountByAttempt[a.id] || 0;
-          return { ...a, hasAnswers: answerCount > 0 };
+          return { ...a, hasAnswers: answerCount > 0, answeredCount: answerCount };
         });
       examsMap[r.exam_key].rounds.push({ ...r, attempts: roundAttempts });
     });
@@ -6481,7 +6612,7 @@ function renderRoundAttemptsHtml(r){
       ? `<span class="lib-meta" style="font-size:.78rem;">from an uploaded PDF — no detailed review available</span>` : '';
     html += `
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;padding:6px 0;font-family:system-ui,sans-serif;font-size:.85rem;">
-        <span>Attempt ${a.attempt_number} (${a.attempt_scope==='full'?'full exam':'missed-only retake'}) — ${a.correct_count}/${a.total_questions}${a.status==='completed' ? ` (${cumulativePct}% cumulative)` : ' · in progress'}</span>
+        <span>Attempt ${a.attempt_number} (${a.attempt_scope==='full'?'full exam':'missed-only retake'}) — ${a.status==='completed' ? `${a.correct_count}/${a.total_questions} (${cumulativePct}% cumulative)` : `${a.answeredCount} of ${a.total_questions} answered · paused`}</span>
         <span style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
           ${noReviewNote}
           ${(a.status==='completed' && a.hasAnswers) ? `<button class="link-btn" data-review-attempt="${a.id}" data-exam-key="${escapeHtml(r.exam_key)}">Review</button>` : ''}
@@ -6729,8 +6860,24 @@ function renderProgressPanel(){
          exists (mastered or not). continueRoundFromProgress() flips status
          back to in_progress once you actually pick this back up. */
       const latestAttempt = r.attempts.length ? r.attempts.reduce((a,b)=> a.attempt_number > b.attempt_number ? a : b) : null;
-      const canContinue = (r.status==='in_progress' || r.status==='abandoned') && latestAttempt &&
+      /* 'mastered' is included here too, per direct user feedback --
+         MASTERY_THRESHOLD is 0.975, not a true 1.0, so a "mastered" round
+         can still have real questions left in funnel_missed_count (the
+         same r.funnel_missed_count>0 check the abandoned/in_progress cases
+         already require below). Reaching mastery shouldn't be a hard stop
+         if there's still real room to finish it off -- only a genuine
+         100% (funnel_missed_count===0) has nothing left to continue,
+         which this condition already excludes on its own. */
+      const canContinue = (r.status==='in_progress' || r.status==='abandoned' || r.status==='mastered') && latestAttempt &&
         (latestAttempt.status==='in_progress' || (latestAttempt.hasAnswers && r.funnel_missed_count > 0));
+      /* A round paused mid-attempt (the actively-resumable case, per
+         canContinue's own in_progress branch above) previously had no
+         at-a-glance sign of how far in you were without expanding "Show
+         attempts" -- the summary line only ever talked about mastery
+         across completed attempts. */
+      const pausedNote = (latestAttempt && latestAttempt.status==='in_progress')
+        ? ` · Paused — ${latestAttempt.answeredCount} of ${latestAttempt.total_questions} answered`
+        : '';
       if(effectiveViewMode === 'grid'){
         gridHtml += `
           <div class="round-card ${r.status==='mastered'?'mastered':''} ${r.status==='abandoned'?'abandoned':''}">
@@ -6741,7 +6888,7 @@ function renderProgressPanel(){
               </div>
               ${renderProgressRing(masteredPctNum, r.status==='mastered')}
             </div>
-            <div class="round-card-meta">${masteredSoFar} of ${r.original_total} mastered${r.status!=='mastered' ? ` · ${r.original_total - masteredSoFar} left` : ''} · ${r.attempts.length} attempt(s)</div>
+            <div class="round-card-meta">${masteredSoFar} of ${r.original_total} mastered${r.status!=='mastered' ? ` · ${r.original_total - masteredSoFar} left` : ''} · ${r.attempts.length} attempt(s)${pausedNote}</div>
             <div class="round-card-actions">
               ${canContinue ? `<button class="btn btn-ghost" data-continue-round="${r.id}">Continue</button>` : ''}
               <button class="link-btn" data-round-toggle="${r.id}">${expanded ? 'Hide' : 'Show'} attempts</button>
@@ -6756,7 +6903,7 @@ function renderProgressPanel(){
               <div class="lib-info" style="flex:1;min-width:220px;">
                 <div class="lib-title">Round ${r.round_number}${masteryBadge}${r.status==='abandoned' ? ' <span class="lib-badge" style="margin-left:8px;">Abandoned</span>' : ''}</div>
                 <div class="funnel-bar"><div class="funnel-bar-fill" style="width:${masteredPct}%;"></div></div>
-                <div class="lib-meta">${masteredPct}% — ${masteredSoFar} of ${r.original_total} mastered so far${r.status!=='mastered' ? ` · ${r.original_total - masteredSoFar} left` : ''} · ${r.attempts.length} attempt(s)</div>
+                <div class="lib-meta">${masteredPct}% — ${masteredSoFar} of ${r.original_total} mastered so far${r.status!=='mastered' ? ` · ${r.original_total - masteredSoFar} left` : ''} · ${r.attempts.length} attempt(s)${pausedNote}</div>
               </div>
               <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                 ${canContinue ? `<button class="btn btn-ghost" data-continue-round="${r.id}" style="padding:4px 10px;font-size:.8rem;">Continue (Missed Only)</button>` : ''}
