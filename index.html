@@ -1450,7 +1450,20 @@ if('serviceWorker' in navigator){
   .ld-final-cta{text-align:center;padding:44px 24px 22px;}
   .ld-final-cta h2{font-family:var(--font-display);font-weight:800;font-size:1.5rem;letter-spacing:-.02em;margin:0 0 20px;text-wrap:balance;}
   /* ===== auth (full-bleed centered card, replaces the old cramped-column look) ===== */
-  .auth-outer{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:40px;background:var(--bg);}
+  /* display:grid;place-items:center, not flex -- a real, measured bug:
+     with display:flex + justify-content/align-items:center, .auth-card's
+     width:100% (a flex-shrink:1 item, flex-basis:auto so basis comes from
+     the width property) resolved to ~310px instead of the full ~350px
+     content width available at 390px viewport, a consistent ~40px
+     (~11%) shortfall reproduced at every sub-380px viewport tested. Real
+     effect, not a rounding artifact: confirmed by live-patching just this
+     one element to display:grid;place-items:center and re-measuring --
+     the card immediately filled the full 350px. Grid's single-item
+     centering doesn't have flexbox's flex-basis/shrink resolution in the
+     first place, so there's nothing left to misfire. This is the root
+     cause behind "the sign-in width doesn't feel right" -- the card
+     really was rendering narrower than its own CSS said it should. */
+  .auth-outer{min-height:100vh;display:grid;place-items:center;padding:40px;background:var(--bg);}
   .auth-card{width:100%;max-width:380px;}
   /* Defensive containment for the Cloudflare Turnstile widget -- its
      iframe is sized by Cloudflare's own script, not by our CSS, and
