@@ -1607,8 +1607,27 @@ if('serviceWorker' in navigator){
      first place, so there's nothing left to misfire. This is the root
      cause behind "the sign-in width doesn't feel right" -- the card
      really was rendering narrower than its own CSS said it should. */
-  .auth-outer{min-height:100vh;display:grid;place-items:center;padding:40px;background:var(--bg);}
-  .auth-card{width:100%;max-width:380px;}
+  .auth-outer{min-height:100vh;display:grid;align-items:center;justify-items:stretch;background:var(--bg);
+    /* The page sets viewport-fit=cover, so on a notched device the layout
+       viewport extends UNDER the notch/rounded corners and the browser does
+       not pad it for you -- the page has to. Every other full-bleed container
+       in this file already does exactly this (see .wrap, #quizView.quiz-fullscreen,
+       .bottom-bar); .auth-outer was the one that didn't, so it centred its card
+       in the FULL width including the occluded strip, which reads as the card
+       sitting off-centre toward the un-notched side. max() keeps the existing
+       roomy desktop framing wherever the inset is 0. */
+    padding:40px max(40px,env(safe-area-inset-right)) 40px max(40px,env(safe-area-inset-left));}
+    /* min-width:0 + margin-inline:auto, with justify-items:stretch on the
+     parent instead of place-items:center. REAL BUG this fixes: with a
+     centred grid item, the card was sized to its CONTENT, so when the
+     Turnstile widget injected its fixed 300px iframe after first paint
+     the card grew past its column and overflowed to the right -- ending
+     up flush against the right edge with all the slack on the left.
+     That is exactly the "renders correct for a second and then reverts"
+     symptom, because Turnstile loads asynchronously. Stretching the item
+     and centring it with auto margins makes the card's width depend on
+     the column, never on what is inside it. */
+  .auth-card{width:100%;max-width:380px;min-width:0;margin-inline:auto;}
   /* Defensive containment for the Cloudflare Turnstile widget -- its
      iframe is sized by Cloudflare's own script, not by our CSS, and
      doesn't shrink to fit a narrow container on its own. Centers it and
@@ -1631,8 +1650,17 @@ if('serviceWorker' in navigator){
      card every other screen in this app gets on mobile. Tightened here,
      mobile-only, so desktop's generous framing is untouched. */
   @media (max-width:480px){
-    .auth-outer{padding:20px;}
+    /* Horizontal padding dropped to 0 here (kept vertically): .wrap already
+       pads 20px each side, so this was a second helping that left only
+       262px of content at 390px wide -- less than the 300px Turnstile
+       needs. Safe-area insets still respected for notched devices. */
+    .auth-outer{padding:20px max(0px,env(safe-area-inset-right)) 20px max(0px,env(safe-area-inset-left));}
   }
+  /* Turnstile renders a fixed-width (300px) iframe it does not resize.
+     Below ~390px there is genuinely not enough room for it, so confine
+     any remaining overflow to this element instead of letting it resize
+     the card. Nothing is clipped -- the widget stays fully reachable. */
+  .cf-turnstile{max-width:100%;overflow-x:auto;}
   .auth-brand{display:flex;align-items:center;gap:10px;font-family:var(--font-display);font-weight:800;font-size:1.2rem;letter-spacing:-.02em;margin-bottom:26px;color:var(--ink);}
   .auth-brand .mark{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,#8FA6FF,#5B6BFF);display:flex;align-items:center;justify-content:center;}
 
