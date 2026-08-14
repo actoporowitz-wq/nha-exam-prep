@@ -1776,6 +1776,27 @@ let flashIndex = 0;
 let flashSelectedOption = null; // null = unanswered; otherwise the clicked option index, revealing the correct answer
 let flashFullScreen = false; // true = card covers the whole viewport (header/tabs/generator hidden), study-mode style
 
+/* AI Explanation toggle for the currently-shown card, same on-demand
+   click-to-request pattern as renderReviewList()/wireReviewList() (see
+   fetchAiExplanation) -- reuses that same in-memory cache, just with a
+   single-card UI instead of a per-row one, since only one card is ever
+   visible at a time here. Keyed off flashAiExplainKey (the current card's
+   question_key) rather than reset on every navigation handler individually
+   -- render time just checks the toggle's key against the card actually
+   being shown, so any navigation (Next/Prev, shuffle, rate, mode switch,
+   etc.) naturally reverts to "off" for the new card with nothing extra to
+   remember to reset. Click-to-request, never auto-shown on flip -- explicit
+   product decision, matching review screens rather than exam-taking's
+   auto-show (which is tied to the "show correct answer instantly" toggle
+   during a scored attempt; flashcards are open-ended study, not that).
+   Gated on its own admin toggle (flashcard_explain_enabled, migration
+   0051), independent of explain_enabled -- see that migration's own
+   comment for why. */
+let flashAiExplainOn = false;
+let flashAiExplainLoading = false;
+let flashAiExplainText = null;
+let flashAiExplainKey = null;
+
 /* ---- True recall mode: study by producing the answer from memory (no
    multiple-choice options), then self-rate "knew it" / "didn't know it".
    Round-based, same funnel philosophy as the rest of this app -- a pass
@@ -2207,12 +2228,19 @@ document.getElementById('submitFeedbackBtn').onclick = async ()=>{
   if(!currentUser){ fbMsgEl.className = 'msg err'; fbMsgEl.textContent = 'Sign in first.'; fbMsgEl.style.display = ''; return; }
   const category = fbCategoryValue;
   try{
-    const { error } = await supabaseClient.from('user_feedback').insert({
+    const { data: inserted, error } = await supabaseClient.from('user_feedback').insert({
       user_id: currentUser.id, category, message, page: location.pathname
-    });
+    }).select('id').single();
     if(error) throw error;
     fbMessageEl.value = '';
     dismissModal(closeFeedbackPanel);
+    /* Fire-and-forget -- the feedback itself is already saved regardless
+       of whether this admin-notification email succeeds, so failures here
+       are logged, never shown to the submitting user. */
+    if(inserted && inserted.id){
+      supabaseClient.functions.invoke('notify-feedback-received', { body: { feedback_id: inserted.id } })
+        .catch(err=> console.error('notify-feedback-received failed:', err));
+    }
   }catch(err){
     fbMsgEl.className = 'msg err';
     fbMsgEl.textContent = 'Could not send feedback: ' + err.message;
@@ -2495,6 +2523,12 @@ let aiFeatureFlags = {
   explain_enabled: true, chat_enabled: true, chat_turn_limit: 5,
   chat_period_limit: 750, chat_period_days: 30, chat_period_used: 0,
   progress_feedback_enabled: true,
+  // Optimistic-default exception: every other flag here defaults true
+  // (fail-open until the real server value loads) -- this one defaults
+  // false on purpose, since it's a newly-merged feature going live for
+  // the first time (see migration 0051), not something already in normal
+  // use that should stay working during the brief gap before this loads.
+  flashcard_explain_enabled: false,
 };
 async function loadAiFeatureFlags(){
   try{
@@ -4445,6 +4479,79 @@ function restartRecallSession(){
   renderFlashcard();
 }
 
+function flashCardKey(card){
+  return card.text.trim().toLowerCase();
+}
+function getCurrentFlashCard(){
+  return flashMode === 'recall' ? flashRecallQueue[flashRecallPos] : flashcards[flashIndex];
+}
+// Shared by both flashcard modes -- AI Explanation REPLACES the bank
+// explanation when toggled on (never shown alongside it, same "one
+// explanation slot" rule renderReviewList()'s review-explain-row already
+// established), and the AI Explain button appears even when there's no
+// bank explanation to fall back on, same as the review screens. Gated on
+// flashcard_explain_enabled (its own admin toggle, migration 0051), not
+// explain_enabled -- this is a separate on/off switch by design.
+function renderFlashExplainRow(card){
+  const key = flashCardKey(card);
+  const showAi = flashAiExplainOn && flashAiExplainKey === key;
+  const loading = showAi && flashAiExplainLoading;
+  let html = `<div class="review-explain-row">`;
+  if(showAi){
+    html += loading
+      ? `<div class="review-explanation" data-role="explain-text"><em>Loading explanation…</em></div>`
+      : `<div class="review-explanation" data-role="explain-text"><strong>Explanation:</strong> ${escapeHtml(flashAiExplainText || '')}</div>`;
+  } else if(card.explanation){
+    html += `<div class="review-explanation" data-role="explain-text"><strong>Explanation:</strong> ${escapeHtml(card.explanation)}</div>`;
+  } else {
+    html += `<div class="review-explanation" data-role="explain-text" hidden></div>`;
+  }
+  if(aiFeatureFlags.flashcard_explain_enabled){
+    html += `<button type="button" class="link-btn ai-explain-btn" id="flashAiExplainBtn" aria-pressed="${showAi}" ${loading?'disabled':''}>${showAi && !loading ? icon('close')+'Hide AI Explanation' : icon('info')+'AI Explanation'}</button>`;
+  }
+  html += `</div>`;
+  return html;
+}
+// Re-wired on every renderFlashcard() call, same full-rerender-and-rewire
+// pattern as every other flashcard control -- click-to-request only, never
+// auto-fired on flip (explicit product decision: flashcards are open-ended
+// study, not a scored attempt, so this follows the review screens' opt-in
+// pattern rather than exam-taking's auto-show).
+function wireFlashAiExplainBtn(){
+  const btn = document.getElementById('flashAiExplainBtn');
+  if(!btn) return;
+  btn.onclick = ()=>{
+    const card = getCurrentFlashCard();
+    if(!card) return;
+    const key = flashCardKey(card);
+    const active = flashAiExplainOn && flashAiExplainKey === key;
+    if(active){
+      flashAiExplainOn = false;
+      renderFlashcard();
+      return;
+    }
+    flashAiExplainOn = true;
+    flashAiExplainKey = key;
+    flashAiExplainLoading = true;
+    flashAiExplainText = null;
+    renderFlashcard();
+    fetchAiExplanation(card).then(explanation=>{
+      // Guard against the user navigating to a different card while this
+      // was in flight -- flashAiExplainKey will have moved on (or been
+      // cleared) by then, and this stale result should just be dropped.
+      if(flashAiExplainKey !== key) return;
+      flashAiExplainLoading = false;
+      flashAiExplainText = explanation;
+      renderFlashcard();
+    }).catch(()=>{
+      if(flashAiExplainKey !== key) return;
+      flashAiExplainOn = false;
+      flashAiExplainLoading = false;
+      renderFlashcard();
+    });
+  };
+}
+
 /* Flashcard objects (built from missed/flagged answers, the library picker,
    or a saved set) only ever carry {text, options, correct, explanation,
    count?} -- no exam/question-number metadata, since that gets discarded at
@@ -4635,7 +4742,7 @@ function renderFlashcard(){
          controls whether it's actually visible. */
       const backHtml = `
         <div class="recall-answer">${escapeHtml(card.options[card.correct])}</div>
-        ${card.explanation ? `<div class="review-explanation" style="text-align:left;"><strong>Explanation:</strong> ${escapeHtml(card.explanation)}</div>` : ''}
+        <div style="text-align:left;">${renderFlashExplainRow(card)}</div>
         <div class="recall-rate-row">
           <button type="button" class="recall-rate-btn didnt" id="recallDidntBtn">${icon('close')}Didn't know it</button>
           <button type="button" class="recall-rate-btn knew" id="recallKnewBtn">${icon('check')}Knew it</button>
@@ -4688,9 +4795,7 @@ function renderFlashcard(){
         <span class="letter">${optionLabel(oi)}</span><span>${escapeHtml(opt)}${tag}</span>
       </button>`;
     });
-    const explanationHtml = (answered && card.explanation)
-      ? `<div class="review-explanation"><strong>Explanation:</strong> ${escapeHtml(card.explanation)}</div>`
-      : '';
+    const explanationHtml = answered ? renderFlashExplainRow(card) : '';
     html = `
       ${topRowHtml}
       <div class="progress-row" id="flashProgressAnchor">
@@ -4841,6 +4946,7 @@ function renderFlashcard(){
   const saveConfirmBtn = document.getElementById('flashSaveConfirmBtn');
   if(saveConfirmBtn) saveConfirmBtn.onclick = ()=> saveCurrentFlashcardSetAs(flashSaveNameDraft);
   if(currentUser){ bindFlashGeneratorHandlers(); bindFlashLibraryPickerHandlers(); }
+  wireFlashAiExplainBtn();
 
   if(restoreId){ document.getElementById(restoreId)?.focus(); }
   else if(restoreFlashOptI !== null){
@@ -7825,6 +7931,17 @@ async function renderAdminErrorsView(){
    panel in Settings (see supabase/migrations/0020_user_feedback.sql) --
    until that migration is pushed this correctly shows a real Supabase
    "relation does not exist" error rather than silently looking empty. */
+let adminFeedbackShowUnresolvedOnly = true;
+let adminFeedbackReplyOpenFor = null; // feedback id whose reply box is expanded, or null
+
+/* Merged from two independent builds (this session's own search/category
+   filter, and the feedback-admin worktree's resolve/reply/export tooling)
+   that both rewrote this same function from the same starting point --
+   reconciled by hand rather than picking one over the other. The
+   resolved-only toggle changes what's actually FETCHED (server-side,
+   .eq('resolved', false)); the search/category filter narrows what's
+   DISPLAYED from whatever was fetched (client-side, over rows already in
+   hand) -- the two compose cleanly, no real overlap in behavior. */
 async function renderAdminFeedbackView(){
   const sub = document.getElementById('adminSubPanel');
   sub.innerHTML = `<div class="format-help">Loading…</div>`;
@@ -7834,34 +7951,182 @@ async function renderAdminFeedbackView(){
     'Suggestion': 'background:var(--accent-soft);color:var(--accent);'
   };
   try{
-    const { data: rows, error } = await supabaseClient.from('user_feedback')
-      .select('*').order('created_at', { ascending: false }).limit(200);
+    let query = supabaseClient.from('user_feedback').select('*').order('created_at', { ascending: false }).limit(200);
+    if(adminFeedbackShowUnresolvedOnly) query = query.eq('resolved', false);
+    const { data: rows, error } = await query;
     if(error) throw error;
-    if(!rows.length){
-      sub.innerHTML = `<div class="format-help">No feedback submitted yet.</div>`;
-      return;
-    }
+
     const userIds = [...new Set(rows.map(r=>r.user_id))];
     let emailByUserId = {};
     if(userIds.length){
       const { data: profiles } = await supabaseClient.from('profiles').select('user_id,email').in('user_id', userIds);
       (profiles||[]).forEach(p=>{ emailByUserId[p.user_id] = p.email; });
     }
-    sub.innerHTML = `
-      <div class="format-help">Most recent 200 feedback submissions, newest first.</div>
-      ${rows.map(r=>`
-        <div class="lib-row">
-          <div class="lib-info">
-            <div class="lib-title"><span class="lib-badge" style="${categoryStyle[r.category] || 'background:var(--chip);'}">${escapeHtml(r.category)}</span></div>
-            <div class="lib-meta" style="white-space:pre-wrap;color:var(--ink);margin:4px 0;">${escapeHtml(r.message)}</div>
-            <div class="lib-meta">${new Date(r.created_at).toLocaleString()} · ${escapeHtml(emailByUserId[r.user_id] || r.user_id)}${r.page ? ' · ' + escapeHtml(r.page) : ''}</div>
+
+    const categories = ['All', ...new Set(rows.map(r=>r.category))];
+    const rowHtml = (r)=>`
+      <div class="lib-row feedback-row" data-feedback-category="${escapeHtml(r.category)}" data-feedback-search="${escapeHtml((r.message + ' ' + (emailByUserId[r.user_id]||'')).toLowerCase())}">
+        <div class="lib-info">
+          <div class="lib-title">
+            <span class="lib-badge" style="${categoryStyle[r.category] || 'background:var(--chip);'}">${escapeHtml(r.category)}</span>
+            ${r.resolved ? `<span class="lib-badge" style="background:var(--good-bg);color:var(--good);">Resolved</span>` : ''}
+          </div>
+          <div class="lib-meta" style="white-space:pre-wrap;color:var(--ink);margin:4px 0;">${escapeHtml(r.message)}</div>
+          <div class="lib-meta">${new Date(r.created_at).toLocaleString()} · ${escapeHtml(emailByUserId[r.user_id] || r.user_id)}${r.page ? ' · ' + escapeHtml(r.page) : ''}</div>
+          ${r.admin_reply ? `<div class="lib-meta" style="margin-top:6px;color:var(--ink);"><strong>Replied</strong> ${new Date(r.replied_at).toLocaleString()}: <span style="white-space:pre-wrap;">${escapeHtml(r.admin_reply)}</span></div>` : ''}
+          <div id="feedbackReplyBox_${r.id}" ${adminFeedbackReplyOpenFor===r.id ? '' : 'hidden'} style="margin-top:8px;">
+            <textarea id="feedbackReplyText_${r.id}" placeholder="Write a reply — sent by email from the site's address" style="min-height:80px;width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--line);box-sizing:border-box;font-family:system-ui,sans-serif;"></textarea>
+            <div style="display:flex;gap:8px;margin-top:6px;">
+              <button class="btn btn-primary" data-send-reply="${r.id}">Send Reply</button>
+              <button class="btn btn-ghost" data-cancel-reply="${r.id}">Cancel</button>
+            </div>
+            <div class="msg" id="feedbackReplyResult_${r.id}"></div>
           </div>
         </div>
-      `).join('')}
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <button class="link-btn" data-toggle-resolved="${r.id}" data-new-resolved="${!r.resolved}">${r.resolved ? 'Mark Unresolved' : 'Mark Resolved'}</button>
+          <button class="link-btn" data-open-reply="${r.id}">${r.admin_reply ? 'Reply Again' : 'Reply'}</button>
+        </div>
+      </div>
     `;
+
+    const controlsHtml = `
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-family:system-ui,sans-serif;">
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="adminFeedbackUnresolvedToggle" ${adminFeedbackShowUnresolvedOnly ? 'checked' : ''}>
+          Show unresolved only
+        </label>
+        <button class="link-btn" id="adminFeedbackExportBtn">Generate Text Output</button>
+      </div>
+      <div id="adminFeedbackExportBlock" hidden style="margin-bottom:14px;">
+        <textarea id="adminFeedbackExportText" readonly style="min-height:160px;width:100%;font-family:monospace;font-size:.8rem;padding:10px;border-radius:8px;border:1px solid var(--line);box-sizing:border-box;"></textarea>
+        <button class="btn btn-ghost" id="adminFeedbackCopyBtn" style="margin-top:8px;">Copy to Clipboard</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;font-family:system-ui,sans-serif;">
+        <input type="text" id="feedbackSearchInput" placeholder="Search message or email…" style="flex:1 1 200px;min-width:0;padding:7px 10px;border-radius:8px;border:1px solid var(--line);">
+        <select id="feedbackCategoryFilter" style="padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);">
+          ${categories.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c==='All' ? 'All categories' : c)}</option>`).join('')}
+        </select>
+        <span class="format-help" id="feedbackFilterCount" style="margin:0;padding:0;background:none;"></span>
+      </div>
+    `;
+
+    if(!rows.length){
+      sub.innerHTML = controlsHtml + `<div class="format-help">${adminFeedbackShowUnresolvedOnly ? 'No unresolved feedback.' : 'No feedback submitted yet.'}</div>`;
+      wireAdminFeedbackControls([], {});
+      return;
+    }
+
+    sub.innerHTML = controlsHtml + `
+      <div class="format-help">${rows.length}${rows.length===200 ? '+' : ''} feedback submission${rows.length===1?'':'s'}, newest first.</div>
+      <div id="feedbackRows">${rows.map(rowHtml).join('')}</div>
+    `;
+    wireAdminFeedbackControls(rows, emailByUserId);
   } catch(err){
     sub.innerHTML = `<div class="msg err">Could not load feedback: ${escapeHtml(err.message)}</div>`;
   }
+}
+
+function wireAdminFeedbackControls(rows, emailByUserId){
+  const sub = document.getElementById('adminSubPanel');
+  document.getElementById('adminFeedbackUnresolvedToggle').onchange = (e)=>{
+    adminFeedbackShowUnresolvedOnly = e.target.checked;
+    renderAdminFeedbackView();
+  };
+  document.getElementById('adminFeedbackExportBtn').onclick = ()=>{
+    const block = document.getElementById('adminFeedbackExportBlock');
+    const text = rows.map(r=>
+      `[${r.resolved ? 'RESOLVED' : 'OPEN'}] ${r.category} — ${new Date(r.created_at).toLocaleString()} — ${emailByUserId[r.user_id] || r.user_id}${r.page ? ' — ' + r.page : ''}\n${r.message}${r.admin_reply ? `\nReply (${new Date(r.replied_at).toLocaleString()}): ${r.admin_reply}` : ''}`
+    ).join('\n\n---\n\n');
+    document.getElementById('adminFeedbackExportText').value = text || '(nothing to export)';
+    block.hidden = false;
+  };
+  const copyBtn = document.getElementById('adminFeedbackCopyBtn');
+  if(copyBtn) copyBtn.onclick = async ()=>{
+    try{
+      await navigator.clipboard.writeText(document.getElementById('adminFeedbackExportText').value);
+      copyBtn.textContent = 'Copied!';
+      setTimeout(()=>{ copyBtn.textContent = 'Copy to Clipboard'; }, 1500);
+    } catch(err){
+      // Clipboard API can be blocked in some contexts -- the textarea is
+      // already readonly and selectable, so manual copy still works.
+    }
+  };
+
+  sub.querySelectorAll('button[data-toggle-resolved]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const id = btn.dataset.toggleResolved;
+      const newResolved = btn.dataset.newResolved === 'true';
+      btn.disabled = true;
+      try{
+        const { error } = await supabaseClient.rpc('admin_set_feedback_resolved', { feedback_id: id, new_resolved: newResolved });
+        if(error) throw error;
+        await renderAdminView();
+      } catch(err){
+        alert('Could not update: ' + err.message);
+        btn.disabled = false;
+      }
+    };
+  });
+
+  sub.querySelectorAll('button[data-open-reply]').forEach(btn=>{
+    btn.onclick = ()=>{
+      adminFeedbackReplyOpenFor = btn.dataset.openReply;
+      renderAdminFeedbackView();
+    };
+  });
+  sub.querySelectorAll('button[data-cancel-reply]').forEach(btn=>{
+    btn.onclick = ()=>{
+      adminFeedbackReplyOpenFor = null;
+      renderAdminFeedbackView();
+    };
+  });
+  sub.querySelectorAll('button[data-send-reply]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const id = btn.dataset.sendReply;
+      const textEl = document.getElementById('feedbackReplyText_' + id);
+      const resultEl = document.getElementById('feedbackReplyResult_' + id);
+      const replyText = textEl.value.trim();
+      if(!replyText){ resultEl.className = 'msg err'; resultEl.textContent = 'Write a reply first.'; return; }
+      btn.disabled = true;
+      resultEl.className = 'msg';
+      resultEl.textContent = 'Sending…';
+      try{
+        const { data, error } = await supabaseClient.functions.invoke('send-feedback-reply', { body: { feedback_id: id, reply_text: replyText } });
+        if(error) throw error;
+        if(data && data.error) throw new Error(data.error);
+        adminFeedbackReplyOpenFor = null;
+        await renderAdminView();
+      } catch(err){
+        resultEl.className = 'msg err';
+        resultEl.textContent = 'Could not send: ' + err.message;
+        btn.disabled = false;
+      }
+    };
+  });
+
+  // This session's own search/category filter, layered on top of whatever
+  // rows the server returned (already scoped by the resolved-only toggle
+  // above) -- purely client-side narrowing of what's currently displayed.
+  const searchInput = document.getElementById('feedbackSearchInput');
+  const categoryFilter = document.getElementById('feedbackCategoryFilter');
+  const countEl = document.getElementById('feedbackFilterCount');
+  const applyFeedbackFilter = ()=>{
+    const q = searchInput.value.trim().toLowerCase();
+    const cat = categoryFilter.value;
+    let shown = 0;
+    document.querySelectorAll('.feedback-row').forEach(row=>{
+      const matchesCat = cat === 'All' || row.dataset.feedbackCategory === cat;
+      const matchesQ = !q || row.dataset.feedbackSearch.includes(q);
+      const visible = matchesCat && matchesQ;
+      row.style.display = visible ? '' : 'none';
+      if(visible) shown++;
+    });
+    countEl.textContent = `Showing ${shown} of ${rows.length}`;
+  };
+  searchInput.oninput = applyFeedbackFilter;
+  categoryFilter.onchange = applyFeedbackFilter;
+  applyFeedbackFilter();
 }
 
 /* Admin controls for the two AI layers (migration 0026) -- the standing
@@ -7879,7 +8144,7 @@ async function renderAiFeatureConfigSection(){
   try{
     const { data, error } = await supabaseClient.rpc('get_ai_feature_flags');
     if(error) throw error;
-    const cfg = (data && data[0]) || { explain_enabled: true, chat_enabled: true, chat_turn_limit: 5, chat_period_limit: 40, chat_period_days: 30, progress_feedback_enabled: true };
+    const cfg = (data && data[0]) || { explain_enabled: true, chat_enabled: true, chat_turn_limit: 5, chat_period_limit: 40, chat_period_days: 30, progress_feedback_enabled: true, flashcard_explain_enabled: false };
     section.innerHTML = `
       <h2>AI Features</h2>
       <div class="format-help">Controls all three AI features app-wide — the base explanation shown during exam-taking and review, the review-only follow-up chat, and on-demand progress feedback.</div>
@@ -7897,13 +8162,19 @@ async function renderAiFeatureConfigSection(){
           AI progress feedback enabled (Progress tab, "Get AI Feedback")
         </label>
         <label style="display:flex;align-items:center;gap:10px;">
+          <input type="checkbox" id="aiFlashcardExplainEnabledInput" ${cfg.flashcard_explain_enabled ? 'checked' : ''}>
+          AI Explanation enabled on flashcards (defaults off — newly merged, not yet tested live)
+        </label>
+        <label style="display:flex;align-items:center;gap:10px;">
           Follow-up questions allowed per exam question, per 24h
           <input type="number" id="aiChatTurnLimitInput" min="1" max="50" value="${cfg.chat_turn_limit}" style="width:64px;">
         </label>
         <label style="display:flex;align-items:center;gap:10px;">
-          Total follow-ups allowed, across all questions, per
+          Follow-up period, in days
           <input type="number" id="aiChatPeriodDaysInput" min="1" max="365" value="${cfg.chat_period_days ?? 30}" style="width:64px;">
-          days:
+        </label>
+        <label style="display:flex;align-items:center;gap:10px;">
+          Total follow-ups allowed within that period, across all questions
           <input type="number" id="aiChatPeriodLimitInput" min="1" max="2000" value="${cfg.chat_period_limit ?? 40}" style="width:80px;">
         </label>
         <button class="btn btn-primary" id="saveAiFeatureConfigBtn" style="align-self:flex-start;">Save</button>
@@ -7917,6 +8188,7 @@ async function renderAiFeatureConfigSection(){
       const explainEnabled = document.getElementById('aiExplainEnabledInput').checked;
       const chatEnabled = document.getElementById('aiChatEnabledInput').checked;
       const progressFeedbackEnabled = document.getElementById('aiProgressFeedbackEnabledInput').checked;
+      const flashcardExplainEnabled = document.getElementById('aiFlashcardExplainEnabledInput').checked;
       const turnLimit = parseInt(document.getElementById('aiChatTurnLimitInput').value, 10);
       const periodDays = parseInt(document.getElementById('aiChatPeriodDaysInput').value, 10);
       const periodLimit = parseInt(document.getElementById('aiChatPeriodLimitInput').value, 10);
@@ -7938,6 +8210,7 @@ async function renderAiFeatureConfigSection(){
           new_chat_period_limit: periodLimit,
           new_chat_period_days: periodDays,
           new_progress_feedback_enabled: progressFeedbackEnabled,
+          new_flashcard_explain_enabled: flashcardExplainEnabled,
         });
         if(saveErr) throw saveErr;
         // Updates this admin's own session immediately -- their review
@@ -7950,7 +8223,7 @@ async function renderAiFeatureConfigSection(){
         // this save doesn't touch chat_period_used, and clobbering it to
         // undefined made isChatPeriodCapped() silently stop enforcing the
         // period cap for the rest of this admin's own session.
-        aiFeatureFlags = { ...aiFeatureFlags, explain_enabled: explainEnabled, chat_enabled: chatEnabled, chat_turn_limit: turnLimit, chat_period_limit: periodLimit, chat_period_days: periodDays, progress_feedback_enabled: progressFeedbackEnabled };
+        aiFeatureFlags = { ...aiFeatureFlags, explain_enabled: explainEnabled, chat_enabled: chatEnabled, chat_turn_limit: turnLimit, chat_period_limit: periodLimit, chat_period_days: periodDays, progress_feedback_enabled: progressFeedbackEnabled, flashcard_explain_enabled: flashcardExplainEnabled };
         resultEl.className = 'msg ok';
         resultEl.textContent = 'Saved.';
       } catch(err){
