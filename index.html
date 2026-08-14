@@ -10106,6 +10106,22 @@ function renderAdminToolsView(){
   const sub = document.getElementById('adminSubPanel');
   sub.innerHTML = `
     <div class="subsection">
+      <h2>Data retention</h2>
+      <div class="format-help">
+        <code>security_events</code> gains a row per sign-in and per library fetch, and
+        <code>client_errors</code> one per client-side error — nothing deleted from them
+        automatically. The abuse-detection features that read these only ever look at a
+        recent window, so older rows are dead weight on the database size limit.
+        Deletes <strong>security events older than 90 days</strong>,
+        <strong>client errors older than 30 days</strong>, and
+        <strong>AI usage older than 400 days</strong>. AI usage is kept far longer on
+        purpose: the rolling 30-day spend ceiling and the follow-up period cap both read
+        it, so purging it aggressively would corrupt live limit enforcement.
+      </div>
+      <button class="btn btn-ghost" id="purgeTelemetryBtn" style="margin-top:8px;">Purge old telemetry</button>
+      <div class="msg" id="purgeTelemetryResult"></div>
+    </div>
+    <div class="subsection">
       <h2>Trace a leaked copy of exam content</h2>
       <div class="format-help">Paste suspicious content here — every account's copy carries an invisible fingerprint, so this can identify whose account it came from.</div>
       <textarea id="watermarkInput" placeholder="Paste text here…" style="min-height:100px;"></textarea>
@@ -10156,6 +10172,31 @@ function renderAdminToolsView(){
   renderStudentFeatureConfigSection();
   renderLegalDocumentsSection();
   renderEmailConfigSection();
+  document.getElementById('purgeTelemetryBtn').onclick = async (e)=>{
+    const btn = e.currentTarget;
+    const resultEl = document.getElementById('purgeTelemetryResult');
+    resultEl.className = 'msg';
+    resultEl.textContent = 'Purging…';
+    /* Guard against a double-click firing two concurrent deletes -- the
+       second would report 0 rows and read as a failure even though the
+       first succeeded. Same class of bug as the double-click-Start race. */
+    btn.disabled = true;
+    try{
+      const { data, error } = await supabaseClient.rpc('purge_old_telemetry');
+      if(error) throw error;
+      const rows = Array.isArray(data) ? data : [];
+      const total = rows.reduce((n, r)=> n + (Number(r.rows_deleted) || 0), 0);
+      resultEl.className = 'msg ok';
+      resultEl.textContent = total === 0
+        ? 'Nothing old enough to purge.'
+        : 'Deleted ' + rows.map(r=> `${Number(r.rows_deleted).toLocaleString()} from ${r.table_name}`).join(', ') + '.';
+    } catch(err){
+      resultEl.className = 'msg err';
+      resultEl.textContent = 'Could not purge: ' + err.message;
+    } finally {
+      btn.disabled = false;
+    }
+  };
   document.getElementById('decodeWatermarkBtn').onclick = ()=>{
     document.getElementById('watermarkResult').textContent = decodeWatermark(document.getElementById('watermarkInput').value, adminData.profiles);
   };
