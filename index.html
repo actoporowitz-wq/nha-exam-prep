@@ -936,6 +936,18 @@ if('serviceWorker' in navigator){
      (see ai-progress-feedback's system prompt) that were rendering as one
      unbroken wall of text with no way to see them without this. */
   .review-explanation{font-size:.85rem;margin-top:6px;padding:8px 10px;background:var(--chip);border-radius:6px;color:var(--muted);white-space:pre-line;}
+  /* Marks AI-written text apart from a hand-written bank explanation (see
+     aiExplanationHtml). Accent-coloured rather than muted on purpose: it's
+     an attribution, not fine print, and it needs to survive being skimmed.
+     white-space:normal resets the pre-line its container sets, so the label
+     itself never inherits the paragraph breaks meant for the body text. */
+  .ai-label{
+    display:flex;align-items:center;gap:5px;white-space:normal;
+    font-family:system-ui,sans-serif;font-size:.68rem;font-weight:700;
+    letter-spacing:.04em;text-transform:uppercase;
+    color:var(--accent);margin-bottom:6px;
+  }
+  .ai-label .icon{width:13px;height:13px;flex:none;}
   /* Three-dot "thinking" indicator for the AI explanation's loading state --
      was static "Loading explanation…" text with no motion at all, easy to
      mistake for a stalled/dead request during the couple of real seconds a
@@ -2916,6 +2928,11 @@ function ensureAiChatPanel(){
     <div class="ai-chat-header">
       <div>
         <h3>Ask about this question</h3>
+        <!-- Labelled once here rather than on every assistant bubble: the
+             entire panel is AI output, so a per-message tag would be noise
+             that repeats down the whole thread. Same .ai-label treatment
+             the explanation surfaces use (see aiExplanationHtml). -->
+        <div class="ai-label" style="margin:4px 0 0;">${icon('info')}AI-generated · double-check anything you'd rely on</div>
         <div class="ai-chat-qtext" id="aiChatQtext"></div>
       </div>
       <div class="ai-chat-header-actions">
@@ -3291,7 +3308,7 @@ function renderQuestion(){
     fetchAiExplanation(q).then(explanation=>{
       if(current !== myCurrent) return;
       const el = document.getElementById('aiExplainBlock');
-      if(el) el.innerHTML = `<strong>Explanation:</strong> ${escapeHtml(explanation)}`;
+      if(el) el.innerHTML = aiExplanationHtml(explanation);
     }).catch(()=>{
       if(current !== myCurrent) return;
       const el = document.getElementById('aiExplainBlock');
@@ -3648,7 +3665,7 @@ function wireReviewList(container, questions){
       textEl.hidden = false;
       textEl.innerHTML = loadingDotsHtml('Loading explanation');
       fetchAiExplanation(q).then(explanation=>{
-        textEl.innerHTML = `<strong>Explanation:</strong> ${escapeHtml(explanation)}`;
+        textEl.innerHTML = aiExplanationHtml(explanation);
         btn.disabled = false;
         btn.innerHTML = `${icon('close')}Hide AI Explanation`;
         if(chatBtn) chatBtn.hidden = false;
@@ -3696,8 +3713,48 @@ function renderReviewPanel(missed, total){
 // so this normalized-text key is the closest thing to one. Was
 // independently duplicated as `x.trim().toLowerCase()` at every call site
 // that needed it (~10 of them) instead of sharing one helper.
+/* Every surface that shows AI-written text to a student renders it through
+   this one helper, so the "this was written by AI" marker cannot end up
+   present on one screen and missing on another -- which is exactly what the
+   audit found (AI output was rendered identically to a hand-written bank
+   explanation everywhere, with no icon, label, or treatment of its own).
+
+   Worth labelling on the merits, not just for tidiness: this app ships an
+   entire AI accuracy-audit feature precisely because this text can be
+   wrong, and it is exam prep for a real professional licence. A student is
+   entitled to know which sentences a model wrote.
+
+   Bank explanations deliberately keep their plain "Explanation:" prefix and
+   do NOT get this marker -- the whole point is that the two are now
+   distinguishable at a glance. */
+function aiExplanationHtml(text){
+  return `<div class="ai-label">${icon('info')}AI-generated · double-check anything you'd rely on</div>${escapeHtml(text)}`;
+}
+
 function computeQuestionKey(text){
   return (text||'').trim().toLowerCase();
+}
+
+/* Use this, NOT computeQuestionKey, whenever a client-derived key is
+   compared against a question_key that came back FROM the server.
+
+   The two are deliberately not the same function. The server strips the
+   invisible per-user watermark before hashing (see
+   _shared/question_identity.ts's own stripWatermark), because the text a
+   browser holds carries that user's mark while exam_library_store does
+   not. The client's computeQuestionKey deliberately does NOT strip: its
+   keys are also what flashcard_recall_progress rows are already stored
+   under, so changing it would orphan saved recall progress for every
+   watermarked question (every 10th one, per exam).
+
+   REAL BUG this fixes: Admin -> AI -> Flagged Explanations looks each
+   flagged row's server-computed question_key up in an index built from
+   EXAM_LIBRARY, which is watermarked. For every 10th question the lookup
+   missed and the row fell back to printing the raw key string instead of
+   the question and its options. Introduced by the watermark work in 0052,
+   so it postdates the full-stack audit and was never in its findings. */
+function serverQuestionKey(text){
+  return computeQuestionKey(stripWatermarkChars(text));
 }
 
 function escapeHtml(s){
@@ -4827,7 +4884,7 @@ function renderFlashExplainRow(card){
   if(showAi){
     html += loading
       ? `<div class="review-explanation" data-role="explain-text"><em>Loading explanation…</em></div>`
-      : `<div class="review-explanation" data-role="explain-text"><strong>Explanation:</strong> ${escapeHtml(flashAiExplainText || '')}</div>`;
+      : `<div class="review-explanation" data-role="explain-text">${aiExplanationHtml(flashAiExplainText || '')}</div>`;
   } else if(card.explanation){
     html += `<div class="review-explanation" data-role="explain-text"><strong>Explanation:</strong> ${escapeHtml(card.explanation)}</div>`;
   } else {
@@ -7699,7 +7756,7 @@ function renderProgressAiFeedbackContent(){
     html += `<div class="msg err" style="margin-bottom:10px;">${escapeHtml(progressAiFeedbackError)}</div>`;
   }
   if(progressAiFeedback && !progressAiFeedbackCollapsed){
-    html += `<div class="review-explanation" style="margin-bottom:10px;">${escapeHtml(progressAiFeedback)}</div>`;
+    html += `<div class="review-explanation" style="margin-bottom:10px;">${aiExplanationHtml(progressAiFeedback)}</div>`;
   }
   return html;
 }
@@ -9712,7 +9769,9 @@ async function renderFlaggedAiAuditsSection(){
       return;
     }
     const byKey = {};
-    getUniqueLibraryQuestions().forEach(q=>{ byKey[computeQuestionKey(q.text)] = q; });
+    // serverQuestionKey, not computeQuestionKey -- r.question_key below was
+    // computed server-side with the watermark stripped. See that function.
+    getUniqueLibraryQuestions().forEach(q=>{ byKey[serverQuestionKey(q.text)] = q; });
     section.innerHTML = `
       <h2>Flagged Explanations</h2>
       <div class="format-help">Cached AI explanations the accuracy audit thinks contain a real error, waiting on a decision.</div>
