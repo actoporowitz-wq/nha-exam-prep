@@ -36,7 +36,19 @@
 })();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+<!-- No integrity="" here on purpose: Cloudflare updates this script
+     frequently and explicitly advises against Subresource Integrity
+     pinning for it -- a stale hash would silently break the CAPTCHA widget
+     on their next update rather than catch a real compromise.
+     render=explicit: without it, Turnstile's own script auto-scans the page
+     for .cf-turnstile elements and tries to render them itself using a
+     data-sitekey attribute none of them have (this app always renders
+     explicitly, via renderTurnstileWidget()'s own turnstile.render() call)
+     -- that implicit auto-render is what threw a console error ("Invalid
+     or missing type for parameter sitekey") on every page load. This flag
+     disables the auto-scan entirely, leaving only the app's own explicit
+     render in control. -->
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
 <script>
 /* App-shell caching only -- see sw.js for the same-origin allowlist that
    keeps every Supabase request (auth, RPCs, exam content) out of it. */
@@ -196,17 +208,27 @@ if('serviceWorker' in navigator){
      only gives var(--bad) ~4.06:1 there, under the 4.5:1 minimum. A
      dedicated darker red for this specific pairing rather than changing
      --bad globally, which is calibrated for other backgrounds too. */
-  .link-btn.danger{color:#B8291C;}
-  .link-btn.danger:hover{color:#961F15;border-color:#B8291C;}
+  /* Real inconsistency found via visual audit: only :hover ever set
+     border-color, so every "danger" link-btn's RESTING state (Delete
+     attempt, Remove card, Remove passkey, Permanently Delete, Remove
+     attachment, Delete set -- all share this one class) had an ordinary
+     neutral var(--line) border, indistinguishable from a non-destructive
+     button except for text color alone -- barely visible at rest,
+     especially in dark mode where --line is close to the surrounding
+     surface color. Border color now matches the text color at rest too,
+     not just on hover, so a destructive action reads as one consistently
+     across every screen that uses it. */
+  .link-btn.danger{color:#B8291C;border-color:#B8291C;}
+  .link-btn.danger:hover{color:#961F15;border-color:#961F15;}
   /* The light-tuned #B8291C above only gives ~2.65:1 against dark theme's
      --surface-2 (verified) -- dark theme's own --bad (#FB7185) was tuned
      for exactly this kind of pairing and gives ~6.1:1 there, so dark modes
      use it directly instead of a second hardcoded hex. */
   @media (prefers-color-scheme: dark){
-    :root:not([data-theme="day"]):not([data-theme="night"]) .link-btn.danger{color:var(--bad);}
+    :root:not([data-theme="day"]):not([data-theme="night"]) .link-btn.danger{color:var(--bad);border-color:var(--bad);}
     :root:not([data-theme="day"]):not([data-theme="night"]) .link-btn.danger:hover{color:var(--bad);border-color:var(--bad);}
   }
-  :root[data-theme="night"] .link-btn.danger{color:var(--bad);}
+  :root[data-theme="night"] .link-btn.danger{color:var(--bad);border-color:var(--bad);}
   :root[data-theme="night"] .link-btn.danger:hover{color:var(--bad);border-color:var(--bad);}
 
   /* Icon system -- see the ICONS map + icon() helper in the script below.
@@ -608,6 +630,26 @@ if('serviceWorker' in navigator){
      own clearance. */
   #quizView.quiz-fullscreen{
     padding-top:max(60px, calc(env(safe-area-inset-top) + 44px));
+    /* Real bug found via mobile QA: the fixed toggle button occupies a
+       constant viewport zone (roughly y:14-58px, see .fullscreen-toggle-row
+       above) regardless of scroll position. The top padding above only
+       guarantees clearance at scrollTop:0 -- once scrolled, whatever
+       content lands at the top of the viewport was never protected by it.
+       For SHORT content, the scrollable range needed to reveal the
+       intentionally scroll-gated bottom buttons (Question list/Pause &
+       Save) can be too small to have moved the top-of-viewport content
+       clear of that zone by the time you reach it, so the toggle ends up
+       sitting on top of question text. Reserving fixed extra scroll room
+       here (independent of content length, same "container padding, not
+       per-row margin" pattern as the top clearance) guarantees maxScroll
+       is always at least this much larger than the toggle's own footprint,
+       which keeps it clear at the actual max-scroll position regardless of
+       how short the content is. Longer content already has ample surplus
+       scroll range, so this doesn't change anything there. Simulation-
+       verified reasoning, not yet confirmed on a real device -- check
+       before fully trusting, per this project's own standing mobile-
+       testing caution. */
+    padding-bottom:70px;
   }
   /* Flashcards' own "Exit Full Screen" toggle gets the same fixed-pinned
      treatment, same clearance mechanism, same reasoning -- universal. */
@@ -617,6 +659,10 @@ if('serviceWorker' in navigator){
   }
   #flashPanel.flash-fullscreen{
     padding-top:max(60px, calc(env(safe-area-inset-top) + 44px));
+    /* Same fix and reasoning as #quizView.quiz-fullscreen's own comment
+       above -- flashcards share the identical fixed-toggle-overlap bug on
+       short cards. */
+    padding-bottom:70px;
   }
   @media (max-width:900px){
     /* Same "not enough scroll slack" mechanism as full-screen above, but
@@ -635,6 +681,20 @@ if('serviceWorker' in navigator){
        -- see scrollElementIntoView). Stays mobile-only -- non-fullscreen
        desktop was never reported broken and isn't part of this request. */
     #quizView:not(.quiz-fullscreen) .quiz-question-block{
+      min-height:calc(100vh - 280px);
+    }
+    /* Same "not enough scroll slack" bug, same fix, on flashcards'
+       non-fullscreen mobile view -- scrollFlashcardIntoView() uses the
+       identical scrollElementIntoView() mechanism as quiz at this same
+       breakpoint, but only quiz ever got this min-height reservation.
+       Covers both MC (.flash-layout) and True Recall (.recall-flip-outer),
+       flashcards' two variable-height content containers. Reuses quiz's
+       own tuned value rather than guessing a different one -- both share
+       the same app shell/header chrome height, so there's no reason to
+       expect a different number here without a real measurement showing
+       otherwise. */
+    #flashPanel:not(.flash-fullscreen) .flash-layout,
+    #flashPanel:not(.flash-fullscreen) .recall-flip-outer{
       min-height:calc(100vh - 280px);
     }
   }
@@ -671,12 +731,17 @@ if('serviceWorker' in navigator){
      most people set once and forget. */
   .qnum-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
   .qnum-row .qnum{margin-bottom:0;}
-  .instant-toggle[aria-pressed="true"]{color:var(--accent);background:var(--accent-soft);}
+  /* border added on top of the existing color+background change -- this
+     control changes real exam-taking behavior mid-session, and color
+     alone (even with a background tint) was found to be an easy-to-miss
+     state signal at a glance. A visible border when on, transparent (not
+     absent) when off so toggling never shifts the button's own size. */
+  .instant-toggle[aria-pressed="true"]{color:var(--accent);background:var(--accent-soft);border-color:var(--accent);}
   /* Desktop keeps the text label (restored per explicit request -- the icon
      alone was only ever meant to save vertical space on mobile, see the
      comment above); mobile reverts to the icon-only square via the
      <=900px override below, unchanged from before this. */
-  .instant-toggle{padding:7px 12px;border-radius:8px;}
+  .instant-toggle{padding:7px 12px;border-radius:8px;border:1px solid transparent;}
   .instant-toggle .nav-label{font-family:system-ui,sans-serif;font-weight:600;font-size:.82rem;}
 
   /* One standard shape for every nav-row, quiz and flashcards alike, in
@@ -718,6 +783,11 @@ if('serviceWorker' in navigator){
   .opt.correct .letter{color:var(--good);}
   .opt.incorrect{border-color:var(--bad);background:var(--bad-bg);}
   .opt.incorrect .letter{color:var(--bad);}
+  /* Review lists reuse .opt as a plain (non-button) div -- read-only, not
+     clickable, so the inherited pointer cursor/hover-border-color from the
+     interactive .opt rules would be misleading here. */
+  .opt.review-opt{cursor:default;}
+  .opt.review-opt:hover{border-color:inherit;}
 
   /* Previous | Flag | Next, three direct flex children, nothing else --
      Flag (quiz only; flashcards has no third item and just gets a plain
@@ -792,7 +862,27 @@ if('serviceWorker' in navigator){
   .score-sub{text-align:center;color:var(--muted);font-family:system-ui,sans-serif;font-size:.88rem;margin-bottom:6px;}
   .result-actions{display:flex;gap:10px;justify-content:center;margin-top:18px;flex-wrap:wrap;font-family:system-ui,sans-serif;}
 
-  textarea{width:100%;min-height:220px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.82rem;border:1px solid var(--line);border-radius:10px;padding:12px;resize:vertical;}
+  /* Real dark-mode bug: raw form controls have their own UA-default white
+     background regardless of --bg/--surface, so Night mode's near-black
+     shell left every plain text input/textarea as a glaring white box --
+     the app's own custom-styled buttons/cards/dropdowns all correctly
+     re-theme via these same tokens, but nothing had ever pointed a text
+     control's background/color at them site-wide (only one narrow dialog-
+     scoped rule did, for two specific fields, everywhere else was
+     untouched). One global rule instead of hunting down every input across
+     every admin panel/dialog individually. */
+  input[type="text"],input[type="email"],input[type="password"],input[type="number"],input[type="search"],input[type="tel"],input[type="url"],input[type="file"],textarea,select{
+    background:var(--surface);color:var(--ink);border-color:var(--line);
+  }
+  /* Was ui-monospace by default -- wrong for the prose textareas that make
+     up almost every use of this element (Legal document editor, welcome
+     packet body, feedback, the leak-trace paste box) and looked like an
+     unstyled default browser textarea sitting next to every other styled
+     input on the same page. Nothing in this app actually needs a
+     monospace textarea (no code/JSON editor exists), so the sans-serif
+     stack every other input/heading/body text already uses is the right
+     default here too. */
+  textarea{width:100%;min-height:220px;font-family:inherit;font-size:.92rem;border:1px solid var(--line);border-radius:10px;padding:12px;resize:vertical;}
   .format-help{font-family:system-ui,sans-serif;font-size:.8rem;color:var(--muted);background:var(--chip);border-radius:10px;padding:12px 14px;margin-bottom:14px;white-space:pre-wrap;line-height:1.5;}
   .msg{font-family:system-ui,sans-serif;font-size:.85rem;margin-top:10px;}
   .msg.err{color:var(--bad);}
@@ -813,7 +903,15 @@ if('serviceWorker' in navigator){
   .review-line{font-family:system-ui,sans-serif;font-size:.85rem;margin-bottom:3px;}
   .review-line.correct-line{color:var(--good);}
   .review-line.wrong-line{color:var(--bad);}
-  .review-explanation{font-size:.85rem;margin-top:6px;padding:8px 10px;background:var(--chip);border-radius:6px;color:var(--muted);}
+  /* pre-line (not the default `normal`): collapses runs of spaces/tabs
+     like normal prose, but respects real newline characters instead of
+     collapsing them away. Harmless for the single-sentence bank/AI
+     explanations that also use this class (no newlines in that content,
+     so nothing changes for them) -- added because the AI progress-feedback
+     card's text has real \n\n paragraph breaks between its distinct ideas
+     (see ai-progress-feedback's system prompt) that were rendering as one
+     unbroken wall of text with no way to see them without this. */
+  .review-explanation{font-size:.85rem;margin-top:6px;padding:8px 10px;background:var(--chip);border-radius:6px;color:var(--muted);white-space:pre-line;}
   /* Three-dot "thinking" indicator for the AI explanation's loading state --
      was static "Loading explanation…" text with no motion at all, easy to
      mistake for a stalled/dead request during the couple of real seconds a
@@ -892,7 +990,17 @@ if('serviceWorker' in navigator){
   .ai-chat-qtext{font-size:.8rem;color:var(--muted);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
   .ai-chat-messages{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px;}
   .ai-chat-bubble{max-width:85%;padding:10px 13px;border-radius:12px;font-size:.92rem;line-height:1.45;white-space:pre-wrap;}
-  .ai-chat-bubble.assistant{align-self:flex-start;background:var(--surface-2);color:var(--ink);}
+  /* Real contrast bug, not a missing rule: every assistant message (the
+     seed explanation AND every follow-up reply) already used this same
+     class -- but var(--surface-2) against the panel's own var(--panel)
+     (aliased to var(--surface)) is a deliberately subtle one-tier lift
+     (same relationship as .format-help's chip background), which reads as
+     "boxed" for a wide element like an explanation but as "not visually
+     distinguished from the panel at all" for a narrower chat bubble --
+     exactly the audit finding that follow-up replies look unboxed. A real
+     border makes every assistant bubble's edge legible regardless of how
+     close the two surface tokens render on a given screen/theme. */
+  .ai-chat-bubble.assistant{align-self:flex-start;background:var(--surface-2);border:1px solid var(--line);color:var(--ink);}
   .ai-chat-bubble.user{align-self:flex-end;background:var(--accent);color:var(--accent-ink);}
   .ai-chat-bubble.error{align-self:center;background:transparent;color:var(--bad);font-size:.85rem;text-align:center;}
   .ai-chat-bubble.pending{opacity:.6;}
@@ -1578,9 +1686,9 @@ if('serviceWorker' in navigator){
     </nav>
     <section class="ld-hero">
       <div class="ld-hero-text">
-        <div class="ld-eyebrow">NHA Certification Prep</div>
-        <h1 class="ld-h1">Walk into your exam already knowing you'll pass.</h1>
-        <p class="ld-sub">Real NHA-style questions, a mastery system that keeps narrowing in on exactly what you're still missing, and flashcards that actually feel good to study with.</p>
+        <div class="ld-eyebrow">LNHA Licensure Exam Prep</div>
+        <h1 class="ld-h1">Walk into your exam having already mastered what used to trip you up.</h1>
+        <p class="ld-sub">Practice questions modeled on the federal LNHA licensure exams, a mastery system that keeps narrowing in on exactly what you're still missing, and flashcards that actually feel good to study with.</p>
         <div class="ld-cta-row">
           <button class="btn btn-primary ld-cta-to-auth" type="button" style="font-size:1rem;padding:13px 26px;">Get Started →</button>
           <button class="ld-ghost ld-cta-to-auth" type="button">Already have an account? Sign in</button>
@@ -1593,11 +1701,11 @@ if('serviceWorker' in navigator){
       <div class="ld-hero-visual" aria-hidden="true">
         <div class="ld-flip-outer"><div class="ld-flip-inner" id="landingFlipDemo">
           <div class="ld-face">
-            <div class="ld-face-q" id="landingFlipQ">Which vein is most commonly used for routine venipuncture?</div>
+            <div class="ld-face-q" id="landingFlipQ">What does the acronym "QAPI" stand for in long-term care?</div>
           </div>
           <div class="ld-face ld-face-back">
             <div class="ld-face-eyebrow">Answer</div>
-            <div class="ld-face-q" id="landingFlipA">Median cubital vein</div>
+            <div class="ld-face-q" id="landingFlipA">Quality Assurance and Performance Improvement</div>
           </div>
         </div></div>
       </div>
@@ -1605,7 +1713,7 @@ if('serviceWorker' in navigator){
     <section class="ld-features">
       <div class="ld-feature"><div class="ico"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 4h16l-6 8v6l-4 2v-8z"/></svg></div><strong>Mastery funnel</strong><p>Every round narrows to exactly what you're still missing — not the same 100 questions on repeat.</p></div>
       <div class="ld-feature"><div class="ico"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><g transform="translate(8,14) rotate(-12)"><rect x="-5" y="-6.3" width="10" height="12.6" rx="1.8" fill="currentColor" fill-opacity="0.55" stroke="none"/></g><g transform="translate(14.5,12) rotate(10)"><rect x="-5" y="-6.3" width="10" height="12.6" rx="1.8" fill="currentColor" stroke="none"/></g></svg></div><strong>Real flashcards</strong><p>Missed questions become a study deck automatically, explanations included, not just a pass/fail.</p></div>
-      <div class="ld-feature"><div class="ico"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5l6.5 1.5v12L4 17z"/><path d="M20 5l-6.5 1.5v12L20 17z"/></svg></div><strong>25 practice exams</strong><p>Full-length, NHA-style practice exams — over 3,400 questions in all.</p></div>
+      <div class="ld-feature"><div class="ico"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5l6.5 1.5v12L4 17z"/><path d="M20 5l-6.5 1.5v12L20 17z"/></svg></div><strong>25 practice exams</strong><p>Full-length practice exams for the LNHA licensure exams — over 3,400 questions in all.</p></div>
     </section>
     <section class="ld-final-cta">
       <h2>Ready to actually feel ready?</h2>
@@ -1647,6 +1755,9 @@ if('serviceWorker' in navigator){
         <button class="settings-menu-btn account-passkeys-btn" type="button" style="display:none;">Passkeys</button>
         <button class="settings-menu-btn account-signout-btn" type="button">Sign Out</button>
         <button class="settings-menu-btn account-delete-btn" type="button" style="color:#FB7185;">Delete Account</button>
+        <div class="settings-label" style="margin-top:12px;">Legal</div>
+        <button class="settings-menu-btn open-privacy-btn" type="button" style="display:none;">Privacy Policy</button>
+        <button class="settings-menu-btn open-terms-btn" type="button" style="display:none;">Terms of Service</button>
       </div>
     </div>
   </nav>
@@ -1673,6 +1784,9 @@ if('serviceWorker' in navigator){
     <button class="account-passkeys-btn" type="button" style="display:none;">Passkeys</button>
     <button class="account-signout-btn" type="button">Sign Out</button>
     <button class="account-delete-btn" type="button" style="color:#FB7185;">Delete Account</button>
+    <div class="settings-label" style="padding:10px 10px 2px;">Legal</div>
+    <button class="open-privacy-btn" type="button" style="display:none;">Privacy Policy</button>
+    <button class="open-terms-btn" type="button" style="display:none;">Terms of Service</button>
   </div>
 
   <main class="main-content">
@@ -1694,8 +1808,14 @@ if('serviceWorker' in navigator){
 
     <div id="appShell" style="display:none">
       <div id="quizView">
-        <div class="panel" id="quizPanel"></div>
-        <div class="panel" id="dotsPanel"></div>
+        <!-- Real skeleton content, not an empty box -- these two panels sit
+             empty for the length of the exam-library fetch on first load
+             (real content always fully replaces this on the first render
+             regardless, so there's no stale-skeleton risk). Reuses the
+             existing .skel shimmer system built for Progress instead of
+             leaving this the one loading gap with no placeholder at all. -->
+        <div class="panel" id="quizPanel"><div class="skel-row"><div class="skel skel-title"></div><div class="skel skel-bar"></div><div class="skel skel-bar"></div><div class="skel skel-bar"></div></div></div>
+        <div class="panel" id="dotsPanel"><div class="skel-row"><div class="skel skel-line"></div></div></div>
       </div>
 
       <div id="resultsView" style="display:none">
@@ -2064,11 +2184,21 @@ document.querySelectorAll('.ld-cta-to-auth').forEach(btn=>{
    anyway). Cycles to the next pair each time the card settles back on its
    front face, so a visitor who lingers sees a few different examples
    rather than the same one flipping back and forth forever. */
+/* Corrected 2026-08 -- these were phlebotomy/clinical trivia left over
+   from an early, wrong guess at this app's domain (see CLAUDE.md's own
+   "corrected LNHA scope" history). The real domain is nursing home
+   administration/regulatory content for the LNHA licensure exams, not
+   bedside clinical technique -- swapped to genuinely on-domain sample
+   questions, kept to well-established, uncontroversial facts (acronym
+   definitions, which law/agency does what) rather than any specific
+   numeric operational detail, since this is real regulatory content on a
+   real licensing-exam product and getting a figure wrong here would just
+   trade one accuracy problem for another. */
 const LANDING_SAMPLE_CARDS = [
-  { q: 'Which vein is most commonly used for routine venipuncture?', a: 'Median cubital vein' },
-  { q: 'What is the normal resting heart rate range for a healthy adult?', a: '60–100 beats per minute' },
-  { q: 'What does the chart abbreviation "NPO" mean?', a: 'Nothing by mouth' },
-  { q: 'Which piece of PPE should be put on first before a sterile procedure?', a: 'Gown' }
+  { q: 'What does the acronym "QAPI" stand for in long-term care?', a: 'Quality Assurance and Performance Improvement' },
+  { q: 'Which federal law established modern nursing home residents’ rights standards?', a: 'OBRA — the Omnibus Budget Reconciliation Act of 1987' },
+  { q: 'What does "CMS" stand for?', a: 'Centers for Medicare & Medicaid Services' },
+  { q: 'What is the core purpose of a facility’s Quality Assurance Committee?', a: 'Identify care issues and carry out corrective action plans' }
 ];
 let landingCardIdx = 0;
 if(!window.matchMedia('(prefers-reduced-motion: reduce)').matches){
@@ -2184,6 +2314,33 @@ function dismissModal(closeFn){
   const idx = modalCloseStack.lastIndexOf(closeFn);
   if(idx !== -1){ modalCloseStack.splice(idx,1); closeFn(); history.back(); }
   else closeFn();
+}
+
+/* Standardizes what a real dialog should already do -- several hand-rolled
+   dialog-overlay dialogs (AI Settings, Exam Access) had none of this at
+   all: no Escape-to-close, no back-button registration (pushModalClose),
+   no focus moving into the dialog on open or back to whatever opened it on
+   close. Returns a wrapped close function -- pass THAT (not the original
+   close) to every call site that closes the dialog (Cancel, backdrop
+   click, a programmatic close-on-save), via dismissModal(), the same way
+   every other dialog in this app already does, so Escape/Back/focus and a
+   plain click-to-close all stay consistent instead of three different
+   half-wired paths. */
+function wireDialogA11y(overlay, close){
+  const opener = document.activeElement;
+  function onKeydown(e){
+    if(e.key === 'Escape') dismissModal(wrapped);
+  }
+  const wrapped = ()=>{
+    document.removeEventListener('keydown', onKeydown);
+    close();
+    if(opener && typeof opener.focus === 'function') opener.focus();
+  };
+  document.addEventListener('keydown', onKeydown);
+  pushModalClose(wrapped);
+  const focusable = overlay.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+  if(focusable) focusable.focus();
+  return wrapped;
 }
 
 /* ---- keyboard shortcuts overlay ---- */
@@ -2536,13 +2693,33 @@ async function loadAiFeatureFlags(){
     if(!error && data && data.length) aiFeatureFlags = data[0];
   }catch(e){ /* keep the optimistic defaults -- server-side is the real gate */ }
 }
+
+/* Populated once per session, same fire-and-forget pattern as
+   loadAiFeatureFlags -- Settings' Privacy Policy/Terms links (hidden until
+   this resolves and finds real content, see renderStatusBar) and the
+   post-sign-in acceptance gate (maybeShowPolicyAcceptancePrompt) both read
+   from this cache rather than each fetching their own copy. */
+let legalDocsCache = null; // [{doc_type,title,body_html,version,updated_at}] | null (not loaded yet)
+async function loadLegalDocuments(){
+  try{
+    const { data, error } = await supabaseClient.rpc('get_legal_documents');
+    if(!error && data) legalDocsCache = data;
+  }catch(e){ /* Settings links just stay hidden until a reload succeeds */ }
+}
+function legalDoc(docType){
+  return legalDocsCache && legalDocsCache.find(d=>d.doc_type===docType);
+}
+function legalDocHasContent(docType){
+  const d = legalDoc(docType);
+  return !!(d && d.body_html && d.body_html.trim());
+}
 function isChatPeriodCapped(){
   return aiFeatureFlags.chat_period_used >= aiFeatureFlags.chat_period_limit;
 }
 
 const aiExplanationCache = new Map();
 function fetchAiExplanation(q){
-  const key = q.text.trim().toLowerCase();
+  const key = computeQuestionKey(q.text);
   if(!aiExplanationCache.has(key)){
     const p = supabaseClient.functions.invoke('ai-explain', {
       body: {
@@ -2639,7 +2816,7 @@ function ensureAiChatPanel(){
 async function openAiChat(q){
   const { backdrop, panel } = ensureAiChatPanel();
   aiChatCurrentQuestion = q;
-  const key = q.text.trim().toLowerCase();
+  const key = computeQuestionKey(q.text);
   panel.querySelector('#aiChatQtext').textContent = q.text;
   backdrop.hidden = false;
   panel.hidden = false;
@@ -2730,7 +2907,7 @@ function updateAiChatPinUI(){
 
 function renderAiChatMessages(){
   if(!aiChatEl || !aiChatCurrentQuestion) return;
-  const key = aiChatCurrentQuestion.text.trim().toLowerCase();
+  const key = computeQuestionKey(aiChatCurrentQuestion.text);
   const thread = aiChatThreads.get(key);
   const list = aiChatEl.panel.querySelector('#aiChatMessages');
   if(thread.messages.length===0){
@@ -2782,7 +2959,7 @@ async function sendAiChatMessage(){
   const text = input.value.trim();
   if(!text) return;
   const q = aiChatCurrentQuestion;
-  const key = q.text.trim().toLowerCase();
+  const key = computeQuestionKey(q.text);
   const thread = aiChatThreads.get(key);
   thread.messages.push({ role:'user', text });
   thread.messages.push({ role:'assistant', text:'…', pending:true });
@@ -3114,7 +3291,7 @@ function showConfirmDialog(message, onConfirm, confirmLabel, danger){
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(6,8,12,.5);display:flex;align-items:center;justify-content:center;z-index:9999;font-family:system-ui,sans-serif;padding:20px;';
   const okColor = danger ? 'var(--bad)' : 'var(--accent)';
   overlay.innerHTML = `
-    <div role="alertdialog" aria-modal="true" aria-label="${escapeHtml(confirmLabel || 'End Exam')}" aria-describedby="confirmDialogMsg" style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;max-width:360px;box-shadow:0 8px 30px rgba(0,0,0,.25);">
+    <div role="alertdialog" aria-modal="true" aria-label="${escapeHtml(confirmLabel || 'End Exam')}" aria-describedby="confirmDialogMsg" style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;max-width:360px;max-height:90vh;overflow-y:auto;box-shadow:0 8px 30px rgba(0,0,0,.25);">
       <div id="confirmDialogMsg" style="font-size:.95rem;line-height:1.5;margin-bottom:18px;color:var(--ink);">${escapeHtml(message)}</div>
       <div class="dialog-actions">
         <button id="confirmCancelBtn" class="dialog-btn" style="font-family:system-ui,sans-serif;border:1px solid var(--line);color:var(--ink);background:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:.88rem;">Cancel</button>
@@ -3253,11 +3430,18 @@ function renderReviewList(indices, questions, answersMap){
       }
     } else {
       q.options.forEach((opt, oi)=>{
+        // Real visual-consistency fix: this used to be plain colored text
+        // (.review-line), a completely different visual language than the
+        // bordered, lettered "choice card" (.opt) exam-taking and
+        // flashcards both use for the exact same concept -- an answer
+        // option. Reusing .opt here (as a read-only div, not a button --
+        // review is look-only) makes review read as the same component
+        // everywhere it appears instead of two unrelated ones.
         let cls = '';
         let tag = '';
-        if(oi === q.correct){ cls = 'correct-line'; tag = ' ✓ correct answer'; }
-        else if(oi === userAns){ cls = 'wrong-line'; tag = ' — your answer'; }
-        html += `<div class="review-line ${cls}">${optionLabel(oi)}) ${escapeHtml(opt)}${tag}</div>`;
+        if(oi === q.correct){ cls = 'correct'; tag = ' ✓ correct answer'; }
+        else if(oi === userAns){ cls = 'incorrect'; tag = ' — your answer'; }
+        html += `<div class="opt review-opt ${cls}" aria-disabled="true"><span class="letter">${optionLabel(oi)}</span><span>${escapeHtml(opt)}${tag}</span></div>`;
       });
       if(userAns===undefined){
         html += `<div class="review-line wrong-line">Not answered</div>`;
@@ -3371,6 +3555,16 @@ function renderReviewPanel(missed, total){
   document.getElementById('reviewMissedBtn').onclick = ()=>{ reviewFilter='missed'; renderReviewPanel(missed, total); };
   document.getElementById('reviewAllBtn').onclick = ()=>{ reviewFilter='all'; renderReviewPanel(missed, total); };
   wireReviewList(reviewPanel, exam.questions);
+}
+
+// Same identity scheme the AI edge functions' own _shared/question_identity.ts
+// uses server-side -- there is no per-question primary key anywhere in
+// this DB (exam_library_store holds the whole library as one JSON blob),
+// so this normalized-text key is the closest thing to one. Was
+// independently duplicated as `x.trim().toLowerCase()` at every call site
+// that needed it (~10 of them) instead of sharing one helper.
+function computeQuestionKey(text){
+  return (text||'').trim().toLowerCase();
 }
 
 function escapeHtml(s){
@@ -3634,7 +3828,7 @@ async function buildFlashcardsFromAttemptIds(attemptIds, scopeMsg){
   rows.forEach(r=>{
     if(r.selected_option===null || r.selected_option===undefined) return;
     if(r.selected_option === r.correct_option) return;
-    const key = r.question_text.trim().toLowerCase();
+    const key = computeQuestionKey(r.question_text);
     if(tally.has(key)) tally.get(key).count++;
     else tally.set(key, { text: r.question_text, options: r.options, correct: r.correct_option, explanation: r.explanation || '', count: 1 });
   });
@@ -3701,7 +3895,7 @@ async function buildFlashcardsFromFlaggedAnswers(attemptIds){
   const tally = new Map();
   rows.forEach(r=>{
     if(!r.flagged) return;
-    const key = r.question_text.trim().toLowerCase();
+    const key = computeQuestionKey(r.question_text);
     if(!tally.has(key)) tally.set(key, { text: r.question_text, options: r.options, correct: r.correct_option, explanation: r.explanation || '' });
   });
   if(tally.size === 0) throw new Error('No flagged questions found — nothing to build flashcards from.');
@@ -3764,12 +3958,12 @@ async function addSelectedAttemptsToFlashcards(attemptIds){
   renderFlashcard();
   try{
     const rows = await fetchAllByIn('exam_attempt_answers', 'attempt_id', attemptIds, '*');
-    const existingKeys = new Set(flashcards.map(c=>c.text.trim().toLowerCase()));
+    const existingKeys = new Set(flashcards.map(c=>computeQuestionKey(c.text)));
     const picked = [];
     rows.forEach(r=>{
       if(r.selected_option===null || r.selected_option===undefined) return;
       if(r.selected_option === r.correct_option) return;
-      const key = r.question_text.trim().toLowerCase();
+      const key = computeQuestionKey(r.question_text);
       if(existingKeys.has(key)) return;
       existingKeys.add(key);
       picked.push({ text: r.question_text, options: r.options, correct: r.correct_option, explanation: r.explanation || '' });
@@ -4024,13 +4218,13 @@ function bindFlashLibraryPickerHandlers(){
    instead of a duplicate card. */
 function addSelectedLibraryQuestionsToFlashcards(){
   if(!flashLibrarySelectedKeys.size) return;
-  const existingKeys = new Set(flashcards.map(c=>c.text.trim().toLowerCase()));
+  const existingKeys = new Set(flashcards.map(c=>computeQuestionKey(c.text)));
   const picked = [];
   flashLibrarySelectedKeys.forEach(key=>{
     const [testIdx, qIdx] = key.split('::').map(Number);
     const q = EXAM_LIBRARY[testIdx] && EXAM_LIBRARY[testIdx].questions[qIdx];
     if(!q) return;
-    const dedupeKey = q.text.trim().toLowerCase();
+    const dedupeKey = computeQuestionKey(q.text);
     if(existingKeys.has(dedupeKey)) return;
     existingKeys.add(dedupeKey);
     picked.push({ text: q.text, options: q.options, correct: q.correct, explanation: q.explanation || '' });
@@ -4318,7 +4512,7 @@ function shuffleFlashcards(){
   renderFlashcard();
 }
 
-function recallKey(card){ return (card.text||'').trim().toLowerCase(); }
+function recallKey(card){ return computeQuestionKey(card.text); }
 
 /* Rebuilds the recall queue whenever the underlying deck has changed
    (reference check against `flashcards` -- every deck-generator/loader in
@@ -4574,7 +4768,7 @@ function getFlashcardLocationLabel(card){
     _flashLocationIndex = new Map();
     EXAM_LIBRARY.forEach(exam=>{
       (exam.questions||[]).forEach((q,qi)=>{
-        const key = q.text.trim().toLowerCase();
+        const key = computeQuestionKey(q.text);
         if(!_flashLocationIndex.has(key)){
           _flashLocationIndex.set(key, { examTitle: exam.title, questionNumber: q.originalNumber || (qi+1) });
         }
@@ -4582,7 +4776,7 @@ function getFlashcardLocationLabel(card){
     });
     _flashLocationIndexSource = EXAM_LIBRARY;
   }
-  const loc = _flashLocationIndex.get(card.text.trim().toLowerCase());
+  const loc = _flashLocationIndex.get(computeQuestionKey(card.text));
   return loc ? `${loc.examTitle} · Q${loc.questionNumber}` : '';
 }
 
@@ -5864,6 +6058,106 @@ async function maybeShowPasskeyEnrollmentPrompt(){
   } catch(e){ /* best-effort -- never block sign-in on this */ }
 }
 
+/* ---- Privacy Policy / Terms of Service: read-only viewer (Settings) ---- */
+// Simple, dismissible single-document viewer -- same dialog-overlay/
+// dialog-card pattern as every other dialog in the app. Not used by the
+// mandatory acceptance gate below, which needs to NOT be dismissible.
+function openLegalDocumentDialog(docType){
+  const d = legalDoc(docType);
+  if(!d) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.innerHTML = `
+    <div class="dialog-card scrollable" style="max-width:640px;text-align:left;">
+      <h3 style="margin:0 0 4px;">${escapeHtml(d.title)}</h3>
+      <div class="format-help" style="margin-bottom:14px;">Last updated ${new Date(d.updated_at).toLocaleDateString()}</div>
+      <div style="max-height:50vh;overflow-y:auto;padding-right:4px;line-height:1.55;">${d.body_html}</div>
+      <div class="dialog-actions" style="margin-top:18px;">
+        <button class="btn btn-primary" id="closeLegalDocBtn">Close</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = ()=> overlay.remove();
+  overlay.onclick = (e)=>{ if(e.target === overlay) dismissModal(close); };
+  overlay.querySelector('#closeLegalDocBtn').onclick = ()=> dismissModal(close);
+  pushModalClose(close);
+}
+
+/* ---- Privacy Policy / Terms of Service: mandatory first-sign-in gate ---- */
+// Deliberately has NO backdrop-click-close, NO Escape handling, and is
+// never registered with pushModalClose/modalCloseStack -- unlike every
+// other dialog in the app, this one must not be dismissible any way other
+// than actually accepting. The version-vs-accepted check happens
+// server-side (get_my_policy_acceptance_status) and the acceptance write
+// (accept_current_policies) takes no client-supplied version, so there's
+// nothing here for a client to spoof even if someone tried to skip this
+// via devtools -- the check just runs again next sign-in.
+function openPolicyAcceptanceGate(pendingDocTypes){
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  const docsHtml = pendingDocTypes.map(dt=>{
+    const d = legalDoc(dt);
+    return `
+      <h4 style="margin:16px 0 6px;">${escapeHtml(d.title)}</h4>
+      <div style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:10px 12px;line-height:1.5;font-size:.92rem;">${d.body_html}</div>
+    `;
+  }).join('');
+  overlay.innerHTML = `
+    <div class="dialog-card scrollable" style="max-width:600px;text-align:left;">
+      <h3 style="margin:0 0 4px;">Before you continue</h3>
+      <div class="format-help">We've updated our policies. Please review and accept to keep using NHA Exam Prep.</div>
+      ${docsHtml}
+      <label style="display:flex;align-items:flex-start;gap:10px;margin-top:18px;font-size:.92rem;">
+        <input type="checkbox" id="policyAcceptCheckbox" style="margin-top:3px;">
+        <span>I have read and agree to the ${pendingDocTypes.map(dt=>escapeHtml(legalDoc(dt).title)).join(' and ')}.</span>
+      </label>
+      <div class="msg" id="policyAcceptMsg"></div>
+      <div class="dialog-actions" style="margin-top:14px;">
+        <button class="btn btn-primary" id="policyAcceptBtn" disabled>Continue</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const checkbox = overlay.querySelector('#policyAcceptCheckbox');
+  const acceptBtn = overlay.querySelector('#policyAcceptBtn');
+  checkbox.onchange = ()=>{ acceptBtn.disabled = !checkbox.checked; };
+  acceptBtn.onclick = async ()=>{
+    const msgEl = overlay.querySelector('#policyAcceptMsg');
+    acceptBtn.disabled = true;
+    try{
+      const { error } = await supabaseClient.rpc('accept_current_policies');
+      if(error) throw error;
+      overlay.remove();
+    } catch(err){
+      msgEl.className = 'msg err';
+      msgEl.textContent = 'Could not save your acceptance: ' + err.message;
+      acceptBtn.disabled = !checkbox.checked;
+    }
+  };
+}
+
+async function maybeShowPolicyAcceptancePrompt(){
+  try{
+    if(!legalDocsCache) await loadLegalDocuments();
+    const configuredDocs = (legalDocsCache || []).filter(d=> d.body_html && d.body_html.trim());
+    if(!configuredDocs.length) return; // nothing published yet -- nothing to gate on
+    const { data: status, error } = await supabaseClient.rpc('get_my_policy_acceptance_status');
+    if(error || !status) return; // best-effort -- never lock someone out over a network hiccup
+    const pending = configuredDocs
+      .map(d=>d.doc_type)
+      .filter(dt=>{
+        const row = status.find(s=>s.doc_type===dt);
+        return !row || !row.up_to_date;
+      });
+    if(pending.length) openPolicyAcceptanceGate(pending);
+  } catch(e){ /* best-effort -- never block sign-in on this */ }
+}
+
 function renderStatusBar(){
   if(appMode !== 'online' || !currentUser){
     statusBar.innerHTML = '';
@@ -5885,6 +6179,16 @@ function renderStatusBar(){
   document.querySelectorAll('.account-passkeys-btn').forEach(btn=>{
     btn.style.display = passkeysActive() ? '' : 'none';
     btn.onclick = ()=>{ closeAccountMenus(); openPasskeysDialog(); };
+  });
+  // Hidden until loadLegalDocuments() resolves and finds real admin-pasted
+  // content -- no point linking to an empty/unpublished document.
+  document.querySelectorAll('.open-privacy-btn').forEach(btn=>{
+    btn.style.display = legalDocHasContent('privacy_policy') ? '' : 'none';
+    btn.onclick = ()=>{ closeAccountMenus(); openLegalDocumentDialog('privacy_policy', 'view'); };
+  });
+  document.querySelectorAll('.open-terms-btn').forEach(btn=>{
+    btn.style.display = legalDocHasContent('terms_of_service') ? '' : 'none';
+    btn.onclick = ()=>{ closeAccountMenus(); openLegalDocumentDialog('terms_of_service', 'view'); };
   });
   tabProgress.style.display = '';
   syncMobileNavVisibility();
@@ -6317,6 +6621,7 @@ async function applyAccessGate(authEvent){
     showView(initialView || 'quiz', initialView ? { fromPopState: true } : undefined);
     loadAiFeatureFlags();
     maybeShowPasskeyEnrollmentPrompt();
+    (async ()=>{ await loadLegalDocuments(); renderStatusBar(); await maybeShowPolicyAcceptancePrompt(); })();
   }
 }
 
@@ -6482,7 +6787,7 @@ function askContinueOrFresh(examTitleText){
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(6,8,12,.5);display:flex;align-items:center;justify-content:center;z-index:9999;font-family:system-ui,sans-serif;padding:20px;';
     overlay.innerHTML = `
-      <div role="alertdialog" aria-modal="true" aria-label="Unfinished attempt" aria-describedby="continueDialogMsg" style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;max-width:380px;box-shadow:0 8px 30px rgba(0,0,0,.25);">
+      <div role="alertdialog" aria-modal="true" aria-label="Unfinished attempt" aria-describedby="continueDialogMsg" style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;max-width:380px;max-height:90vh;overflow-y:auto;box-shadow:0 8px 30px rgba(0,0,0,.25);">
         <div id="continueDialogMsg" style="font-size:.95rem;line-height:1.5;margin-bottom:18px;color:var(--ink);">You have an unfinished attempt on "${escapeHtml(examTitleText)}". Continue where you left off, or start fresh?</div>
         <div class="dialog-actions">
           <button id="startFreshBtn" class="dialog-btn" style="font-family:system-ui,sans-serif;border:1px solid var(--line);color:var(--ink);background:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:.88rem;">Start Fresh</button>
@@ -6527,25 +6832,46 @@ async function resumeOnlineAttempt(round, attempt, examData){
    a fresh round (see the offline retakeBtn comment for why "fresh full
    attempt" = next round), except it first checks for a resumable unfinished
    attempt and asks the user before discarding it. */
+/* Real incident: double-clicking "Start" (or clicking it again before the
+   first click's dialog appears) used to fire this function twice
+   concurrently. Both calls independently read the same in-progress round/
+   resumable attempt before either had committed anything, so both showed
+   their own "Continue or Start Fresh?" dialog stacked on top of each
+   other -- dismissing the top one let the second run its own
+   discard/abandon/create-round sequence against data the first call was
+   still mid-flight on, and the two calls could race to insert a second
+   round with the identical round_number (createRound's priorRoundNumber
+   was captured by both before either wrote anything), which the DB's own
+   uniqueness expectations were never built to have two clients racing
+   against at once. Guarding re-entrancy here, once, fixes it regardless of
+   which exact step in that pileup was actually freezing the tab -- no
+   second call gets far enough to show a second dialog at all now. */
+let beginOnlineAttemptInFlight = false;
 async function beginOnlineAttempt(examData){
-  const latest = await onlineStore.findLatestRound(examData.examKey);
-  if(latest && latest.status === 'in_progress'){
-    const resumable = await onlineStore.findResumableAttempt(latest.id);
-    if(resumable){
-      const choice = await askContinueOrFresh(examData.title);
-      if(choice === 'continue'){
-        await resumeOnlineAttempt(latest, resumable, examData);
-        return;
+  if(beginOnlineAttemptInFlight) return;
+  beginOnlineAttemptInFlight = true;
+  try{
+    const latest = await onlineStore.findLatestRound(examData.examKey);
+    if(latest && latest.status === 'in_progress'){
+      const resumable = await onlineStore.findResumableAttempt(latest.id);
+      if(resumable){
+        const choice = await askContinueOrFresh(examData.title);
+        if(choice === 'continue'){
+          await resumeOnlineAttempt(latest, resumable, examData);
+          return;
+        }
+        await onlineStore.discardAttempt(resumable.id);
       }
-      await onlineStore.discardAttempt(resumable.id);
+      await onlineStore.abandonRound(latest.id);
     }
-    await onlineStore.abandonRound(latest.id);
+    const priorRoundNumber = latest ? latest.round_number : 0;
+    const round = await onlineStore.createRound(examData.examKey, examData.title, examData.questions.length, priorRoundNumber);
+    activeOnlineRound = round;
+    activeOnlineAttempt = await onlineStore.createAttemptWithQuestions(round.id, 1, 'full', null, examData.questions);
+    loadExam(examData);
+  } finally {
+    beginOnlineAttemptInFlight = false;
   }
-  const priorRoundNumber = latest ? latest.round_number : 0;
-  const round = await onlineStore.createRound(examData.examKey, examData.title, examData.questions.length, priorRoundNumber);
-  activeOnlineRound = round;
-  activeOnlineAttempt = await onlineStore.createAttemptWithQuestions(round.id, 1, 'full', null, examData.questions);
-  loadExam(examData);
 }
 
 /* Fire-and-forget per-answer save so an online attempt is always resumable
@@ -6641,8 +6967,19 @@ async function renderProgressView(){
       if(attErr) throw attErr;
       attempts = attemptRows;
       if(attempts.length){
-        const answerRows = await fetchAllByIn('exam_attempt_answers', 'attempt_id', attempts.map(a=>a.id), 'attempt_id');
-        answerRows.forEach(r=>{ answerCountByAttempt[r.attempt_id] = (answerCountByAttempt[r.attempt_id]||0) + 1; });
+        /* A row exists here for every question the moment an attempt is
+           created (see onlineStore.createAttemptWithQuestions) -- most
+           start out with selected_option:null and only get filled in as
+           the student actually answers. Counting rows alone (the previous
+           behavior) counted every still-unanswered placeholder too, so a
+           165-question attempt with 5 real answers showed "165 of 165
+           answered" instead of "5 of 165". Only a non-null selected_option
+           is a real answer. */
+        const answerRows = await fetchAllByIn('exam_attempt_answers', 'attempt_id', attempts.map(a=>a.id), 'attempt_id,selected_option');
+        answerRows.forEach(r=>{
+          if(r.selected_option === null || r.selected_option === undefined) return;
+          answerCountByAttempt[r.attempt_id] = (answerCountByAttempt[r.attempt_id]||0) + 1;
+        });
       }
     }
     const examsMap = {};
@@ -7315,6 +7652,21 @@ async function renderAdminView(){
     const aiPeriodUsedByUser = {};
     aiUsageRows.forEach(r=>{ aiPeriodUsedByUser[r.user_id] = (aiPeriodUsedByUser[r.user_id]||0) + 1; });
 
+    // Powers the badge on the Feedback nav pill -- a head-only count query
+    // (no rows fetched) rather than the Feedback tab's own full fetch,
+    // since this needs to be available before that tab is ever opened.
+    // Non-fatal on error (e.g. migration 0048 not pushed yet) -- a missing
+    // badge count shouldn't take down the rest of the admin panel.
+    let unresolvedFeedbackCount = 0;
+    try{
+      const { count, error: fbCountErr } = await supabaseClient
+        .from('user_feedback').select('id', { count: 'exact', head: true }).eq('resolved', false);
+      if(fbCountErr) throw fbCountErr;
+      unresolvedFeedbackCount = count || 0;
+    } catch(fbCountErr){
+      console.error('Could not load unresolved feedback count:', fbCountErr);
+    }
+
     const flagsByUser = {};
     profiles.forEach(p=>{
       const userEvents = events.filter(e=>e.user_id===p.user_id);
@@ -7377,7 +7729,7 @@ async function renderAdminView(){
         aiHeavyUsage, aiPeriodUsed, aiEffectivePeriodLimit: effectivePeriodLimit,
       };
     });
-    adminData = { profiles, flagsByUser, aiConfig, aiOverridesByUser };
+    adminData = { profiles, flagsByUser, aiConfig, aiOverridesByUser, unresolvedFeedbackCount };
   } catch(err){
     adminPanel.innerHTML = `<h1>Admin</h1><div class="msg err">Could not load admin data: ${escapeHtml(err.message)}</div>`;
     return;
@@ -7400,7 +7752,7 @@ function renderAdminPanel(){
       <button id="adminNavAccounts" class="${adminSubView==='accounts'?'active':''}">Accounts</button>
       <button id="adminNavAuditLog" class="${adminSubView==='auditLog'?'active':''}">Audit Log</button>
       <button id="adminNavErrors" class="${adminSubView==='errors'?'active':''}">Errors</button>
-      <button id="adminNavFeedback" class="${adminSubView==='feedback'?'active':''}">Feedback</button>
+      <button id="adminNavFeedback" class="${adminSubView==='feedback'?'active':''}">Feedback${adminData.unresolvedFeedbackCount ? ` <span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">${adminData.unresolvedFeedbackCount}</span>` : ''}</button>
       <button id="adminNavAi" class="${adminSubView==='ai'?'active':''}">AI</button>
       <button id="adminNavTools" class="${adminSubView==='tools'?'active':''}">Tools</button>
     </div>
@@ -7485,8 +7837,9 @@ function openAiAccountOverrideDialog(userId, email){
   `;
   document.body.appendChild(overlay);
   const close = ()=>{ overlay.remove(); };
-  overlay.onclick = (e)=>{ if(e.target === overlay) close(); };
-  overlay.querySelector('#ovCancelBtn').onclick = close;
+  const dismiss = wireDialogA11y(overlay, close);
+  overlay.onclick = (e)=>{ if(e.target === overlay) dismissModal(dismiss); };
+  overlay.querySelector('#ovCancelBtn').onclick = ()=> dismissModal(dismiss);
   // Fresh every time this dialog opens -- an admin opening a different
   // account's AI settings shouldn't land with the previous account's AI
   // Usage left expanded. Moved here (out of the "View Progress" drilldown)
@@ -7512,7 +7865,7 @@ function openAiAccountOverrideDialog(userId, email){
       if(error) throw error;
       resultEl.className = 'msg ok';
       resultEl.textContent = 'Saved.';
-      setTimeout(()=>{ close(); renderAdminView(); }, 500);
+      setTimeout(()=>{ dismissModal(dismiss); renderAdminView(); }, 500);
     } catch(err){
       resultEl.className = 'msg err';
       resultEl.textContent = 'Could not save: ' + err.message;
@@ -7584,6 +7937,12 @@ async function openExamAccessDialog(userId, email){
     <div class="dialog-card scrollable" style="max-width:460px;">
       <h3 style="margin:0 0 6px;">Exam access — ${escapeHtml(email)}</h3>
       <div class="format-help">Override which exams this account can see, independent of the site-wide default in Admin → Tools → Exam Visibility. Leave "Inherit" to just use that default.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;font-family:system-ui,sans-serif;">
+        <input type="text" id="examAccessFilter" placeholder="Filter by exam title…" style="flex:1 1 160px;min-width:0;padding:7px 10px;border-radius:8px;border:1px solid var(--line);">
+        <button class="link-btn" type="button" data-bulk-exam-access="">Set visible → Inherit</button>
+        <button class="link-btn" type="button" data-bulk-exam-access="true">Set visible → On</button>
+        <button class="link-btn" type="button" data-bulk-exam-access="false">Set visible → Off</button>
+      </div>
       <div id="examAccessList" style="margin-top:12px;font-family:system-ui,sans-serif;">Loading…</div>
       <div class="msg" id="examAccessResult"></div>
       <div class="dialog-actions" style="margin-top:16px;">
@@ -7594,8 +7953,9 @@ async function openExamAccessDialog(userId, email){
   `;
   document.body.appendChild(overlay);
   const close = ()=>{ overlay.remove(); };
-  overlay.onclick = (e)=>{ if(e.target === overlay) close(); };
-  overlay.querySelector('#examAccessCancelBtn').onclick = close;
+  const dismiss = wireDialogA11y(overlay, close);
+  overlay.onclick = (e)=>{ if(e.target === overlay) dismissModal(dismiss); };
+  overlay.querySelector('#examAccessCancelBtn').onclick = ()=> dismissModal(dismiss);
 
   const listEl = overlay.querySelector('#examAccessList');
   let overridesByTitle = {};
@@ -7612,7 +7972,7 @@ async function openExamAccessDialog(userId, email){
       const has = Object.prototype.hasOwnProperty.call(overridesByTitle, e.exam_title);
       const current = has ? overridesByTitle[e.exam_title] : null;
       return `
-        <label style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);">
+        <label class="exam-access-row" data-exam-access-row-title="${escapeHtml(e.exam_title.toLowerCase())}" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);">
           <span>${escapeHtml(e.exam_title)}</span>
           <select data-exam-access-title="${escapeHtml(e.exam_title)}" class="ai-override-select">
             <option value="">Inherit (site: ${e.enabled ? 'on' : 'off'})</option>
@@ -7625,6 +7985,30 @@ async function openExamAccessDialog(userId, email){
     listEl.innerHTML = `<div class="msg err">Could not load: ${escapeHtml(err.message)}</div>`;
     return;
   }
+
+  // Filter and bulk-set: added for a real, non-destructive quality-of-life
+  // gap -- 27 near-identical rows with no way to narrow or bulk-apply.
+  // Filtering only toggles visibility (rows stay in the DOM either way),
+  // so it can never change what actually gets saved; bulk-set only ever
+  // touches rows currently visible under the active filter, so narrowing
+  // first and bulk-setting is how you target a subset.
+  const filterInput = overlay.querySelector('#examAccessFilter');
+  filterInput.oninput = ()=>{
+    const q = filterInput.value.trim().toLowerCase();
+    listEl.querySelectorAll('.exam-access-row').forEach(row=>{
+      row.style.display = row.dataset.examAccessRowTitle.includes(q) ? '' : 'none';
+    });
+  };
+  overlay.querySelectorAll('[data-bulk-exam-access]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const val = btn.dataset.bulkExamAccess;
+      listEl.querySelectorAll('.exam-access-row').forEach(row=>{
+        if(row.style.display === 'none') return; // filtered out -- leave untouched
+        const sel = row.querySelector('select[data-exam-access-title]');
+        if(sel) sel.value = val;
+      });
+    };
+  });
 
   overlay.querySelector('#examAccessSaveBtn').onclick = async ()=>{
     const resultEl = overlay.querySelector('#examAccessResult');
@@ -7651,7 +8035,7 @@ async function openExamAccessDialog(userId, email){
       }
       resultEl.className = 'msg ok';
       resultEl.textContent = 'Saved.';
-      setTimeout(close, 500);
+      setTimeout(()=>dismissModal(dismiss), 500);
     } catch(err){
       resultEl.className = 'msg err';
       resultEl.textContent = 'Could not save: ' + err.message;
@@ -7726,6 +8110,7 @@ function renderAdminAccountsView(){
           <button class="link-btn" data-view-events="${p.user_id}">View Security Events</button>
           <button class="link-btn" data-ai-settings-user="${p.user_id}" data-ai-settings-email="${escapeHtml(p.email)}">AI Settings</button>
           <button class="link-btn" data-exam-access-user="${p.user_id}" data-exam-access-email="${escapeHtml(p.email)}">Exam Access</button>
+          <button class="link-btn" data-resend-welcome-user="${p.user_id}" data-resend-welcome-email="${escapeHtml(p.email)}">Resend Welcome Packet</button>
           ${isSelf ? '' : isProtected ? `
             <span class="lib-badge" style="background:var(--chip);" title="Suspend/delete/role-change are blocked server-side for this account">Protected account</span>
           ` : `
@@ -7768,11 +8153,47 @@ function renderAdminAccountsView(){
       try{
         const { error } = await supabaseClient.rpc('admin_set_approved', { target_user_id: targetId, new_approved: newApproved });
         if(error) throw error;
+        /* Approval and the welcome-email send are two independent
+           outcomes -- the approval has already committed by this point, so
+           a failed send is reported separately rather than swallowed or
+           made to look like the approval itself failed. "turned off" means
+           the admin's own Email-section kill-switch is on, a deliberate
+           choice, not a real failure -- skip the alert for that case. */
+        if(newApproved){
+          try{
+            const { data: sendData, error: sendErr } = await supabaseClient.functions.invoke('send-welcome-email', { body: { target_user_id: targetId } });
+            if(sendErr) throw sendErr;
+            if(sendData && sendData.error) throw new Error(sendData.error);
+          } catch(sendErr){
+            if(!/turned off/i.test(sendErr.message || '')){
+              alert('Approved, but the welcome email failed to send — use "Resend Welcome Packet" on this account to retry.\n\n' + sendErr.message);
+            }
+          }
+        }
         await renderAdminView();
       } catch(err){
         alert('Could not update: ' + err.message);
         btn.disabled = false;
       }
+    };
+  });
+  sub.querySelectorAll('button[data-resend-welcome-user]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const targetId = btn.dataset.resendWelcomeUser;
+      const targetEmail = btn.dataset.resendWelcomeEmail;
+      showConfirmDialog(`Send the welcome packet to ${targetEmail}?`, async ()=>{
+        btn.disabled = true;
+        try{
+          const { data, error } = await supabaseClient.functions.invoke('send-welcome-email', { body: { target_user_id: targetId } });
+          if(error) throw error;
+          if(data && data.error) throw new Error(data.error);
+          alert(`Welcome packet sent to ${targetEmail}.`);
+        } catch(err){
+          alert('Could not send: ' + err.message);
+        } finally {
+          btn.disabled = false;
+        }
+      }, 'Send Welcome Packet');
     };
   });
   sub.querySelectorAll('button[data-delete-user]').forEach(btn=>{
@@ -7867,7 +8288,12 @@ async function renderAdminAuditLogView(){
     const actionLabels = {
       approve: 'Approved', suspend: 'Suspended', delete_user: 'Permanently deleted',
       grant_admin: 'Granted admin to', revoke_admin: 'Revoked admin from',
-      dismiss_flag: 'Dismissed flag for', undismiss_flag: 'Un-dismissed flag for'
+      dismiss_flag: 'Dismissed flag for', undismiss_flag: 'Un-dismissed flag for',
+      update_site_email_config: 'Updated site email settings',
+      update_welcome_packet_config: 'Updated welcome packet',
+      add_welcome_packet_attachment: 'Added welcome packet attachment',
+      remove_welcome_packet_attachment: 'Removed welcome packet attachment',
+      send_welcome_email: 'Sent welcome packet to'
     };
     sub.innerHTML = `
       <div class="format-help">Most recent 200 admin actions, newest first.</div>
@@ -8236,6 +8662,190 @@ async function renderAiFeatureConfigSection(){
   }
 }
 
+/* Site-wide sender identity + the admin-editable welcome packet (subject,
+   body, attachments) sent when an account is approved. Same load-via-RPC-
+   with-a-fallback-default shape as renderAiFeatureConfigSection() above,
+   but simpler on the write side -- nothing else in the client reads this
+   config, so there's no in-memory cache to keep in sync on save, just a
+   full re-render (re-fetch) after any change. Password reset / signup
+   verification are NOT sent from here -- they stay on Supabase Auth's own
+   built-in flow, routed through the same sender via a dashboard SMTP
+   setting rather than custom code (see the plan this was built from). */
+async function renderEmailConfigSection(){
+  const section = document.getElementById('emailConfigSection');
+  if(!section) return;
+  try{
+    const [{ data: siteData, error: siteErr }, { data: packetData, error: packetErr }, { data: attachData, error: attachErr }] = await Promise.all([
+      supabaseClient.rpc('get_site_email_config'),
+      supabaseClient.rpc('get_welcome_packet_config'),
+      supabaseClient.rpc('list_welcome_packet_attachments'),
+    ]);
+    if(siteErr) throw siteErr;
+    if(packetErr) throw packetErr;
+    if(attachErr) throw attachErr;
+    const site = (siteData && siteData[0]) || { from_name:'NHA Exam Prep', from_address:'no-reply@example.com', reply_to_address:null };
+    const packet = (packetData && packetData[0]) || { subject:'Welcome to NHA Exam Prep!', body_html:'<p>Welcome!</p>', enabled:true };
+    const attachments = attachData || [];
+    const formatSize = (bytes)=>{
+      if(bytes < 1024) return bytes + ' B';
+      if(bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+      return (bytes/(1024*1024)).toFixed(1) + ' MB';
+    };
+
+    section.innerHTML = `
+      <h2>Email</h2>
+      <div class="format-help">Site-wide sender identity and the welcome packet sent when an account is approved. Password reset and signup verification are routed through this same sender via Supabase's own SMTP settings — a dashboard config, not here.</div>
+
+      <h3 style="margin-top:18px;">Sender</h3>
+      <div style="display:flex;flex-direction:column;gap:10px;max-width:420px;font-family:system-ui,sans-serif;margin-top:8px;">
+        <label>From name<input type="text" id="emailFromNameInput" value="${escapeHtml(site.from_name)}" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--line);margin-top:4px;box-sizing:border-box;"></label>
+        <label>From address<input type="email" id="emailFromAddressInput" value="${escapeHtml(site.from_address)}" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--line);margin-top:4px;box-sizing:border-box;"></label>
+        <div class="format-help">Must be an address on your Resend-verified domain, or sends will fail.</div>
+        <label>Reply-to (optional)<input type="email" id="emailReplyToInput" value="${escapeHtml(site.reply_to_address || '')}" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--line);margin-top:4px;box-sizing:border-box;"></label>
+        <button class="btn btn-primary" id="saveSiteEmailBtn" style="align-self:flex-start;">Save Sender</button>
+        <div class="msg" id="siteEmailResult"></div>
+      </div>
+
+      <h3 style="margin-top:22px;">Welcome Packet</h3>
+      <div style="display:flex;flex-direction:column;gap:10px;max-width:520px;font-family:system-ui,sans-serif;margin-top:8px;">
+        <label style="display:flex;align-items:center;gap:10px;">
+          <input type="checkbox" id="welcomePacketEnabledInput" ${packet.enabled ? 'checked' : ''}>
+          Send automatically when an account is approved
+        </label>
+        <label>Subject<input type="text" id="welcomePacketSubjectInput" value="${escapeHtml(packet.subject)}" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--line);margin-top:4px;box-sizing:border-box;"></label>
+        <label>Body<textarea id="welcomePacketBodyInput" style="min-height:160px;width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--line);margin-top:4px;font-family:system-ui,sans-serif;box-sizing:border-box;">${escapeHtml(packet.body_html)}</textarea></label>
+        <div class="format-help">Basic HTML tags are supported (&lt;p&gt;, &lt;b&gt;, &lt;a href="..."&gt;, etc.) — this isn't a rich-text editor, just plain markup.</div>
+        <button class="btn btn-primary" id="saveWelcomePacketBtn" style="align-self:flex-start;">Save Welcome Packet</button>
+        <div class="msg" id="welcomePacketResult"></div>
+      </div>
+
+      <h3 style="margin-top:22px;">Attachments</h3>
+      <div style="font-family:system-ui,sans-serif;max-width:520px;margin-top:8px;">
+        ${attachments.length ? attachments.map(a=>`
+          <div class="lib-row" style="padding:8px 0;">
+            <div class="lib-info">
+              <div class="lib-title" style="font-size:.88rem;">${escapeHtml(a.file_name)}</div>
+              <div class="lib-meta">${formatSize(a.size_bytes)} · uploaded ${new Date(a.uploaded_at).toLocaleDateString()}</div>
+            </div>
+            <button class="link-btn danger" data-remove-attachment="${a.id}" data-remove-attachment-path="${escapeHtml(a.storage_path)}" data-remove-attachment-name="${escapeHtml(a.file_name)}">Remove</button>
+          </div>
+        `).join('') : `<div class="format-help">No attachments yet.</div>`}
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px;">
+          <input type="file" id="welcomePacketFileInput" multiple>
+          <button class="btn btn-ghost" id="welcomePacketUploadBtn">Upload</button>
+        </div>
+        <div class="msg" id="welcomePacketAttachmentsResult"></div>
+      </div>
+    `;
+
+    document.getElementById('saveSiteEmailBtn').onclick = async ()=>{
+      const resultEl = document.getElementById('siteEmailResult');
+      resultEl.className = 'msg'; resultEl.textContent = '';
+      const fromName = document.getElementById('emailFromNameInput').value.trim();
+      const fromAddress = document.getElementById('emailFromAddressInput').value.trim();
+      const replyTo = document.getElementById('emailReplyToInput').value.trim();
+      if(!fromName || !fromAddress){
+        resultEl.className = 'msg err'; resultEl.textContent = 'From name and From address are required.'; return;
+      }
+      try{
+        const { error } = await supabaseClient.rpc('admin_update_site_email_config', {
+          new_from_name: fromName,
+          new_from_address: fromAddress,
+          new_reply_to_address: replyTo || null,
+          clear_reply_to: !replyTo,
+        });
+        if(error) throw error;
+        resultEl.className = 'msg ok'; resultEl.textContent = 'Saved.';
+      } catch(err){
+        resultEl.className = 'msg err'; resultEl.textContent = 'Could not save: ' + err.message;
+      }
+    };
+
+    document.getElementById('saveWelcomePacketBtn').onclick = async ()=>{
+      const resultEl = document.getElementById('welcomePacketResult');
+      resultEl.className = 'msg'; resultEl.textContent = '';
+      const subject = document.getElementById('welcomePacketSubjectInput').value.trim();
+      const bodyHtml = document.getElementById('welcomePacketBodyInput').value;
+      const enabled = document.getElementById('welcomePacketEnabledInput').checked;
+      if(!subject || !bodyHtml.trim()){
+        resultEl.className = 'msg err'; resultEl.textContent = 'Subject and body cannot be blank.'; return;
+      }
+      try{
+        const { error } = await supabaseClient.rpc('admin_update_welcome_packet_config', {
+          new_subject: subject,
+          new_body_html: bodyHtml,
+          new_enabled: enabled,
+        });
+        if(error) throw error;
+        resultEl.className = 'msg ok'; resultEl.textContent = 'Saved.';
+      } catch(err){
+        resultEl.className = 'msg err'; resultEl.textContent = 'Could not save: ' + err.message;
+      }
+    };
+
+    document.getElementById('welcomePacketUploadBtn').onclick = async ()=>{
+      const resultEl = document.getElementById('welcomePacketAttachmentsResult');
+      const fileInput = document.getElementById('welcomePacketFileInput');
+      const files = Array.from(fileInput.files || []);
+      if(!files.length){
+        resultEl.className = 'msg err'; resultEl.textContent = 'Choose one or more files first.'; return;
+      }
+      resultEl.className = 'msg'; resultEl.textContent = 'Uploading…';
+      const outcomes = [];
+      for(const file of files){
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const path = `${crypto.randomUUID()}-${safeName}`;
+        try{
+          const { error: uploadErr } = await supabaseClient.storage.from('welcome-packet').upload(path, file, { contentType: file.type || 'application/octet-stream' });
+          if(uploadErr) throw uploadErr;
+          const { error: registerErr } = await supabaseClient.rpc('admin_register_welcome_packet_attachment', {
+            p_storage_path: path,
+            p_file_name: file.name,
+            p_content_type: file.type || 'application/octet-stream',
+            p_size_bytes: file.size,
+          });
+          if(registerErr){
+            /* Registration failed after the file already landed in Storage
+               -- clean up the now-orphaned object rather than leaving a
+               file with no metadata row pointing at it. */
+            await supabaseClient.storage.from('welcome-packet').remove([path]);
+            throw registerErr;
+          }
+          outcomes.push(`${file.name}: uploaded`);
+        } catch(err){
+          outcomes.push(`${file.name}: failed — ${err.message}`);
+        }
+      }
+      resultEl.className = 'msg';
+      resultEl.textContent = outcomes.join(' · ');
+      renderEmailConfigSection();
+    };
+
+    section.querySelectorAll('button[data-remove-attachment]').forEach(btn=>{
+      btn.onclick = ()=>{
+        const path = btn.dataset.removeAttachmentPath;
+        const id = btn.dataset.removeAttachment;
+        const name = btn.dataset.removeAttachmentName;
+        showConfirmDialog(`Remove attachment "${name}" from the welcome packet?`, async ()=>{
+          const resultEl = document.getElementById('welcomePacketAttachmentsResult');
+          try{
+            const { error: removeErr } = await supabaseClient.storage.from('welcome-packet').remove([path]);
+            if(removeErr) throw removeErr;
+            const { error: rpcErr } = await supabaseClient.rpc('admin_remove_welcome_packet_attachment', { attachment_id: id });
+            if(rpcErr) throw rpcErr;
+            renderEmailConfigSection();
+          } catch(err){
+            resultEl.className = 'msg err';
+            resultEl.textContent = 'Could not remove: ' + err.message;
+          }
+        }, 'Remove', true);
+      };
+    });
+  } catch(err){
+    section.innerHTML = `<h2>Email</h2><div class="msg err">Could not load current settings: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
 /* Pre-generates Layer 1 AI explanations for the whole question bank up
    front, so real users never pay the first-time generation latency (or,
    equivalently, so the real dollar cost of generating each unique
@@ -8281,7 +8891,7 @@ function getUniqueLibraryQuestions(){
   const unique = [];
   EXAM_LIBRARY.forEach(exam=>{
     (exam.questions||[]).forEach(q=>{
-      const key = q.text.trim().toLowerCase() + '::' + questionContentSignature(q);
+      const key = computeQuestionKey(q.text) + '::' + questionContentSignature(q);
       if(seen.has(key)) return;
       seen.add(key);
       unique.push(q);
@@ -8308,36 +8918,52 @@ function renderAiPregenStatus(){
   if(stopBtn) stopBtn.hidden = !s.running;
 }
 
+// Shared client-driven concurrency-limited worker pool -- runAiPregeneration
+// and runAiAudit below used to each independently implement the identical
+// iterate/invoke-per-item/track-progress shape, near-duplicate code with no
+// real difference beyond which edge function they called. `onItem(item)`
+// does the actual per-item work (including its own progress-state
+// updates); `shouldStop()` is checked before every item so a Stop click
+// mid-run still takes effect promptly. This only owns the
+// concurrency/iteration mechanics -- progress state/rendering stays each
+// caller's own responsibility, since the two track genuinely different
+// fields (generated/alreadyCached vs. ok/flagged/skipped).
+async function runWorkerPool(items, concurrency, onItem, shouldStop){
+  let idx = 0;
+  async function worker(){
+    while(idx < items.length){
+      if(shouldStop()) return;
+      const item = items[idx++];
+      await onItem(item);
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, worker));
+}
+
 async function runAiPregeneration(limit){
   let questions = getUniqueLibraryQuestions();
   if(limit && limit > 0) questions = questions.slice(0, limit);
   aiPregenState = { running: true, stop: false, total: questions.length, processed: 0, generated: 0, alreadyCached: 0, errors: 0 };
   renderAiPregenStatus();
-  let idx = 0;
-  async function worker(){
-    while(idx < questions.length){
-      if(aiPregenState.stop) return;
-      const q = questions[idx++];
-      try{
-        const { data, error } = await supabaseClient.functions.invoke('ai-explain', {
-          body: {
-            question_text: q.text,
-            options: q.options,
-            correct_option: q.correct,
-            existing_explanation: q.explanation || undefined,
-          },
-        });
-        if(error || (data && data.error)) aiPregenState.errors++;
-        else if(data.cached) aiPregenState.alreadyCached++;
-        else aiPregenState.generated++;
-      } catch(e){
-        aiPregenState.errors++;
-      }
-      aiPregenState.processed++;
-      renderAiPregenStatus();
+  await runWorkerPool(questions, AI_PREGEN_CONCURRENCY, async (q)=>{
+    try{
+      const { data, error } = await supabaseClient.functions.invoke('ai-explain', {
+        body: {
+          question_text: q.text,
+          options: q.options,
+          correct_option: q.correct,
+          existing_explanation: q.explanation || undefined,
+        },
+      });
+      if(error || (data && data.error)) aiPregenState.errors++;
+      else if(data.cached) aiPregenState.alreadyCached++;
+      else aiPregenState.generated++;
+    } catch(e){
+      aiPregenState.errors++;
     }
-  }
-  await Promise.all(Array.from({ length: AI_PREGEN_CONCURRENCY }, worker));
+    aiPregenState.processed++;
+    renderAiPregenStatus();
+  }, ()=>aiPregenState.stop);
   aiPregenState.running = false;
   renderAiPregenStatus();
 }
@@ -8382,32 +9008,26 @@ async function runAiAudit(limit){
   if(limit && limit > 0) questions = questions.slice(0, limit);
   aiAuditState = { running: true, stop: false, total: questions.length, processed: 0, ok: 0, flagged: 0, skipped: 0, errors: 0 };
   renderAiAuditStatus();
-  let idx = 0;
-  async function worker(){
-    while(idx < questions.length){
-      if(aiAuditState.stop) return;
-      const q = questions[idx++];
-      try{
-        const { data, error } = await supabaseClient.functions.invoke('ai-audit', {
-          body: {
-            question_text: q.text,
-            options: q.options,
-            correct_option: q.correct,
-            existing_explanation: q.explanation || undefined,
-          },
-        });
-        if(error || (data && data.error)) aiAuditState.errors++;
-        else if(data.skipped) aiAuditState.skipped++;
-        else if(data.verdict === 'flagged') aiAuditState.flagged++;
-        else aiAuditState.ok++;
-      } catch(e){
-        aiAuditState.errors++;
-      }
-      aiAuditState.processed++;
-      renderAiAuditStatus();
+  await runWorkerPool(questions, AI_AUDIT_CONCURRENCY, async (q)=>{
+    try{
+      const { data, error } = await supabaseClient.functions.invoke('ai-audit', {
+        body: {
+          question_text: q.text,
+          options: q.options,
+          correct_option: q.correct,
+          existing_explanation: q.explanation || undefined,
+        },
+      });
+      if(error || (data && data.error)) aiAuditState.errors++;
+      else if(data.skipped) aiAuditState.skipped++;
+      else if(data.verdict === 'flagged') aiAuditState.flagged++;
+      else aiAuditState.ok++;
+    } catch(e){
+      aiAuditState.errors++;
     }
-  }
-  await Promise.all(Array.from({ length: AI_AUDIT_CONCURRENCY }, worker));
+    aiAuditState.processed++;
+    renderAiAuditStatus();
+  }, ()=>aiAuditState.stop);
   aiAuditState.running = false;
   renderAiAuditStatus();
   renderFlaggedAiAuditsSection(); // pick up anything the run just flagged
@@ -8434,7 +9054,7 @@ async function renderFlaggedAiAuditsSection(){
       return;
     }
     const byKey = {};
-    getUniqueLibraryQuestions().forEach(q=>{ byKey[q.text.trim().toLowerCase()] = q; });
+    getUniqueLibraryQuestions().forEach(q=>{ byKey[computeQuestionKey(q.text)] = q; });
     section.innerHTML = `
       <h2>Flagged Explanations</h2>
       <div class="format-help">Cached AI explanations the accuracy audit thinks contain a real error, waiting on a decision.</div>
@@ -8664,6 +9284,53 @@ async function renderExamVisibilityConfigSection(){
   }
 }
 
+async function renderLegalDocumentsSection(){
+  const section = document.getElementById('legalDocumentsSection');
+  if(!section) return;
+  try{
+    const { data, error } = await supabaseClient.rpc('get_legal_documents');
+    if(error) throw error;
+    legalDocsCache = data; // keep the shared cache fresh too, not just this view
+    const docs = data || [];
+    const fieldsHtml = docs.map(d=>`
+      <h3 style="margin-top:18px;">${escapeHtml(d.title)}</h3>
+      <div class="format-help">Version ${d.version} · last updated ${new Date(d.updated_at).toLocaleDateString()}${legalDocHasContent(d.doc_type) ? '' : ' · not yet published — students won\'t see a prompt or a Settings link until this has real content'}</div>
+      <div style="display:flex;flex-direction:column;gap:10px;max-width:640px;font-family:system-ui,sans-serif;margin-top:8px;">
+        <textarea id="legalDocBody_${d.doc_type}" style="min-height:220px;width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--line);font-family:system-ui,sans-serif;box-sizing:border-box;">${escapeHtml(d.body_html)}</textarea>
+        <div class="format-help">Basic HTML tags are supported (&lt;p&gt;, &lt;b&gt;, &lt;a href="..."&gt;, etc.) — not a rich-text editor, just plain markup. Saving a real text change bumps the version and re-prompts every user to accept it again next sign-in.</div>
+        <button class="btn btn-primary" data-save-legal-doc="${d.doc_type}" style="align-self:flex-start;">Save ${escapeHtml(d.title)}</button>
+        <div class="msg" id="legalDocResult_${d.doc_type}"></div>
+      </div>
+    `).join('');
+    section.innerHTML = `
+      <h2>Legal</h2>
+      <div class="format-help">Privacy Policy and Terms of Service, shown as a must-accept prompt the first time a signed-in user encounters a new version, and always reachable afterward from Settings → Legal. Leave a document blank to keep that gate/link off entirely.</div>
+      ${fieldsHtml}
+    `;
+    section.querySelectorAll('[data-save-legal-doc]').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const docType = btn.getAttribute('data-save-legal-doc');
+        const resultEl = document.getElementById(`legalDocResult_${docType}`);
+        const bodyHtml = document.getElementById(`legalDocBody_${docType}`).value;
+        resultEl.className = 'msg'; resultEl.textContent = '';
+        try{
+          const { error: saveErr } = await supabaseClient.rpc('admin_update_legal_document', {
+            target_doc_type: docType,
+            new_body_html: bodyHtml,
+          });
+          if(saveErr) throw saveErr;
+          resultEl.className = 'msg ok'; resultEl.textContent = 'Saved.';
+          renderLegalDocumentsSection();
+        } catch(err){
+          resultEl.className = 'msg err'; resultEl.textContent = 'Could not save: ' + err.message;
+        }
+      };
+    });
+  } catch(err){
+    section.innerHTML = `<h2>Legal</h2><div class="msg err">Could not load: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
 function renderAdminToolsView(){
   const sub = document.getElementById('adminSubPanel');
   sub.innerHTML = `
@@ -8700,9 +9367,19 @@ function renderAdminToolsView(){
       <h2>Exam Visibility</h2>
       <div class="format-help">Loading current settings…</div>
     </div>
+    <div class="subsection" id="emailConfigSection">
+      <h2>Email</h2>
+      <div class="format-help">Loading current settings…</div>
+    </div>
+    <div class="subsection" id="legalDocumentsSection">
+      <h2>Legal</h2>
+      <div class="format-help">Loading current settings…</div>
+    </div>
   `;
   renderPasskeyFeatureConfigSection();
   renderExamVisibilityConfigSection();
+  renderLegalDocumentsSection();
+  renderEmailConfigSection();
   document.getElementById('decodeWatermarkBtn').onclick = ()=>{
     document.getElementById('watermarkResult').textContent = decodeWatermark(document.getElementById('watermarkInput').value, adminData.profiles);
   };
@@ -8949,7 +9626,12 @@ async function renderAdminAiUsageSection(targetUserId){
 
     const explainOn = override?.explain_enabled ?? cfg?.explain_enabled ?? true;
     const chatOn = override?.chat_enabled ?? cfg?.chat_enabled ?? true;
-    const fmtCost = (n)=> '$' + n.toFixed(4);
+    // Was always 4 decimals ($0.6339) regardless of size -- unusual next
+    // to the whole-dollar mental model every other dollar amount in this
+    // app uses. 2 decimals covers any amount that's actually a full cent
+    // or more; genuinely sub-cent amounts (most single AI calls) keep 4,
+    // since rounding those to 2 would just show a misleading $0.00.
+    const fmtCost = (n)=> '$' + n.toFixed(n >= 0.01 ? 2 : 4);
     const atLimitBadge = `<span class="lib-badge" style="background:#fbeaea;color:#c0392b;">at limit</span>`;
     const historyRows = rows.slice(0, 50);
 
@@ -9077,7 +9759,17 @@ function renderAdminExamsSection(examsMap){
    and history, never mutate another account's data. Backed by the
    admin-read-all RLS policies, so it works identically for grandfathered
    and freshly-approved accounts. */
+// Real bug: clicking "View Progress" on one account, then quickly on
+// another before the first fetch resolves, had no staleness check -- if
+// the slower (first) request happened to land second, its render call
+// would overwrite the second account's already-showing data with the
+// first account's, silently under the second account's own header. This
+// token is bumped on every call; a render only proceeds if its own token
+// is still the current one by the time its data arrives, so a superseded
+// in-flight request just does nothing instead of overwriting newer data.
+let adminUserProgressRequestToken = 0;
 async function renderAdminUserProgress(targetUserId){
+  const myToken = ++adminUserProgressRequestToken;
   const targetProfile = adminData.profiles.find(p=>p.user_id===targetUserId);
   const label = targetProfile ? targetProfile.email : targetUserId;
   adminPanel.innerHTML = `<h1>Admin — Progress for ${escapeHtml(label)}</h1><div class="format-help">Loading…</div>`;
@@ -9092,6 +9784,7 @@ async function renderAdminUserProgress(targetUserId){
       if(aErr) throw aErr;
       attempts = attemptRows;
     }
+    if(myToken !== adminUserProgressRequestToken) return; // superseded -- a newer account's data is already showing
     let html = `
       <h1>Admin — Progress for ${escapeHtml(label)}</h1>
       <button class="link-btn" id="backToAdminBtn" style="margin-top:6px;margin-bottom:18px;">← Back to Admin</button>
@@ -9113,6 +9806,7 @@ async function renderAdminUserProgress(targetUserId){
     adminExamCollapsed = {};
     renderAdminExamsSection(examsMap);
   } catch(err){
+    if(myToken !== adminUserProgressRequestToken) return; // superseded -- don't clobber newer data with a stale error either
     adminPanel.innerHTML = `
       <h1>Admin</h1>
       <div class="msg err">Could not load progress: ${escapeHtml(err.message)}</div>
