@@ -615,9 +615,28 @@ if('serviceWorker' in navigator){
      NOT make its descendants fixed too; each element's own position
      property is independent. Universal (not mobile-gated) for the same
      reason as the block above -- desktop full-screen now scrolls too. */
+  /* REAL BUG, reproduced live on the deployed site at 390x664 (real
+     Playwright iPhone 13, not simulation-by-reasoning): as a bare floating
+     button this covered question text. quizView is itself the scrolling
+     element, so scrolling toward the deliberately scroll-gated bottom
+     buttons drags content up through this button's CONSTANT y:14-58 band.
+     Measured at true max scroll: two rendered text line-boxes intersected
+     the button, and a screenshot showed "nosocomial infecti|" cut off
+     mid-word behind it -- the exact symptom reported from a real device.
+     An earlier attempt added padding-bottom to quizView to buy extra
+     scroll room; that made it slightly WORSE, since more scroll range
+     means content travels further up under the button.
+     The fix is to stop it being a floating pill over live text and make it
+     an ordinary opaque header band the content scrolls cleanly beneath --
+     which is how every mobile app handles a fixed top control. This costs
+     no extra layout at all: quizView already reserves padding-top:60px for
+     exactly this button, and the band is sized to match that (14 + 44
+     button + 2 = 60), so nothing shifts. */
   #quizView.quiz-fullscreen .fullscreen-toggle-row{
-    position:fixed;top:max(14px,env(safe-area-inset-top));
-    right:max(16px,env(safe-area-inset-right));margin:0;z-index:16;
+    position:fixed;top:0;left:0;right:0;margin:0;z-index:16;
+    background:var(--panel);
+    padding:max(14px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 2px max(16px,env(safe-area-inset-left));
+    text-align:right;
   }
   /* Clearance for the now-floating toggle button lives on quizView's own
      top padding instead of a per-row margin -- a margin big enough to
@@ -653,9 +672,14 @@ if('serviceWorker' in navigator){
   }
   /* Flashcards' own "Exit Full Screen" toggle gets the same fixed-pinned
      treatment, same clearance mechanism, same reasoning -- universal. */
+  /* Same opaque-header treatment and same reasoning as quiz's toggle above
+     -- flashcards share the identical scroller/fixed-button geometry, so
+     they share the identical text-under-the-button bug. */
   #flashPanel.flash-fullscreen .fullscreen-toggle-row{
-    position:fixed;top:max(14px,env(safe-area-inset-top));
-    right:max(16px,env(safe-area-inset-right));margin:0;z-index:16;
+    position:fixed;top:0;left:0;right:0;margin:0;z-index:16;
+    background:var(--panel);
+    padding:max(14px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 2px max(16px,env(safe-area-inset-left));
+    text-align:right;
   }
   #flashPanel.flash-fullscreen{
     padding-top:max(60px, calc(env(safe-area-inset-top) + 44px));
