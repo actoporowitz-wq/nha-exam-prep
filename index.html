@@ -8584,15 +8584,23 @@ function wireAdminFeedbackControls(rows, emailByUserId){
    CLAUDE.md / project memory project_ai_chat_launch_gate): an enable/
    disable switch for each layer plus a configurable per-question chat
    follow-up limit, replacing what used to be a hardcoded constant in
-   ai-chat's own source. Reads/writes via get_ai_feature_flags() /
-   admin_update_ai_feature_config() -- the same RPCs the review screens'
-   own gating uses, never the ai_feature_config table directly (it has no
-   policies for any client, admin or not). */
+   ai-chat's own source. Writes via admin_update_ai_feature_config(), same
+   as the review screens' own gating uses, never the ai_feature_config
+   table directly (it has no policies for any client, admin or not).
+
+   READS via admin_get_ai_feature_config() (0056), NOT get_ai_feature_flags()
+   -- that one deliberately returns the CALLER's own effective flags
+   (coalesced with their personal ai_account_overrides row), which is
+   correct for "what applies to me" but wrong for an admin editing the
+   site-wide default: any admin who has ever set a personal override for
+   testing would see THEIR OWN override values here, and a freshly-saved
+   global default would appear to silently revert on the next load even
+   though it saved correctly. See 0056's own comment for the real incident. */
 async function renderAiFeatureConfigSection(){
   const section = document.getElementById('aiFeatureConfigSection');
   if(!section) return;
   try{
-    const { data, error } = await supabaseClient.rpc('get_ai_feature_flags');
+    const { data, error } = await supabaseClient.rpc('admin_get_ai_feature_config');
     if(error) throw error;
     const cfg = (data && data[0]) || { explain_enabled: true, chat_enabled: true, chat_turn_limit: 5, chat_period_limit: 40, chat_period_days: 30, progress_feedback_enabled: true, flashcard_explain_enabled: false };
     section.innerHTML = `
