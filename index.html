@@ -140,7 +140,14 @@ if('serviceWorker' in navigator){
   @keyframes bootPulse{0%,100%{opacity:1;}50%{opacity:.55;}}
   @media (prefers-reduced-motion:reduce){ #bootLoading .mark{animation:none;} }
   .wrap{max-width:760px;margin:0 auto;padding:28px max(20px,env(safe-area-inset-right)) max(80px,env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left));}
-  h1{font-size:1.5rem;letter-spacing:.02em;margin:0 0 4px;font-weight:600;}
+  /* overflow-wrap/word-break because headings interpolate user data that
+     has no spaces to break at -- "Admin — Progress for <email>" is the real
+     case: an email address is one unbreakable token, so the default
+     overflow-wrap:normal pushed the h1 (and the page with it) wider than
+     the viewport instead of wrapping. Same pairing already used by
+     .lib-title, which fixed this for Admin's account LIST rows; the
+     drilldown heading is a separate element and never got it. */
+  h1{font-size:1.5rem;letter-spacing:.02em;margin:0 0 4px;font-weight:600;overflow-wrap:break-word;word-break:break-word;}
   .sub{color:var(--muted);font-size:.92rem;margin-bottom:22px;}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin-bottom:18px;box-shadow:0 1px 2px rgba(0,0,0,.03);}
   .toplinks{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;font-family:system-ui,sans-serif;font-size:.82rem;}
@@ -1192,8 +1199,45 @@ if('serviceWorker' in navigator){
   @media (max-width:900px){
     .progress-toolbar-controls .dd{order:2;}
   }
+  /* The Progress filters get their own row above the round list rather than
+     joining .progress-toolbar-controls -- see renderProgressPanel's note.
+     min-width:0 is load-bearing: flex items default to min-width:auto, so
+     without it a .dd cannot shrink below its label's content width and a
+     long label claims a whole line, producing a ragged wrap. The trigger's
+     inner span already ellipsizes, so a narrow box degrades cleanly. */
+  .progress-filters-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:12px;}
+  /* The tab switch is sized identically to the dropdowns beside it so the
+     row reads as one set of equal controls rather than a pill plus some
+     menus. Its own buttons split it evenly for the same reason. */
+  .progress-filters-row .dd,
+  .progress-filters-row .progress-tab-switch{flex:1 1 150px;min-width:0;}
+  .progress-filters-row .progress-tab-switch{display:flex;}
+  /* white-space:nowrap + ellipsis rather than letting a label wrap or get
+     sliced mid-word. The mobile label is already shortened to "Missed" in
+     markup; this is the backstop for narrower devices than the 390px the
+     shortening was measured at. */
+  .progress-filters-row .progress-tab-switch button{flex:1;justify-content:center;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .progress-filters-row .dd-trigger{width:100%;justify-content:space-between;}
+  /* Two per row on phone widths: exactly half the row minus half the gap. */
+  @media (max-width:900px){
+    .progress-filters-row .dd,
+    .progress-filters-row .progress-tab-switch{flex:1 1 calc(50% - 5px);}
+  }
   .subsection{border-top:1px solid var(--line);margin-top:18px;padding-top:18px;}
   .lib-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;}
+  /* Audit Log / Errors list controls. The search field is given the same
+     padding/border/radius the Accounts tab's search sets inline, so the two
+     admin toolbars don't visibly disagree. flex-wrap so the four controls
+     drop to a second row on phone widths rather than squashing. */
+  .admin-log-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:12px;}
+  .admin-log-toolbar input[type="search"]{flex:1;min-width:180px;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-family:system-ui,sans-serif;}
+  .admin-log-pager{display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;margin-top:12px;}
+  .admin-log-pager button[disabled]{opacity:.45;cursor:default;}
+  /* Retention/deletion controls, deliberately below the list rather than in
+     the toolbar -- these are destructive and shouldn't sit next to the
+     filters people click constantly. */
+  .admin-log-purge{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:18px;padding-top:14px;border-top:1px solid var(--line);}
+  .admin-log-purge .format-help{flex:1 1 240px;min-width:0;}
   /* .lib-info had no min-width set, and flex items default to
      min-width:auto -- meaning it (and .lib-title's text inside it) could
      never shrink below its own unbroken content width. Harmless for short
@@ -1678,7 +1722,15 @@ if('serviceWorker' in navigator){
   .pw-field input{padding-right:40px;}
   .pw-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted);padding:6px;display:flex;align-items:center;border-radius:6px;}
   .pw-toggle:hover{color:var(--ink);background:var(--surface-2);}
-  .pw-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+  /* Deliberately thinner and INSET, unlike every other :focus-visible ring
+     in this file. .pw-toggle is absolutely positioned inside .pw-field, on
+     top of the input -- so the usual `2px solid var(--accent)` at
+     outline-offset:1px drew a ring of the same weight and colour as
+     `.auth-card input:focus` (line ~1676) right across the input's own
+     blue focus border, reading as the button having "eaten" it. A negative
+     offset keeps the ring inside the button's own box, so both focus
+     indicators stay legible at once. */
+  .pw-toggle:focus-visible{outline:1px solid var(--accent);outline-offset:-2px;}
   /* Placed right after the base rule (not in the shared mobile-breakpoint
      block up above) deliberately -- equal-specificity CSS rules resolve by
      source order, and putting a same-specificity override earlier in the
@@ -2449,19 +2501,36 @@ document.getElementById('submitFeedbackBtn').onclick = async ()=>{
   if(!currentUser){ fbMsgEl.className = 'msg err'; fbMsgEl.textContent = 'Sign in first.'; fbMsgEl.style.display = ''; return; }
   const category = fbCategoryValue;
   try{
-    const { data: inserted, error } = await supabaseClient.from('user_feedback').insert({
+    /* The insert is deliberately NOT chained with .select('id').single().
+       user_feedback's RLS grants INSERT on your own rows but SELECT only to
+       admins, so reading the row back is a privilege an ordinary student
+       does not have -- and chaining it made that read-back failure fail the
+       whole submission. Live effect: feedback worked until de2c28d shipped
+       the chained read-back on 2026-08-13, and the table has not received a
+       single row since 2026-08-11. Every non-admin saw "Could not send
+       feedback" while their message was, at best, never saved.
+       The id is only ever needed for an optional admin notification, so it
+       is fetched separately below and allowed to come back empty. */
+    const { error } = await supabaseClient.from('user_feedback').insert({
       user_id: currentUser.id, category, message, page: location.pathname
-    }).select('id').single();
+    });
     if(error) throw error;
     fbMessageEl.value = '';
     dismissModal(closeFeedbackPanel);
     /* Fire-and-forget -- the feedback itself is already saved regardless
        of whether this admin-notification email succeeds, so failures here
-       are logged, never shown to the submitting user. */
-    if(inserted && inserted.id){
-      supabaseClient.functions.invoke('notify-feedback-received', { body: { feedback_id: inserted.id } })
-        .catch(err=> console.error('notify-feedback-received failed:', err));
-    }
+       are logged, never shown to the submitting user. The id lookup needs
+       SELECT, which only succeeds for admins until migration 0063 adds a
+       read-your-own-feedback policy; until then this simply no-ops. */
+    supabaseClient.from('user_feedback')
+      .select('id').eq('user_id', currentUser.id)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle()
+      .then(({ data: row })=>{
+        if(row && row.id){
+          return supabaseClient.functions.invoke('notify-feedback-received', { body: { feedback_id: row.id } });
+        }
+      })
+      .catch(err=> console.error('notify-feedback-received failed:', err));
   }catch(err){
     fbMsgEl.className = 'msg err';
     fbMsgEl.textContent = 'Could not send feedback: ' + err.message;
@@ -2891,8 +2960,37 @@ function isChatPeriodCapped(){
 }
 
 const aiExplanationCache = new Map();
+/* This in-memory cache key must include the OPTIONS and the correct answer,
+   not just the question text.
+
+   computeQuestionKey() is the question text itself (stripped, trimmed,
+   lowercased) -- not a hash -- and the library genuinely contains repeated
+   stems: 84 distinct texts have more than one variant, covering 189
+   questions, where the wording is identical but the options and/or the
+   correct answer differ. Keyed on text alone, the second such question a
+   student opened in a session was served the FIRST one's explanation, which
+   reads exactly like the AI answering a different question than the one on
+   screen.
+
+   The server never had this problem: ai_explanations is keyed on
+   (question_key, content_hash), and content_hash covers stem + options +
+   correct_option + the bank explanation. This mirrors those same four
+   fields so the client cache can't be coarser than the server's.
+
+   Deliberately a separate local key rather than a change to
+   computeQuestionKey(): that function also keys stored flashcard recall
+   progress (flashcard_recall_progress, 0021), so redefining it would
+   orphan every student's saved "knew it" state. */
+function aiExplanationCacheKey(q){
+  return JSON.stringify([
+    computeQuestionKey(q.text),
+    (q.options || []).map(o => String(o).trim()),
+    q.correct,
+    (q.explanation || '').trim(),
+  ]);
+}
 function fetchAiExplanation(q){
-  const key = computeQuestionKey(q.text);
+  const key = aiExplanationCacheKey(q);
   if(!aiExplanationCache.has(key)){
     const p = supabaseClient.functions.invoke('ai-explain', {
       body: {
@@ -5563,11 +5661,37 @@ function isMobileDevice(){
    toggle nobody flips often, versus blocking the whole sign-in screen's
    first paint on it. */
 let passkeyFeatureEnabled = true;
+/* Set by wireAuthPasswordToggle() to its own render(), so the flag load
+   below can correct the icon in place. Null whenever the sign-in view
+   isn't currently mounted. */
+let syncPasskeyAffordance = null;
+/* Re-applies passkeysActive() to every control whose visibility depends on
+   it. Needed because the optimistic default above is a GUESS: both the
+   sign-in toggle and the Settings "Passkeys" button paint before the RPC
+   resolves, and each is otherwise only re-rendered by a user action that
+   may never come. The comment above says the icon "could flash before
+   disappearing on next render" -- for the sign-in screen there is no next
+   render, so without this it stayed wrong for the whole session. */
+function refreshPasskeyAffordances(){
+  // The stored render() closes over the toggle/input nodes that existed
+  // when it was wired. Once the sign-in view unmounts (or re-renders)
+  // those are detached, and calling it would write innerHTML into a node
+  // nobody can see. Drop the reference instead; the next
+  // wireAuthPasswordToggle() re-registers a fresh one.
+  if(syncPasskeyAffordance){
+    if(document.getElementById('authPasswordToggle')) syncPasskeyAffordance();
+    else syncPasskeyAffordance = null;
+  }
+  document.querySelectorAll('.account-passkeys-btn').forEach(btn=>{
+    btn.style.display = passkeysActive() ? '' : 'none';
+  });
+}
 async function loadPasskeyFeatureFlag(){
   try{
     const { data, error } = await supabaseClient.rpc('get_passkey_feature_flags');
     if(!error && data && data.length) passkeyFeatureEnabled = !!data[0].enabled;
   }catch(e){ /* keep the optimistic default -- server-side is the real gate */ }
+  refreshPasskeyAffordances();
 }
 function passkeysActive(){
   return PASSKEYS_SUPPORTED && passkeyFeatureEnabled;
@@ -5951,6 +6075,10 @@ function wireAuthPasswordToggle(){
   // already-filled-on-render case neither event would catch.
   input.oninput = render;
   input.onchange = render;
+  // Expose render() so refreshPasskeyAffordances() can correct the icon if
+  // the feature flag resolves to `false` after this view has already
+  // painted -- the common case, since the flag is an async RPC.
+  syncPasskeyAffordance = render;
   render();
 }
 
@@ -7308,6 +7436,22 @@ let progressSortMode = 'name_asc'; // 'name_asc' | 'name_desc' | 'last' | 'first
    and explicitly wanted the desktop choice back afterward. */
 let progressViewMode = localStorage.getItem('nha_progress_view_mode') === 'stacked' ? 'stacked' : 'grid';
 
+/* ---- Rounds-view filters ----
+   Deliberately NOT persisted to localStorage, for the same reason
+   progressTab isn't (see its comment below): which layout you prefer is a
+   durable taste, but "I'm only looking at what I haven't mastered right
+   now" is a within-visit question. Coming back days later to a Progress
+   screen silently hiding most of your rounds -- with the reason parked in
+   a dropdown you'd have to notice -- is exactly the kind of surprise that
+   reads as data loss.
+   Mastery here reuses the round's existing cumulative status ('mastered'),
+   the same flag the badge and ring already key off. It is NOT recomputed
+   from a percentage, so the filter can never disagree with the badge shown
+   on the very same card. */
+let progressFilterMastery = 'all'; // 'all' | 'mastered' | 'not_mastered'
+let progressFilterExam = 'all';    // 'all' | exam title
+let progressFilterRound = 'all';   // 'all' | round number as a string
+
 /* ---- Missed-questions list (migration 0055's missed_list_enabled) ----
    Lives INSIDE Progress as a peer view rather than its own sidebar tab --
    the user's explicit call: weak spots belong next to the mastery data
@@ -7842,6 +7986,33 @@ function wireProgressAiFeedbackBlock(){
   }
 }
 
+/* Applies the three rounds-view filters, returning a NEW array. Never
+   mutates progressData -- it's the cached source of truth for the whole
+   tab (stat pills, resume banner, the missed list's own lookups), and
+   filtering it in place would make a dropdown silently destroy data that
+   only a refetch could restore.
+   Exams left with no matching rounds are dropped entirely rather than
+   rendered as an empty heading. */
+function filterProgressExams(exams){
+  if(progressFilterMastery === 'all' && progressFilterExam === 'all' && progressFilterRound === 'all') return exams;
+  return exams
+    .filter(ex => progressFilterExam === 'all' || ex.examTitle === progressFilterExam)
+    .map(ex => ({
+      ...ex,
+      rounds: ex.rounds.filter(r => {
+        if(progressFilterMastery === 'mastered' && r.status !== 'mastered') return false;
+        // 'not_mastered' deliberately keeps 'abandoned' rounds: the question
+        // being asked is "what haven't I finished off", and an abandoned
+        // round is a unmastered one you walked away from -- the single most
+        // relevant thing to surface under this filter, not something to hide.
+        if(progressFilterMastery === 'not_mastered' && r.status === 'mastered') return false;
+        if(progressFilterRound !== 'all' && String(r.round_number) !== progressFilterRound) return false;
+        return true;
+      })
+    }))
+    .filter(ex => ex.rounds.length > 0);
+}
+
 function renderProgressPanel(){
   if(progressAttemptView){ renderProgressAttemptDetail(); return; }
   const d = progressData;
@@ -7861,6 +8032,12 @@ function renderProgressPanel(){
      sat above the Resume banner along with the stat pills, which put the
      sort control (and its effect on the stack's order) a whole banner's
      distance away from the stack it actually controls. */
+  /* Filter option lists are built from the UNFILTERED data on purpose. If
+     they were derived from the already-filtered set, choosing "Exam 3"
+     would remove every other exam from the exam dropdown, leaving no way
+     back to "All" except a page reload -- a dead-end control. */
+  const allExamTitles = [...new Set(d.exams.map(ex=>ex.examTitle))].sort((a,b)=>a.localeCompare(b));
+  const allRoundNumbers = [...new Set(d.exams.flatMap(ex=>ex.rounds.map(r=>r.round_number)))].sort((a,b)=>a-b);
   const controlsRowHtml = `
     ${d.exams.length ? renderDropdown({ id:'progressSort', ariaLabel:'Sort progress list', selected: progressSortMode, options:[
       {value:'name_asc', label:'Sort: Name (A–Z)'},
@@ -7876,6 +8053,33 @@ function renderProgressPanel(){
     ` : ''}
     ${renderProgressAiFeedbackControls()}
   `;
+  /* The three filters live in their OWN row, directly above the round list,
+     rather than joining the toolbar above. Two reasons, and the first is the
+     one that matters:
+     1. The toolbar is a tuned single row (stat pills + sort + Grid/Stacked +
+        AI feedback). Adding three more controls to it pushed it to two rows
+        on desktop and four on mobile, which stranded the Rounds/Missed
+        switch below it and visibly broke a layout that had been worked over
+        repeatedly. Keeping the toolbar's membership exactly as it was leaves
+        that work intact.
+     2. It's also where these belong on their own merits -- same reasoning
+        already applied to the sort control on mobile: a control that changes
+        which rows you see should sit next to the rows, not a banner away. */
+  const filterDropdownsHtml = d.exams.length ? `
+      ${renderDropdown({ id:'progressFilterMastery', ariaLabel:'Filter by mastery', selected: progressFilterMastery, options:[
+        {value:'all', label:'Any status'},
+        {value:'mastered', label:'Mastered only'},
+        {value:'not_mastered', label:'Not mastered'}
+      ]})}
+      ${allExamTitles.length > 1 ? renderDropdown({ id:'progressFilterExam', ariaLabel:'Filter by exam', selected: progressFilterExam, options:[
+        {value:'all', label:'All exams'},
+        ...allExamTitles.map(t=>({value:t, label:t}))
+      ]}) : ''}
+      ${allRoundNumbers.length > 1 ? renderDropdown({ id:'progressFilterRound', ariaLabel:'Filter by round', selected: progressFilterRound, options:[
+        {value:'all', label:'All rounds'},
+        ...allRoundNumbers.map(n=>({value:String(n), label:`Round ${n}`}))
+      ]}) : ''}
+  ` : '';
   /* Rounds vs Missed questions. Rendered on EVERY viewport, unlike the
      Grid/Stacked switch above it -- that one is a desktop-only layout
      preference, this is the only way to reach the missed list at all, so
@@ -7885,10 +8089,16 @@ function renderProgressPanel(){
      started yet, since an empty Progress screen has no misses to show and
      the toggle would just be a dead control on a first-run screen. */
   const showMissedTab = studentFeatureFlags.missed_list_enabled && d.exams.length > 0;
+  /* No margin-bottom here, unlike the standalone usages of
+     .study-mode-switch elsewhere: this now sits INSIDE .progress-filters-row
+     as a flex item, and a bottom margin on one item of a flex row inflates
+     its margin box and throws off align-items:center against its neighbours.
+     That is the exact trap already documented for .view-mode-switch in the
+     Progress toolbar and for flashcards' mode switch before it. */
   const tabSwitchHtml = showMissedTab ? `
-    <div class="study-mode-switch view-mode-switch" role="group" aria-label="Progress section" style="margin-bottom:14px;">
+    <div class="study-mode-switch view-mode-switch progress-tab-switch" role="group" aria-label="Progress section" style="margin-bottom:0;">
       <button type="button" data-progress-tab="rounds" class="${progressTab==='rounds'?'active':''}">Rounds</button>
-      <button type="button" data-progress-tab="missed" class="${progressTab==='missed'?'active':''}">Missed questions</button>
+      <button type="button" data-progress-tab="missed" class="${progressTab==='missed'?'active':''}">${isMobileViewport ? 'Missed' : 'Missed questions'}</button>
     </div>
   ` : '';
   let html = `
@@ -7900,15 +8110,30 @@ function renderProgressPanel(){
       </div>
       ${(isMobileViewport || progressTab==='missed') ? '' : `<div class="progress-toolbar-controls">${controlsRowHtml}</div>`}
     </div>
-    ${tabSwitchHtml}
     ${(isMobileViewport || progressTab==='missed') ? '' : renderProgressAiFeedbackContent()}
     <div class="msg" id="progressMsg"></div>
   `;
+  /* The Rounds/Missed switch is NOT rendered here any more, on any viewport.
+     On its own line it was the only block on the page that didn't span the
+     content column -- a narrow pill floating mid-page with whitespace to its
+     right, which read as an unfinished row rather than a deliberate one. It
+     now shares .progress-filters-row with the filter dropdowns, so every
+     block on the page is a full-width row and nothing sits alone.
+     Previously it also sat above the Resume banner, which pushed it a banner + the AI-feedback button + four filter
+     dropdowns away from the list it actually switches. That's the same
+     complaint, and the same fix, already applied to the sort control (see
+     controlsRowHtml's comment): on a phone the control belongs next to the
+     thing it changes, because they can't both be on screen otherwise.
+     Desktop keeps it in the header, where the whole toolbar is one glance. */
   /* The misses list replaces the rounds content entirely rather than
      rendering below it -- they're two answers to the same question ("how
      am I doing"), and stacking them would bury whichever came second.
      Returns early so none of the rounds/resume/grid markup below runs. */
   if(showMissedTab && progressTab === 'missed'){
+    // Same row wrapper as the rounds view, so the switch spans the column
+    // here too -- there are no filters to pair it with on this tab, and its
+    // flex-grow takes the full width rather than leaving a stranded pill.
+    html += `<div class="progress-filters-row">${tabSwitchHtml}</div>`;
     html += renderMissedList();
     progressPanel.innerHTML = html;
     wireProgressTabs();
@@ -7949,8 +8174,27 @@ function renderProgressPanel(){
      group under anymore); Stacked mode keeps the per-exam headers/grouping
      as before, unaffected -- it doesn't have this problem since a thin row
      doesn't look empty/isolated the way a padded card does. */
+  const filteredExams = filterProgressExams(d.exams);
+  const filtersActive = progressFilterMastery !== 'all' || progressFilterExam !== 'all' || progressFilterRound !== 'all';
+  /* One row holding the view switch and the filters together. Both answer
+     "which rows am I looking at", and pairing them means neither is ever
+     alone on a line: the row always spans the full column width. */
+  if(tabSwitchHtml || filterDropdownsHtml){
+    html += `<div class="progress-filters-row">${tabSwitchHtml}${filterDropdownsHtml}</div>`;
+  }
+  /* Only shown while a filter is on. Without it, a filter that matches
+     nothing renders as a blank area under the toolbar that's
+     indistinguishable from "you have no progress" -- and the offer to
+     clear is what stops that from being a dead end, since the dropdowns
+     themselves still read as normal. */
+  if(filtersActive && d.exams.length){
+    const shownRounds = filteredExams.reduce((n,ex)=>n+ex.rounds.length, 0);
+    html += shownRounds
+      ? `<div class="format-help" style="margin-bottom:10px;">Showing ${shownRounds} of ${d.totalRounds} round${d.totalRounds===1?'':'s'}. <button type="button" class="link-btn" id="progressClearFilters">Clear filters</button></div>`
+      : `<div class="format-help" style="margin-bottom:10px;">No rounds match these filters. <button type="button" class="link-btn" id="progressClearFilters">Clear filters</button></div>`;
+  }
   let gridHtml = '';
-  sortProgressExams(d.exams, progressSortMode).forEach(ex=>{
+  sortProgressExams(filteredExams, progressSortMode).forEach(ex=>{
     /* Test-level cue, separate from the per-round "Mastered" badge below --
        lets someone scanning the whole list see which tests are done
        without expanding each one. A test counts once any of its rounds
@@ -8058,6 +8302,21 @@ function renderProgressPanel(){
   wireProgressTabs();
   wireProgressAiFeedbackBlock();
   wireDropdown('progressSort', (value)=>{ progressSortMode = value; renderProgressPanel(); }, renderProgressPanel);
+  /* Each filter collapses any expanded round first. Otherwise a round you'd
+     expanded could be filtered out while progressExpandedRoundId still
+     pointed at it, so clearing the filter later would silently re-expand
+     something you never re-opened. */
+  wireDropdown('progressFilterMastery', (value)=>{ progressFilterMastery = value; progressExpandedRoundId = null; renderProgressPanel(); }, renderProgressPanel);
+  wireDropdown('progressFilterExam', (value)=>{ progressFilterExam = value; progressExpandedRoundId = null; renderProgressPanel(); }, renderProgressPanel);
+  wireDropdown('progressFilterRound', (value)=>{ progressFilterRound = value; progressExpandedRoundId = null; renderProgressPanel(); }, renderProgressPanel);
+  const clearFiltersBtn = document.getElementById('progressClearFilters');
+  if(clearFiltersBtn) clearFiltersBtn.onclick = ()=>{
+    progressFilterMastery = 'all';
+    progressFilterExam = 'all';
+    progressFilterRound = 'all';
+    progressExpandedRoundId = null;
+    renderProgressPanel();
+  };
   progressPanel.querySelectorAll('[data-progress-view]').forEach(btn=>{
     btn.onclick = ()=>{
       progressViewMode = btn.dataset.progressView;
@@ -8280,6 +8539,47 @@ let adminSecurityEventsUserId = null; // "View Security Events" drilldown
 let adminReviewAttempt = null; // { id, label } | null -- set when drilling into one attempt's question-by-question review
 let adminReviewFilter = 'missed'; // 'missed' | 'all' -- mirrors reviewFilter, for renderAdminAttemptReview
 let adminSubView = 'accounts'; // 'accounts' | 'auditLog' | 'errors' | 'feedback' | 'ai' | 'tools' -- sub-nav within the Admin tab
+
+/* ---- Audit Log / Errors list controls ----
+   Both views were a bare `select('*').order(created_at).limit(200)`: no
+   search, no filter, no date range, no way past the newest 200 rows. On a
+   table that is never trimmed that means the older an entry gets the more
+   permanently unreachable it becomes -- the 201st row is functionally
+   deleted while still costing storage forever.
+   Filtering/paging is done SERVER-side (PostgREST .or/.eq/.gte/.range)
+   rather than by fetching everything and narrowing in the browser. Fetching
+   the whole table to filter it client-side is exactly what stops working as
+   these grow, which is the problem being fixed. Note this differs from the
+   Feedback view above, which filters in-browser -- that one is bounded by
+   how many people actually submit feedback; these are machine-generated. */
+const ADMIN_LOG_PAGE_SIZE = 50;
+let adminAuditSearch = '', adminAuditAction = 'all', adminAuditRange = 'all', adminAuditSort = 'desc', adminAuditPage = 0;
+let adminErrorsSearch = '', adminErrorsScope = 'all', adminErrorsRange = 'all', adminErrorsSort = 'desc', adminErrorsPage = 0;
+
+/* PostgREST's .or() takes a comma-separated filter list, and its ilike
+   patterns are parsed out of that same string -- so a search containing a
+   comma, parenthesis or dot doesn't just fail to match, it changes the
+   shape of the query being sent. Strip those rather than escaping them:
+   this is a free-text search box over log messages, and no real search
+   intent is lost by dropping punctuation that PostgREST reserves. */
+function sanitizePostgrestPattern(s){
+  /* Dots are deliberately NOT stripped. PostgREST splits `column.op.value`
+     on the first two dots only, so a dot inside the value is safe -- and
+     stripping it broke the single most likely search in these views:
+     "bob@example.com" became "bob@example com", which then ilike-matched
+     nothing, since the space is a literal. Caught by testing the helper
+     directly rather than by eyeballing the query it builds.
+     What does have to go: the comma and parens that delimit .or()'s filter
+     list, and the % / _ ilike wildcards, so a search string can neither
+     reshape the query nor silently widen its own match. */
+  return String(s || '').replace(/[,()%_\\]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+/* Range dropdown value -> ISO cutoff, or null for "all time". */
+function rangeSinceIso(range){
+  const days = { '24h': 1, '7d': 7, '30d': 30, '90d': 90 }[range];
+  if(!days) return null;
+  return new Date(Date.now() - days*24*60*60*1000).toISOString();
+}
 let adminSearch = ''; // account-list email search
 let adminFilter = 'all'; // 'all' | 'pending' | 'flagged' | 'admins'
 let adminSort = 'lastActive'; // 'lastActive' | 'signupDate' | 'flagSeverity' | 'name'
@@ -8973,13 +9273,17 @@ async function renderAdminAuditLogView(){
   const sub = document.getElementById('adminSubPanel');
   sub.innerHTML = `<div class="format-help">Loading…</div>`;
   try{
-    const { data: rows, error } = await supabaseClient.from('admin_action_log')
-      .select('*').order('created_at', { ascending: false }).limit(200);
+    const term = sanitizePostgrestPattern(adminAuditSearch);
+    const since = rangeSinceIso(adminAuditRange);
+    let q = supabaseClient.from('admin_action_log').select('*', { count: 'exact' });
+    if(term) q = q.or(`actor_email.ilike.%${term}%,target_email.ilike.%${term}%,action.ilike.%${term}%`);
+    if(adminAuditAction !== 'all') q = q.eq('action', adminAuditAction);
+    if(since) q = q.gte('created_at', since);
+    const from = adminAuditPage * ADMIN_LOG_PAGE_SIZE;
+    const { data: rows, error, count } = await q
+      .order('created_at', { ascending: adminAuditSort === 'asc' })
+      .range(from, from + ADMIN_LOG_PAGE_SIZE - 1);
     if(error) throw error;
-    if(!rows.length){
-      sub.innerHTML = `<div class="format-help">No admin actions recorded yet.</div>`;
-      return;
-    }
     const actionLabels = {
       approve: 'Approved', suspend: 'Suspended', delete_user: 'Permanently deleted',
       grant_admin: 'Granted admin to', revoke_admin: 'Revoked admin from',
@@ -8990,9 +9294,28 @@ async function renderAdminAuditLogView(){
       remove_welcome_packet_attachment: 'Removed welcome packet attachment',
       send_welcome_email: 'Sent welcome packet to'
     };
+    const filtersActive = !!term || adminAuditAction !== 'all' || adminAuditRange !== 'all';
     sub.innerHTML = `
-      <div class="format-help">Most recent 200 admin actions, newest first.</div>
-      ${rows.map(r=>{
+      <div class="admin-log-toolbar">
+        <input type="search" id="auditSearchInput" placeholder="Search admin, account, or action…" value="${escapeHtml(adminAuditSearch)}" aria-label="Search audit log">
+        ${renderDropdown({ id:'auditActionFilter', ariaLabel:'Filter by action', selected: adminAuditAction, options:[
+          {value:'all', label:'All actions'},
+          ...Object.keys(actionLabels).map(k=>({value:k, label:actionLabels[k]}))
+        ]})}
+        ${renderDropdown({ id:'auditRangeFilter', ariaLabel:'Filter by date', selected: adminAuditRange, options:[
+          {value:'all', label:'All time'},
+          {value:'24h', label:'Last 24 hours'},
+          {value:'7d', label:'Last 7 days'},
+          {value:'30d', label:'Last 30 days'},
+          {value:'90d', label:'Last 90 days'}
+        ]})}
+        ${renderDropdown({ id:'auditSortOrder', ariaLabel:'Sort order', selected: adminAuditSort, options:[
+          {value:'desc', label:'Newest first'},
+          {value:'asc', label:'Oldest first'}
+        ]})}
+      </div>
+      ${renderAdminLogSummary(count, adminAuditPage, filtersActive, 'admin action', 'auditClearFilters')}
+      ${rows.length ? rows.map(r=>{
         const label = actionLabels[r.action] || r.action;
         const flagType = r.detail && r.detail.flag_type ? ` (${r.detail.flag_type})` : '';
         return `
@@ -9003,11 +9326,107 @@ async function renderAdminAuditLogView(){
             </div>
           </div>
         `;
-      }).join('')}
+      }).join('') : `<div class="format-help">${filtersActive ? 'No admin actions match these filters.' : 'No admin actions recorded yet.'}</div>`}
+      ${renderAdminLogPager(count, adminAuditPage, 'auditPrevPage', 'auditNextPage')}
+      <div class="admin-log-purge">
+        <span class="format-help">Audit entries are kept indefinitely. Individual entries can't be deleted — that's deliberate, since this is the record of what admins did to other people's accounts. Whole age bands can be retired, no closer than 90 days.</span>
+        <button type="button" class="btn btn-ghost" id="auditPurgeOld">Retire entries older than 1 year</button>
+      </div>
     `;
+    wireAdminLogControls({
+      searchId: 'auditSearchInput',
+      onSearch: v=>{ adminAuditSearch = v; adminAuditPage = 0; },
+      dropdowns: [
+        ['auditActionFilter', v=>{ adminAuditAction = v; adminAuditPage = 0; }],
+        ['auditRangeFilter',  v=>{ adminAuditRange  = v; adminAuditPage = 0; }],
+        ['auditSortOrder',    v=>{ adminAuditSort   = v; adminAuditPage = 0; }]
+      ],
+      clearId: 'auditClearFilters',
+      onClear: ()=>{ adminAuditSearch=''; adminAuditAction='all'; adminAuditRange='all'; adminAuditPage=0; },
+      prevId: 'auditPrevPage', nextId: 'auditNextPage',
+      onPage: delta=>{ adminAuditPage += delta; },
+      rerender: renderAdminAuditLogView
+    });
+    const auditPurge = document.getElementById('auditPurgeOld');
+    if(auditPurge) auditPurge.onclick = ()=>{
+      showConfirmDialog(
+        'Permanently delete every audit entry older than one year? The purge itself is recorded in this log, so the trim stays visible. This cannot be undone.',
+        async ()=>{
+          const { data, error } = await supabaseClient.rpc('admin_purge_action_log', { p_older_than_days: 365 });
+          if(error){ alert('Could not retire entries: ' + error.message); return; }
+          adminAuditPage = 0;
+          await renderAdminAuditLogView();
+          const msg = document.querySelector('.admin-log-purge .format-help');
+          if(msg) msg.textContent = `Retired ${data} entr${data===1?'y':'ies'}.`;
+        },
+        'Retire entries',
+        true
+      );
+    };
   } catch(err){
     sub.innerHTML = `<div class="msg err">Could not load audit log: ${escapeHtml(err.message)}</div>`;
   }
+}
+
+/* Shared by both log views -- "Showing 1-50 of 1,284", plus a Clear
+   filters affordance whenever a filter is narrowing the result. The count
+   comes from PostgREST's exact count on the same filtered query, so it
+   reports matches rather than table size. */
+function renderAdminLogSummary(count, page, filtersActive, noun, clearId){
+  const total = count || 0;
+  if(!total) return '';
+  const first = page * ADMIN_LOG_PAGE_SIZE + 1;
+  const last = Math.min(total, (page + 1) * ADMIN_LOG_PAGE_SIZE);
+  return `<div class="format-help" style="margin-bottom:10px;">
+    Showing ${first.toLocaleString()}–${last.toLocaleString()} of ${total.toLocaleString()} ${escapeHtml(noun)}${total===1?'':'s'}${filtersActive ? ' matching these filters' : ''}.
+    ${filtersActive ? `<button type="button" class="link-btn" id="${clearId}">Clear filters</button>` : ''}
+  </div>`;
+}
+
+/* Prev/Next rather than numbered pages: these tables have no stable upper
+   bound, and rendering a page number per 50 rows would itself become the
+   unusable control. Buttons are disabled rather than hidden at the ends so
+   the row doesn't reflow as you page through. */
+function renderAdminLogPager(count, page, prevId, nextId){
+  const total = count || 0;
+  if(total <= ADMIN_LOG_PAGE_SIZE) return '';
+  const lastPage = Math.ceil(total / ADMIN_LOG_PAGE_SIZE) - 1;
+  return `<div class="admin-log-pager">
+    <button type="button" class="btn btn-ghost" id="${prevId}" ${page<=0?'disabled':''}>← Newer</button>
+    <span class="format-help">Page ${page+1} of ${(lastPage+1).toLocaleString()}</span>
+    <button type="button" class="btn btn-ghost" id="${nextId}" ${page>=lastPage?'disabled':''}>Older →</button>
+  </div>`;
+}
+
+/* Wiring shared by both log views. The search box re-queries on a debounce
+   rather than per keystroke -- each keystroke is a network round-trip here,
+   unlike the client-side filters elsewhere in Admin. Focus and caret
+   position are restored after the re-render, since replacing innerHTML
+   would otherwise drop focus mid-word on every debounce tick. */
+function wireAdminLogControls(cfg){
+  const input = document.getElementById(cfg.searchId);
+  if(input){
+    input.oninput = (e)=>{
+      const val = e.target.value;
+      const caret = e.target.selectionStart;
+      clearTimeout(wireAdminLogControls._t);
+      wireAdminLogControls._t = setTimeout(async ()=>{
+        cfg.onSearch(val);
+        await cfg.rerender();
+        const again = document.getElementById(cfg.searchId);
+        if(again){ again.focus(); try{ again.setSelectionRange(caret, caret); }catch(_){} }
+      }, 300);
+    };
+  }
+  (cfg.dropdowns||[]).forEach(([id, apply])=>{
+    wireDropdown(id, (value)=>{ apply(value); cfg.rerender(); }, cfg.rerender);
+  });
+  const clearBtn = cfg.clearId ? document.getElementById(cfg.clearId) : null;
+  if(clearBtn) clearBtn.onclick = ()=>{ cfg.onClear(); cfg.rerender(); };
+  const prev = document.getElementById(cfg.prevId);
+  if(prev) prev.onclick = ()=>{ cfg.onPage(-1); cfg.rerender(); };
+  const next = document.getElementById(cfg.nextId);
+  if(next) next.onclick = ()=>{ cfg.onPage(1); cfg.rerender(); };
 }
 
 /* Same list pattern as the audit log above. The extra profiles lookup is
@@ -9018,31 +9437,125 @@ async function renderAdminErrorsView(){
   const sub = document.getElementById('adminSubPanel');
   sub.innerHTML = `<div class="format-help">Loading…</div>`;
   try{
-    const { data: rows, error } = await supabaseClient.from('client_errors')
-      .select('*').order('created_at', { ascending: false }).limit(200);
+    const term = sanitizePostgrestPattern(adminErrorsSearch);
+    const since = rangeSinceIso(adminErrorsRange);
+    let q = supabaseClient.from('client_errors').select('*', { count: 'exact' });
+    if(term) q = q.or(`message.ilike.%${term}%,url.ilike.%${term}%,stack.ilike.%${term}%`);
+    // "Script error." is the opaque cross-origin message browsers deliberately
+    // redact (see .claude/rules/frontend.md) -- it dominates this table and
+    // carries no stack, so being able to push it aside is the difference
+    // between this view being readable and not.
+    if(adminErrorsScope === 'signed_in')  q = q.not('user_id', 'is', null);
+    if(adminErrorsScope === 'signed_out') q = q.is('user_id', null);
+    if(adminErrorsScope === 'with_stack') q = q.not('stack', 'is', null);
+    if(adminErrorsScope === 'real')       q = q.not('message', 'ilike', '%Script error%');
+    if(since) q = q.gte('created_at', since);
+    const from = adminErrorsPage * ADMIN_LOG_PAGE_SIZE;
+    const { data: rows, error, count } = await q
+      .order('created_at', { ascending: adminErrorsSort === 'asc' })
+      .range(from, from + ADMIN_LOG_PAGE_SIZE - 1);
     if(error) throw error;
-    if(!rows.length){
-      sub.innerHTML = `<div class="format-help">No client errors recorded yet.</div>`;
-      return;
-    }
-    const userIds = [...new Set(rows.filter(r=>r.user_id).map(r=>r.user_id))];
+    const userIds = [...new Set((rows||[]).filter(r=>r.user_id).map(r=>r.user_id))];
     let emailByUserId = {};
     if(userIds.length){
       const { data: profiles } = await supabaseClient.from('profiles').select('user_id,email').in('user_id', userIds);
       (profiles||[]).forEach(p=>{ emailByUserId[p.user_id] = p.email; });
     }
+    const filtersActive = !!term || adminErrorsScope !== 'all' || adminErrorsRange !== 'all';
     sub.innerHTML = `
-      <div class="format-help">Most recent 200 client-side errors, newest first — best-effort, silently logged from every signed-in and signed-out screen.</div>
-      ${rows.map(r=>`
+      <div class="admin-log-toolbar">
+        <input type="search" id="errorsSearchInput" placeholder="Search message, URL, or stack…" value="${escapeHtml(adminErrorsSearch)}" aria-label="Search client errors">
+        ${renderDropdown({ id:'errorsScopeFilter', ariaLabel:'Filter errors', selected: adminErrorsScope, options:[
+          {value:'all', label:'All errors'},
+          {value:'real', label:'Exclude "Script error."'},
+          {value:'with_stack', label:'With a stack trace'},
+          {value:'signed_in', label:'Signed-in users'},
+          {value:'signed_out', label:'Signed out'}
+        ]})}
+        ${renderDropdown({ id:'errorsRangeFilter', ariaLabel:'Filter by date', selected: adminErrorsRange, options:[
+          {value:'all', label:'All time'},
+          {value:'24h', label:'Last 24 hours'},
+          {value:'7d', label:'Last 7 days'},
+          {value:'30d', label:'Last 30 days'},
+          {value:'90d', label:'Last 90 days'}
+        ]})}
+        ${renderDropdown({ id:'errorsSortOrder', ariaLabel:'Sort order', selected: adminErrorsSort, options:[
+          {value:'desc', label:'Newest first'},
+          {value:'asc', label:'Oldest first'}
+        ]})}
+      </div>
+      ${renderAdminLogSummary(count, adminErrorsPage, filtersActive, 'client error', 'errorsClearFilters')}
+      ${rows && rows.length ? rows.map(r=>`
         <div class="lib-row">
           <div class="lib-info">
             <div class="lib-title">${escapeHtml(r.message)}</div>
             <div class="lib-meta">${new Date(r.created_at).toLocaleString()} · ${escapeHtml(r.user_id ? (emailByUserId[r.user_id] || r.user_id) : 'signed out')} · ${escapeHtml(r.url || '')}</div>
             ${r.stack ? `<div class="lib-meta" style="white-space:pre-wrap;">${escapeHtml(r.stack)}</div>` : ''}
           </div>
+          <button type="button" class="link-btn" data-delete-error="${escapeHtml(r.id)}">Delete</button>
         </div>
-      `).join('')}
+      `).join('') : `<div class="format-help">${filtersActive ? 'No client errors match these filters.' : 'No client errors recorded yet.'}</div>`}
+      <div class="admin-log-purge">
+        <span class="format-help">Clear out old entries:</span>
+        <button type="button" class="btn btn-ghost" id="errorsPurgeOld">Delete older than 30 days</button>
+        <button type="button" class="btn btn-ghost" id="errorsPurgeScript">Delete all "Script error." rows</button>
+      </div>
+      ${renderAdminLogPager(count, adminErrorsPage, 'errorsPrevPage', 'errorsNextPage')}
     `;
+    wireAdminLogControls({
+      searchId: 'errorsSearchInput',
+      onSearch: v=>{ adminErrorsSearch = v; adminErrorsPage = 0; },
+      dropdowns: [
+        ['errorsScopeFilter', v=>{ adminErrorsScope = v; adminErrorsPage = 0; }],
+        ['errorsRangeFilter', v=>{ adminErrorsRange = v; adminErrorsPage = 0; }],
+        ['errorsSortOrder',   v=>{ adminErrorsSort  = v; adminErrorsPage = 0; }]
+      ],
+      clearId: 'errorsClearFilters',
+      onClear: ()=>{ adminErrorsSearch=''; adminErrorsScope='all'; adminErrorsRange='all'; adminErrorsPage=0; },
+      prevId: 'errorsPrevPage', nextId: 'errorsNextPage',
+      onPage: delta=>{ adminErrorsPage += delta; },
+      rerender: renderAdminErrorsView
+    });
+    /* Deletion goes through RPCs, not a client-side .delete(): client_errors
+       has an admin READ policy and no DELETE policy at all, so a direct
+       delete silently affects zero rows rather than failing loudly. See
+       migration 0062, which also explains why the audit log deliberately
+       gets no equivalent per-row delete. */
+    sub.querySelectorAll('[data-delete-error]').forEach(btn=>{
+      btn.onclick = ()=>{
+        const id = btn.dataset.deleteError;
+        showConfirmDialog('Delete this error entry? This cannot be undone.', async ()=>{
+          const { error } = await supabaseClient.rpc('admin_delete_client_errors', { p_ids: [id] });
+          if(error){ alert('Could not delete: ' + error.message); return; }
+          // Deleting the last row of a page would otherwise leave you on an
+          // empty page past the end of the (now shorter) result set.
+          if(rows.length === 1 && adminErrorsPage > 0) adminErrorsPage -= 1;
+          renderAdminErrorsView();
+        }, 'Delete', true);
+      };
+    });
+    const purgeOld = document.getElementById('errorsPurgeOld');
+    if(purgeOld) purgeOld.onclick = ()=>{
+      showConfirmDialog('Delete every client error older than 30 days? This cannot be undone.', async ()=>{
+        const { data, error } = await supabaseClient.rpc('admin_purge_client_errors', { p_older_than_days: 30, p_script_errors_only: false });
+        if(error){ alert('Could not purge: ' + error.message); return; }
+        adminErrorsPage = 0;
+        await renderAdminErrorsView();
+        const msg = document.querySelector('.admin-log-purge .format-help');
+        if(msg) msg.textContent = `Deleted ${data} entr${data===1?'y':'ies'}.`;
+      }, 'Delete', true);
+    };
+    const purgeScript = document.getElementById('errorsPurgeScript');
+    if(purgeScript) purgeScript.onclick = ()=>{
+      showConfirmDialog('Delete every "Script error." entry? These are the opaque cross-origin errors browsers redact, so they carry no stack trace and cannot be debugged. This cannot be undone.', async ()=>{
+        const { data, error } = await supabaseClient.rpc('admin_purge_client_errors', { p_older_than_days: null, p_script_errors_only: true });
+        if(error){ alert('Could not purge: ' + error.message); return; }
+        adminErrorsPage = 0;
+        await renderAdminErrorsView();
+        const msg = document.querySelector('.admin-log-purge .format-help');
+        if(msg) msg.textContent = `Deleted ${data} entr${data===1?'y':'ies'}.`;
+      }, 'Delete', true);
+    };
   } catch(err){
     sub.innerHTML = `<div class="msg err">Could not load client errors: ${escapeHtml(err.message)}</div>`;
   }
