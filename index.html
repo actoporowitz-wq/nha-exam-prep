@@ -1297,6 +1297,46 @@ if('serviceWorker' in navigator){
   /* Retention/deletion controls, deliberately below the list rather than in
      the toolbar -- these are destructive and shouldn't sit next to the
      filters people click constantly. */
+  .missed-search{width:100%;box-sizing:border-box;padding:9px 12px;margin-bottom:12px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-family:system-ui,sans-serif;font-size:.92rem;}
+  /* Collapsible account rows (Admin -> Accounts). The header is a real
+     <button> so it is keyboard-reachable and announces its expanded state;
+     the nested badge controls stay clickable because the toggle handler
+     ignores clicks that originate on them. */
+  .admin-account{border:1px solid var(--line);border-radius:10px;margin-bottom:8px;background:var(--panel);overflow:hidden;}
+  .admin-account.expanded{border-color:var(--accent);}
+  .admin-account-head{padding:4px 14px 10px;}
+  .admin-account-toggle{display:flex;align-items:flex-start;gap:10px;width:100%;padding:10px 0 6px;background:none;border:0;text-align:left;cursor:pointer;color:var(--ink);font-family:system-ui,sans-serif;}
+  .admin-account-toggle:hover .lib-title{text-decoration:underline;}
+  .admin-account-toggle .lib-info{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1;}
+  .admin-account-toggle .lib-title{font-weight:600;font-size:.95rem;}
+  .admin-account-chev{display:flex;flex:0 0 auto;padding-top:2px;transition:transform .15s ease;}
+  .admin-account.expanded .admin-account-chev{transform:rotate(180deg);}
+  /* Indented to line up with the toggle's text column (chevron width + gap),
+     so the badges read as belonging to the account above them. */
+  .admin-account-badges{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:34px;}
+  .admin-account-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:0 14px 14px;border-top:1px solid var(--line);padding-top:12px;}
+  @media (prefers-reduced-motion: reduce){ .admin-account-chev{transition:none;} }
+  /* Unread-reply indicator on the "Send feedback" buttons. A count, not a
+     bare dot -- "3 replies waiting" is a different prompt from "something
+     changed", and the number costs nothing to show. */
+  /* The score-average selector sits on its own row under the stat pills so
+     the pill it controls is directly above it, rather than across the
+     toolbar from it. */
+  .score-metric-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
+  .fb-unread-dot{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;margin-left:7px;padding:0 5px;border-radius:9px;background:var(--bad);color:#fff;font-size:.7rem;font-weight:700;font-family:system-ui,sans-serif;line-height:1;}
+  .fb-reply{border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-bottom:10px;background:var(--surface-2);}
+  .fb-reply.unread{border-color:var(--accent);background:var(--accent-soft);}
+  .fb-reply-quote{font-family:system-ui,sans-serif;font-size:.84rem;color:var(--muted);border-left:3px solid var(--line);padding-left:9px;margin-top:3px;white-space:pre-wrap;}
+  .fb-reply-body{font-family:system-ui,sans-serif;font-size:.89rem;color:var(--ink);margin-top:3px;white-space:pre-wrap;}
+  .admin-log-selectbar{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-bottom:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);}
+  .admin-log-selectall{display:flex;align-items:center;gap:7px;cursor:pointer;font-size:.86rem;color:var(--ink);}
+  .admin-log-selectbar .format-help{flex:1 1 auto;min-width:0;margin:0;}
+  .admin-log-delete-selected:not([disabled]){color:var(--bad);border-color:var(--bad);}
+  /* The checkbox is a sibling of .lib-info inside .lib-row (a flex row), so it
+     needs to not shrink -- otherwise a long error message squeezes it to zero
+     width and it becomes untappable on a phone. */
+  .admin-log-check{display:flex;align-items:flex-start;padding-top:2px;flex:0 0 auto;cursor:pointer;}
+  .admin-log-check input{width:17px;height:17px;cursor:pointer;}
   .admin-log-purge{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:18px;padding-top:14px;border-top:1px solid var(--line);}
   .admin-log-purge .format-help{flex:1 1 240px;min-width:0;}
   /* .lib-info had no min-width set, and flex items default to
@@ -1926,7 +1966,7 @@ if('serviceWorker' in navigator){
           <button data-mode-btn="night" type="button">Night</button>
           <button data-mode-btn="auto" type="button" class="active">Auto</button>
         </div>
-        <button class="settings-menu-btn open-feedback-btn" type="button" style="margin-top:10px;"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5h15a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H10l-4 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></svg>Send feedback</button>
+        <button class="settings-menu-btn open-feedback-btn" type="button" style="margin-top:10px;"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5h15a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H10l-4 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></svg>Send feedback<span class="fb-unread-dot" hidden></span></button>
         <div class="settings-label" style="margin-top:12px;">Account</div>
         <div class="settings-account-email"></div>
         <button class="settings-menu-btn account-passkeys-btn" type="button" style="display:none;">Passkeys</button>
@@ -1955,7 +1995,7 @@ if('serviceWorker' in navigator){
       <button data-mode-btn="night" type="button">Night</button>
       <button data-mode-btn="auto" type="button" class="active">Auto</button>
     </div>
-    <button class="open-feedback-btn" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5h15a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H10l-4 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></svg>Send feedback</button>
+    <button class="open-feedback-btn" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5h15a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H10l-4 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></svg>Send feedback<span class="fb-unread-dot" hidden></span></button>
     <div class="settings-label" style="padding:10px 10px 2px;">Account</div>
     <div class="settings-account-email" style="padding:0 10px 4px;"></div>
     <button class="account-passkeys-btn" type="button" style="display:none;">Passkeys</button>
@@ -2037,8 +2077,12 @@ if('serviceWorker' in navigator){
 </div>
 
 <div class="dialog-overlay" id="feedbackOverlay" role="dialog" aria-modal="true" aria-labelledby="feedbackHeading" hidden>
-  <div class="dialog-card">
+  <div class="dialog-card scrollable">
     <h2 id="feedbackHeading">Send feedback</h2>
+    <!-- Replies from an admin land here. Rendered above the compose form on
+         purpose: an unread answer to something you already asked matters more
+         than the empty box for asking again. -->
+    <div id="fbRepliesWrap"></div>
     <div style="margin-bottom:12px;">
       <div style="display:block;font-family:system-ui,sans-serif;font-size:.78rem;font-weight:700;color:var(--muted);margin-bottom:5px;">Category</div>
       <div id="fbCategoryDD" style="width:100%;"></div>
@@ -2336,16 +2380,29 @@ function clearPasskeyEnrolledOnDevice(){ try{ localStorage.removeItem(PASSKEY_DE
 function isPasskeyEnrolledOnDevice(){ try{ return localStorage.getItem(PASSKEY_DEVICE_FLAG_KEY) === '1'; }catch(e){ return false; } }
 
 /* ---- landing page gate ---- */
-/* A device that already registered a passkey has obviously used this app
-   before and signed in at least once -- the marketing landing page is for
-   first-time visitors, so skip straight past it for a returning device,
-   same as if they'd already clicked through once this session. Without
-   this, the mobile-PWA auto-unlock splash (see shouldShowUnlockSplash())
-   would never actually get a chance to auto-fire on a cold app open --
-   the landing page would sit in front of it every single time, since
-   nothing else in the existing landing-gate logic knew this was a
-   returning device. */
-let showLanding = !isPasskeyEnrolledOnDevice();
+/* The landing page is skipped ONLY where keeping it would actually break
+   something: an installed mobile PWA whose device has a passkey. That is
+   precisely the case shouldShowUnlockSplash() fires in, and the splash
+   can't auto-fire on a cold open if the landing page is sitting in front
+   of it.
+
+   This used to be plain `!isPasskeyEnrolledOnDevice()`, which was too
+   broad by a wide margin: enrolling a passkey once suppressed the landing
+   page in EVERY context on that device forever after -- desktop browser,
+   mobile browser tab, any visitor sharing the machine -- even though none
+   of those ever show the unlock splash, so none of them had anything to
+   protect. Reported as "don't see landing page on mobile anymore".
+
+   Deliberately does NOT call shouldShowUnlockSplash() itself despite
+   mirroring it: that function also reads passkeysActive(), whose
+   PASSKEYS_SUPPORTED / passkeyFeatureEnabled bindings are declared far
+   below this line and would throw on the temporal dead zone at module-init
+   time. isStandalonePwa() and isMobileDevice() are pure hoisted function
+   declarations reading only navigator/matchMedia, so they are safe here.
+   The extra passkeysActive() term only ever makes the splash LESS likely,
+   and showing the landing page when the splash won't fire is the correct
+   outcome anyway -- so the narrower check here is safe in both directions. */
+let showLanding = !(isPasskeyEnrolledOnDevice() && isStandalonePwa() && isMobileDevice());
 const landingViewEl = document.getElementById('landingView');
 const appLayoutEl = document.getElementById('appLayout');
 function updateLandingGate(){
@@ -2480,6 +2537,31 @@ function closeAccountMenus(){
    promise-based dialog with no cancel state would leave the caller's
    await hanging forever. ---- */
 let modalCloseStack = [];
+/* dismissModal() unwinds its own history entry with history.back(), and
+   popstate fires ASYNCHRONOUSLY -- by which point the stack entry has
+   already been spliced, so the popstate handler below no longer recognises
+   the event as modal-related and falls through to re-routing the view.
+   That stray re-render lands AFTER the dialog's own onConfirm callback has
+   finished, so it silently stomps whatever the callback just rendered.
+
+   Measured symptom (2026-08-21, real Playwright): confirming "Delete round"
+   inside the admin View-Progress drilldown fired a spurious
+   showView('admin', {fromPopState:true}) about one tick later. showView ->
+   admin calls renderAdminView(), whose first three statements null
+   adminDrilldownUserId / adminSecurityEventsUserId / adminReviewAttempt --
+   so the admin was bounced out of the drilldown back to the default panel
+   even though the delete handler had correctly re-rendered the drilldown.
+
+   This is why the bug looked like it "recurs in different scenarios": it is
+   not specific to deleting, it is generic to EVERY confirm/cancel of every
+   dialog. It is only VISIBLE where the view carries sub-state that
+   showView() resets -- the admin drilldown being the worst case.
+
+   The counter lets the handler swallow the unwind we caused ourselves,
+   while a genuine user-initiated Back still routes normally.
+   pushModalClose() always pushes an entry before this can run, so every
+   increment is guaranteed a matching popstate to consume it. */
+let pendingModalUnwinds = 0;
 function pushModalClose(closeFn){
   history.pushState({modal:true}, '', location.pathname + location.search);
   modalCloseStack.push(closeFn);
@@ -2489,7 +2571,7 @@ function dismissModal(closeFn){
      close, then unwinds the history entry pushModalClose added so a later
      Back doesn't hit a dead no-op step. */
   const idx = modalCloseStack.lastIndexOf(closeFn);
-  if(idx !== -1){ modalCloseStack.splice(idx,1); closeFn(); history.back(); }
+  if(idx !== -1){ modalCloseStack.splice(idx,1); closeFn(); pendingModalUnwinds++; history.back(); }
   else closeFn();
 }
 
@@ -2544,12 +2626,91 @@ function renderFbCategoryDropdown(){
   });
   wireDropdown('fbCategory', (value)=>{ fbCategoryValue = value; renderFbCategoryDropdown(); }, renderFbCategoryDropdown);
 }
+/* ---- admin replies, read in-app (migration 0071) ----
+   The student can already SELECT their own user_feedback rows (0063), so
+   this needs no new read grant -- only somewhere to show them and a way to
+   clear the unread mark. */
+let fbReplies = [];          // rows of mine that have an admin_reply
+let fbUnreadCount = 0;
+
+async function loadFeedbackReplies(){
+  if(!currentUser) { fbReplies = []; fbUnreadCount = 0; updateFeedbackUnreadDot(); return; }
+  try{
+    const { data, error } = await supabaseClient.from('user_feedback')
+      .select('id, category, message, created_at, admin_reply, replied_at, reply_read_at')
+      .eq('user_id', currentUser.id)
+      .not('admin_reply', 'is', null)
+      .order('replied_at', { ascending: false })
+      .limit(50);
+    if(error) throw error;
+    fbReplies = data || [];
+    fbUnreadCount = fbReplies.filter(r=>!r.reply_read_at).length;
+  }catch(err){
+    /* Non-fatal, and deliberately silent in the UI: a missing reply badge is
+       a smaller problem than an error banner on a screen the student did not
+       ask anything of. Also keeps the app working before 0071 is applied,
+       when reply_read_at does not exist yet. */
+    console.error('Could not load feedback replies:', err);
+    fbReplies = [];
+    fbUnreadCount = 0;
+  }
+  updateFeedbackUnreadDot();
+}
+
+function updateFeedbackUnreadDot(){
+  document.querySelectorAll('.fb-unread-dot').forEach(dot=>{
+    dot.hidden = fbUnreadCount === 0;
+    dot.textContent = fbUnreadCount > 0 ? String(fbUnreadCount) : '';
+    dot.setAttribute('aria-label', fbUnreadCount === 1 ? '1 unread reply' : fbUnreadCount + ' unread replies');
+  });
+}
+
+function renderFeedbackReplies(){
+  const wrap = document.getElementById('fbRepliesWrap');
+  if(!wrap) return;
+  if(!fbReplies.length){ wrap.innerHTML = ''; return; }
+  wrap.innerHTML = `
+    <div style="margin-bottom:16px;">
+      <div style="font-family:system-ui,sans-serif;font-size:.78rem;font-weight:700;color:var(--muted);margin-bottom:6px;">
+        ${fbUnreadCount ? `${fbUnreadCount} new ${fbUnreadCount===1?'reply':'replies'}` : 'Replies'}
+      </div>
+      ${fbReplies.map(r=>`
+        <div class="fb-reply ${r.reply_read_at ? '' : 'unread'}">
+          <div class="lib-meta">You asked (${escapeHtml(r.category)}) on ${new Date(r.created_at).toLocaleDateString()}:</div>
+          <div class="fb-reply-quote">${escapeHtml(r.message)}</div>
+          <div class="lib-meta" style="margin-top:8px;">Reply${r.replied_at ? ' · ' + new Date(r.replied_at).toLocaleDateString() : ''}${r.reply_read_at ? '' : ' · <strong>new</strong>'}</div>
+          <div class="fb-reply-body">${escapeHtml(r.admin_reply)}</div>
+        </div>`).join('')}
+    </div>`;
+}
+
+/* Marks everything read as soon as the panel has actually shown them. Done
+   on open rather than behind a "mark as read" button: the replies are fully
+   visible at this point, so a second click to say so would be busywork.
+   Fire-and-forget -- the local state is updated regardless, so a failed
+   write just means the dot returns on the next load rather than breaking
+   anything the student is looking at. */
+async function markFeedbackRepliesRead(){
+  if(!fbUnreadCount) return;
+  fbUnreadCount = 0;
+  updateFeedbackUnreadDot();
+  try{
+    const { error } = await supabaseClient.rpc('mark_own_feedback_replies_read');
+    if(error) throw error;
+    fbReplies.forEach(r=>{ if(!r.reply_read_at) r.reply_read_at = new Date().toISOString(); });
+  }catch(err){
+    console.error('Could not mark replies read:', err);
+  }
+}
+
 function openFeedbackPanel(){
   document.getElementById('settingsPop').hidden = true;
   document.getElementById('moreSheet').hidden = true;
   fbMsgEl.style.display = 'none';
   feedbackOverlayEl.hidden = false;
   renderFbCategoryDropdown();
+  renderFeedbackReplies();
+  markFeedbackRepliesRead();
   fbMessageEl.focus();
   pushModalClose(closeFeedbackPanel);
 }
@@ -2578,6 +2739,7 @@ document.getElementById('submitFeedbackBtn').onclick = async ()=>{
     if(error) throw error;
     fbMessageEl.value = '';
     dismissModal(closeFeedbackPanel);
+    loadFeedbackReplies();
     /* Fire-and-forget -- the feedback itself is already saved regardless
        of whether this admin-notification email succeeds, so failures here
        are logged, never shown to the submitting user. The id lookup needs
@@ -2700,6 +2862,10 @@ function showView(v, opts){
    dismissModal above) instead of the underlying view changing out from under
    a dialog that's still on screen. */
 window.addEventListener('popstate', ()=>{
+  /* Our own dismissModal() unwind -- already handled synchronously there.
+     Swallow it instead of re-routing, or it re-renders the whole view and
+     stomps the dialog callback's own render. See pendingModalUnwinds. */
+  if(pendingModalUnwinds > 0){ pendingModalUnwinds--; return; }
   if(modalCloseStack.length){ modalCloseStack.pop()(); return; }
   if(appShell.style.display === 'none') return;
   let v = VIEW_FOR_PATH[location.pathname] || 'quiz';
@@ -5998,6 +6164,7 @@ function renderAuthView(){
       <div class="auth-links-row" style="margin-top:14px;font-family:system-ui,sans-serif;font-size:.85rem;display:flex;gap:16px;flex-wrap:wrap;">
         <button class="text-link" id="goSignupBtn">Request early access</button>
         <button class="text-link" id="goForgotBtn">Forgot password?</button>
+        <button class="text-link" id="goLandingBtn">What is this?</button>
       </div>
     `;
   } else if(authScreen === 'signup'){
@@ -6087,6 +6254,12 @@ function renderAuthView(){
      passkey to sign in with, so they keep the plain always-eye version. */
   if(authScreen === 'signin') wireAuthPasswordToggle(); else wirePasswordToggle('authPassword', 'authPasswordToggle');
   wirePasswordToggle('authNewPassword', 'authNewPasswordToggle');
+  /* Keeps the landing page reachable from the sign-in form. Without it the
+     landing page is a one-way door: once dismissed (or auto-skipped in the
+     installed mobile PWA) there is no route back to it in the running app
+     short of clearing site data. */
+  const goLanding = document.getElementById('goLandingBtn');
+  if(goLanding) goLanding.onclick = ()=>{ showLanding = true; updateLandingGate(); };
   const goSignup = document.getElementById('goSignupBtn');
   if(goSignup) goSignup.onclick = ()=>{ authScreen='signup'; authError=''; authErrorIsPasskeyNudge=false; authMessage=''; renderAuthView(); };
   const goSignin = document.getElementById('goSigninBtn');
@@ -6329,6 +6502,7 @@ async function openPasskeysDialog(){
       <h3 style="margin:0 0 4px;">Passkeys</h3>
       <div class="format-help">Sign in with Face ID, Touch ID, Windows Hello, or a security key instead of typing your password. Passkeys are a newer, experimental feature -- your password still works as before.</div>
       <div id="passkeysListWrap" style="margin-top:14px;"><div class="format-help">Loading…</div></div>
+      <div id="passkeyDeviceWrap" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);"></div>
       <div class="msg" id="passkeysMsg"></div>
       <div class="dialog-actions" style="margin-top:16px;">
         <button class="btn btn-ghost" id="passkeysCloseBtn">Done</button>
@@ -6374,6 +6548,7 @@ async function openPasskeysDialog(){
               // will be prompted... again").
               if(!overlay.querySelector('[data-remove-passkey]')){
                 clearPasskeyEnrolledOnDevice();
+                renderPasskeyDeviceSection();
                 try{ await supabaseClient.rpc('clear_own_passkey_prompt_dismissal'); }catch(e){}
                 if(profile) profile.passkey_prompt_dismissed_at = null;
               }
@@ -6388,6 +6563,46 @@ async function openPasskeysDialog(){
     }
   }
 
+  /* THIS DEVICE, as distinct from the account-level list above.
+     PASSKEY_DEVICE_FLAG_KEY is a localStorage flag meaning "a passkey was
+     registered from this browser", which WebAuthn gives no way to query
+     directly. It drives two things: the mobile-PWA auto-unlock splash, and
+     (previously, far too broadly) whether the landing page is skipped.
+
+     It was previously set silently on enrollment and cleared only when an
+     account dropped to zero passkeys -- so there was no way to see it, and
+     no way to turn auto-unlock off on a shared or borrowed device without
+     deleting the passkey itself. This exposes both. */
+  function renderPasskeyDeviceSection(){
+    const wrap = overlay.querySelector('#passkeyDeviceWrap');
+    if(!wrap) return;
+    const enrolled = isPasskeyEnrolledOnDevice();
+    const pwaMobile = isStandalonePwa() && isMobileDevice();
+    wrap.innerHTML = `
+      <div style="font-weight:600;font-size:.92rem;margin-bottom:4px;">This device</div>
+      <div class="format-help" style="margin-bottom:10px;">
+        ${enrolled
+          ? (pwaMobile
+              ? 'A passkey is registered here, so opening the installed app goes straight to a biometric unlock instead of the sign-in form.'
+              : 'A passkey is registered here. Auto-unlock only applies to the installed app on a phone or tablet, so it has no effect in this browser.')
+          : 'No passkey is registered on this device yet. Adding one above enables auto-unlock in the installed mobile app.'}
+      </div>
+      ${enrolled ? `<button type="button" class="btn btn-ghost" id="passkeyForgetDeviceBtn">Turn off auto-unlock on this device</button>` : ''}
+    `;
+    const forget = overlay.querySelector('#passkeyForgetDeviceBtn');
+    if(forget) forget.onclick = ()=>{
+      showConfirmDialog(
+        'Turn off auto-unlock on this device?\n\nYour passkey is NOT deleted and still works for signing in -- this only stops the installed app from jumping straight to the biometric prompt when it opens. Useful on a shared or borrowed device.',
+        ()=>{
+          clearPasskeyEnrolledOnDevice();
+          renderPasskeyDeviceSection();
+          const msgEl = overlay.querySelector('#passkeysMsg');
+          if(msgEl){ msgEl.className = 'msg ok'; msgEl.textContent = 'Auto-unlock is off on this device.'; }
+        }, 'Turn off', false);
+    };
+  }
+  renderPasskeyDeviceSection();
+
   overlay.querySelector('#passkeysAddBtn').onclick = async ()=>{
     const addBtn = overlay.querySelector('#passkeysAddBtn');
     const msgEl = overlay.querySelector('#passkeysMsg');
@@ -6398,6 +6613,7 @@ async function openPasskeysDialog(){
       if(error) throw error;
       markPasskeyEnrolledOnDevice();
       await refreshList();
+      renderPasskeyDeviceSection();
     } catch(err){
       if(msgEl){ msgEl.className = 'msg err'; msgEl.textContent = passkeyErrorMessage(err); }
     } finally{
@@ -7216,6 +7432,9 @@ async function applyAccessGate(authEvent){
     showView(initialView || 'quiz', initialView ? { fromPopState: true } : undefined);
     loadAiFeatureFlags();
     loadStudentFeatureFlags();
+    // Same fire-and-forget posture as the flag loads: the unread dot appears
+    // a moment after the shell paints rather than delaying it.
+    loadFeedbackReplies();
     maybeShowPasskeyEnrollmentPrompt();
     (async ()=>{ await loadLegalDocuments(); renderStatusBar(); await maybeShowPolicyAcceptancePrompt(); })();
   }
@@ -7548,6 +7767,13 @@ let progressFilterRound = 'all';   // 'all' | round number as a string
    is a within-visit mode, and landing on the misses list days later because
    of a click from a previous session would be surprising. */
 let progressTab = 'rounds'; // 'rounds' | 'missed'
+/* Which score average the Progress header is showing. 'final' (a cold full
+   sitting) and 'cum_all' (mastery once retakes count) answer two different
+   questions -- "would I pass today" vs "how much of this exam do I know" --
+   and 'cum_<n>' shows the funnel partway. Persisted for the session only;
+   deliberately NOT reset per visit, since it is a reading preference rather
+   than a filter that could hide data. */
+let progressScoreMetric = 'final';
 let missedRows = null;      // null = not loaded yet; [] | [{key,text,options,correct,explanation,count,lastMissedAt}]
 let missedLoading = false;
 /* Whether a load has been kicked off for this visit to Progress. The lazy
@@ -7562,6 +7788,11 @@ let missedError = null;
 let missedSortMode = 'count_desc'; // 'count_desc' | 'recent' | 'exam'
 let missedExamFilter = 'all';
 let missedRevealed = new Set(); // question keys currently expanded to show the answer
+/* Free-text filter over the missed list. Client-side over rows already in
+   memory (same posture as the library search), so it costs nothing and works
+   offline. Matched against question text AND the exam title, so "renal" and
+   "Exam 12" both work in the same box. */
+let missedSearchQuery = '';
 
 /* Tallies every question the student got wrong, deduped across attempts.
    Same miss test and same tally shape as buildFlashcardsFromAttemptIds
@@ -7578,22 +7809,30 @@ let missedRevealed = new Set(); // question keys currently expanded to show the 
    to whichever exam is scanned first when a question appears in more than
    one). original_number comes straight off the snapshot for the same
    reason. */
-async function loadMissedQuestions(){
-  if(missedLoading) return;
-  missedLoading = true;
-  missedError = null;
+/* targetUserId defaults to the signed-in account, so every existing call
+   site is unchanged. The admin drilldown passes the account being viewed --
+   reads are allowed by the same admin-read-all RLS policies that already
+   back renderAdminUserProgress(). Results go to the caller's own state via
+   the returned value; the globals below stay the STUDENT's, so an admin
+   inspecting someone else can never leave that data sitting in the view
+   their own Progress tab reads from. */
+async function loadMissedQuestions(targetUserId){
+  const forUser = targetUserId || currentUser.id;
+  const isSelf = !targetUserId || targetUserId === currentUser.id;
+  if(isSelf && missedLoading) return;
+  if(isSelf){ missedLoading = true; missedError = null; }
   try{
     const { data: rounds, error: rErr } = await supabaseClient.from('exam_rounds')
-      .select('id, exam_title').eq('user_id', currentUser.id);
+      .select('id, exam_title').eq('user_id', forUser);
     if(rErr) throw rErr;
-    if(!rounds.length){ missedRows = []; return; }
+    if(!rounds.length){ if(isSelf) missedRows = []; return []; }
     const roundTitle = new Map(rounds.map(r=>[r.id, r.exam_title]));
     const { data: attempts, error: aErr } = await supabaseClient.from('exam_attempts')
       .select('id, round_id, completed_at')
       .in('round_id', rounds.map(r=>r.id))
       .eq('status', 'completed');
     if(aErr) throw aErr;
-    if(!attempts.length){ missedRows = []; return; }
+    if(!attempts.length){ if(isSelf) missedRows = []; return []; }
     const attemptMeta = new Map(attempts.map(a=>[a.id, a]));
     const rows = await fetchAllByIn('exam_attempt_answers', 'attempt_id', attempts.map(a=>a.id), '*');
     const tally = new Map();
@@ -7621,12 +7860,15 @@ async function loadMissedQuestions(){
         });
       }
     });
-    missedRows = Array.from(tally.values());
+    const built = Array.from(tally.values());
+    if(isSelf) missedRows = built;
+    return built;
   } catch(err){
-    missedError = err.message;
-    missedRows = [];
+    if(isSelf){ missedError = err.message; missedRows = []; }
+    else throw err;
+    return [];
   } finally {
-    missedLoading = false;
+    if(isSelf) missedLoading = false;
   }
 }
 
@@ -7635,6 +7877,17 @@ async function loadMissedQuestions(){
 function visibleMissedRows(){
   let rows = (missedRows || []).slice();
   if(missedExamFilter !== 'all') rows = rows.filter(r=>r.examTitle === missedExamFilter);
+  /* Watermark characters are stripped before matching, never for display.
+     They are zero-width so they never change what a human sees, but they sit
+     inside the string and would break a substring match that happens to span
+     one -- the same trap the library search documents. */
+  const q = stripWatermarkChars(missedSearchQuery).trim().toLowerCase();
+  if(q){
+    rows = rows.filter(r=>
+      stripWatermarkChars(r.text || '').toLowerCase().includes(q) ||
+      (r.examTitle || '').toLowerCase().includes(q)
+    );
+  }
   if(missedSortMode === 'recent'){
     rows.sort((a,b)=> (b.lastMissedAt||'').localeCompare(a.lastMissedAt||''));
   } else if(missedSortMode === 'exam'){
@@ -7661,6 +7914,7 @@ function renderMissedList(){
     .sort((a,b)=> a.localeCompare(b, undefined, {numeric:true}));
   const rows = visibleMissedRows();
   const controls = `
+    <input type="search" id="missedSearchInput" class="missed-search" placeholder="Search your missed questions…" value="${escapeHtml(missedSearchQuery)}" aria-label="Search missed questions">
     <div class="progress-toolbar-controls" style="margin-bottom:14px;">
       ${renderDropdown({ id:'missedSort', ariaLabel:'Sort missed questions', selected: missedSortMode, options:[
         {value:'count_desc', label:'Sort: Most missed'},
@@ -7672,11 +7926,28 @@ function renderMissedList(){
         ...examTitles.map(t=>({value:t, label:t}))
       ]}) : ''}
     </div>
-    <div class="format-help">${rows.length} question${rows.length===1?'':'s'} you've missed${missedExamFilter==='all' ? '' : ` in ${escapeHtml(missedExamFilter)}`}, deduplicated across every completed attempt.</div>
-    <button type="button" class="btn btn-ghost" id="missedBuildDeckBtn" style="margin-bottom:14px;">${icon('cards')}Study these as flashcards${missedExamFilter==='all' ? '' : ` (${rows.length})`}</button>
+    <div class="format-help">${rows.length} question${rows.length===1?'':'s'} you've missed${missedExamFilter==='all' ? '' : ` in ${escapeHtml(missedExamFilter)}`}${missedSearchQuery.trim() ? ` matching “${escapeHtml(missedSearchQuery.trim())}”` : ''}, deduplicated across every completed attempt.</div>
+    ${rows.length ? `<button type="button" class="btn btn-ghost" id="missedBuildDeckBtn" style="margin-bottom:14px;">${icon('cards')}Study these as flashcards${(missedExamFilter==='all' && !missedSearchQuery.trim()) ? '' : ` (${rows.length})`}</button>` : ''}
   `;
-  const body = rows.map(r=>{
-    const revealed = missedRevealed.has(r.key);
+  /* A search that matches nothing is a different situation from having
+     missed nothing at all -- the early return above covers the latter. */
+  if(!rows.length){
+    return controls + `<div class="format-help">No missed questions match that search. <button type="button" class="link-btn" id="missedClearSearch">Clear search</button></div>`;
+  }
+  const body = renderMissedRowsHtml(rows, missedRevealed);
+  return controls + body;
+}
+
+/* The per-question rows, shared by the student's own Missed tab and the
+   admin drilldown's. Extracted rather than duplicated so the two can never
+   drift in what they reveal -- this markup decides whether the correct
+   answer is shown, and two copies of that decision is one too many.
+   Takes the revealed-set explicitly because the two surfaces keep separate
+   expansion state (an admin expanding a student's question must not also
+   expand it on the admin's own Progress tab). */
+function renderMissedRowsHtml(rows, revealedSet){
+  return rows.map(r=>{
+    const revealed = revealedSet.has(r.key);
     const where = [r.examTitle, r.originalNumber ? `Q${r.originalNumber}` : ''].filter(Boolean).join(' · ');
     let answerHtml = '';
     if(revealed){
@@ -7710,7 +7981,6 @@ function renderMissedList(){
         ${answerHtml}
       </div>`;
   }).join('');
-  return controls + body;
 }
 
 // Shared by both render paths (rounds and misses) -- the tab switch is
@@ -7762,6 +8032,22 @@ function wireMissedList(){
   // rendered when there's more than one exam to filter between.
   wireDropdown('missedSort', (v)=>{ missedSortMode = v; renderProgressPanel(); }, ()=>renderProgressPanel());
   wireDropdown('missedExam', (v)=>{ missedExamFilter = v; renderProgressPanel(); }, ()=>renderProgressPanel());
+  /* Re-rendering on every keystroke replaces innerHTML, which drops focus
+     and the caret mid-word -- the same problem the admin log search solved.
+     Restored here rather than debounced: this filter is client-side over
+     rows already in memory, so there is no round-trip to debounce away. */
+  const searchInput = document.getElementById('missedSearchInput');
+  if(searchInput){
+    searchInput.oninput = (e)=>{
+      missedSearchQuery = e.target.value;
+      const caret = e.target.selectionStart;
+      renderProgressPanel();
+      const again = document.getElementById('missedSearchInput');
+      if(again){ again.focus(); try{ again.setSelectionRange(caret, caret); }catch(err){} }
+    };
+  }
+  const clearSearch = document.getElementById('missedClearSearch');
+  if(clearSearch) clearSearch.onclick = ()=>{ missedSearchQuery = ''; renderProgressPanel(); };
   const deckBtn = document.getElementById('missedBuildDeckBtn');
   if(deckBtn) deckBtn.onclick = buildDeckFromMissedList;
   progressPanel.querySelectorAll('button[data-missed-reveal]').forEach(btn=>{
@@ -7792,6 +8078,156 @@ let progressFollowUps = [];      // [{role:'user'|'assistant', content}]
 let progressFollowUpLoading = false;
 let progressFollowUpError = null;
 let progressFollowUpCapped = false;  // turn/period cap hit -- disable the input rather than let it fail again
+
+/* Average score across attempts, for the Progress header stat.
+
+   COUNTS COMPLETED FULL-LENGTH ATTEMPTS ONLY, and that restriction is the
+   whole reason this is a function rather than an inline reduce:
+
+     * in_progress attempts have correct_count 0 against a full
+       total_questions, so including them drags the average toward zero and
+       makes it fall every time a student opens an exam.
+     * missed_retake attempts are a different measurement. Measured on
+       production 2026-08-21: full attempts average 140 questions at 73.9%,
+       missed-only retakes average 26 questions at 80.9% -- and retakes are
+       68 of the 135 completed attempts. Averaging the two together lets a
+       short, easy retake pull the headline number up by the same weight as
+       a full 165-question sitting, which reads as improvement that did not
+       happen.
+
+   Unweighted mean of per-attempt percentages, not total-correct over
+   total-questions: each sitting is one data point regardless of length, so
+   a 100-question exam doesn't count less than a 185-question one.
+
+   Returns null when there is nothing to average, so callers can omit the
+   stat entirely rather than print "0%" or "NaN%" for a student who has
+   started an exam but not finished one. */
+function averageAttemptScore(exams){
+  let sum = 0, n = 0;
+  (exams || []).forEach(ex=>(ex.rounds || []).forEach(r=>(r.attempts || []).forEach(a=>{
+    if(a.status !== 'completed') return;
+    if(a.attempt_scope && a.attempt_scope !== 'full') return;
+    if(!a.total_questions) return;
+    sum += (a.correct_count / a.total_questions) * 100;
+    n++;
+  })));
+  return n ? { pct: sum / n, count: n } : null;
+}
+
+/* ---- the two score averages ----
+
+   These measure genuinely different things and the gap between them is the
+   point of the whole retake funnel. Measured on production 2026-08-21:
+   a cold full sitting averages 73.9%, while cumulative mastery after the
+   retakes averages 85.9% across the same 68 rounds.
+
+   CUMULATIVE MASTERY AFTER N ATTEMPTS, for one round. A round is a full
+   exam followed by missed-only retakes, so a retake's correct_count is
+   "how many of the ones I still had wrong did I get right this time" --
+   the running total is therefore:
+
+       missed after attempt 1  = original_total - attempt1.correct_count
+       missed after attempt k  = missed after (k-1) - attemptk.correct_count
+       cumulative %            = (original_total - missed) / original_total
+
+   n === 'all' reads exam_rounds.funnel_missed_count instead of replaying,
+   deliberately: that column is the server-maintained final state and is
+   exactly what the round cards already display, so deriving "final" a
+   second way would risk showing two different numbers for the same thing.
+
+   Returns null for a round with fewer than n completed attempts. That
+   exclusion is what makes "after 2 attempts" honest -- averaging in rounds
+   that only ever had one attempt would silently mix "didn't improve" with
+   "hasn't tried yet". */
+function cumulativeMasteryAfter(round, n){
+  if(!round || !round.original_total) return null;
+  const done = (round.attempts || [])
+    .filter(a=>a.status === 'completed')
+    .sort((a,b)=> a.attempt_number - b.attempt_number);
+  if(!done.length) return null;
+
+  if(n === 'all'){
+    const missed = Math.max(0, round.funnel_missed_count);
+    return ((round.original_total - missed) / round.original_total) * 100;
+  }
+
+  if(done.length < n) return null;
+  let missed = null;
+  done.slice(0, n).forEach((a, i)=>{
+    if(i === 0) missed = round.original_total - a.correct_count;
+    else missed = missed - a.correct_count;
+  });
+  missed = Math.max(0, missed);
+  return ((round.original_total - missed) / round.original_total) * 100;
+}
+
+/* Averaged across every round deep enough to have the metric. Unweighted --
+   each round is one data point regardless of exam length, same reasoning as
+   averageAttemptScore(). Returns null when nothing qualifies. */
+function averageCumulativeScore(exams, n){
+  let sum = 0, count = 0;
+  (exams || []).forEach(ex=>(ex.rounds || []).forEach(r=>{
+    const pct = cumulativeMasteryAfter(r, n);
+    if(pct === null || isNaN(pct)) return;
+    sum += pct; count++;
+  }));
+  return count ? { pct: sum / count, count } : null;
+}
+
+/* How many completed attempts the deepest round has -- bounds the "after N
+   attempts" options so the dropdown never offers a depth no round reaches.
+   Live max is 5. */
+function maxCompletedAttempts(exams){
+  let max = 0;
+  (exams || []).forEach(ex=>(ex.rounds || []).forEach(r=>{
+    const n = (r.attempts || []).filter(a=>a.status === 'completed').length;
+    if(n > max) max = n;
+  }));
+  return max;
+}
+
+/* Resolves the selected metric to { pct, count, label, help }, or null.
+   Shared by the student's Progress header and the admin drilldown so the two
+   can never disagree about what a number means. */
+function resolveScoreMetric(exams, metric){
+  if(metric === 'final'){
+    const avg = averageAttemptScore(exams);
+    return avg && {
+      pct: avg.pct, count: avg.count,
+      label: `final exam score · ${avg.count} sitting${avg.count===1?'':'s'}`,
+      help: `Mean score across ${avg.count} completed full-length attempt${avg.count===1?'':'s'}, scored the way the real exam would be. Missed-only retakes are excluded so a short retake can't inflate it.`
+    };
+  }
+  if(metric === 'cum_all'){
+    const avg = averageCumulativeScore(exams, 'all');
+    return avg && {
+      pct: avg.pct, count: avg.count,
+      label: `cumulative · ${avg.count} round${avg.count===1?'':'s'}`,
+      help: `How much of each exam you now have right once your retakes are counted, averaged over ${avg.count} round${avg.count===1?'':'s'}.`
+    };
+  }
+  const n = parseInt(String(metric).replace('cum_', ''), 10);
+  if(!Number.isInteger(n) || n < 1) return null;
+  const avg = averageCumulativeScore(exams, n);
+  return avg && {
+    pct: avg.pct, count: avg.count,
+    label: `cumulative after ${n} attempt${n===1?'':'s'} · ${avg.count} round${avg.count===1?'':'s'}`,
+    help: `How much of each exam you had right after ${n} attempt${n===1?'':'s'}, averaged over the ${avg.count} round${avg.count===1?'':'s'} that got at least that far. Rounds with fewer attempts are left out rather than counted as no progress.`
+  };
+}
+
+/* Builds the metric options for a given data set. */
+function scoreMetricOptions(exams){
+  const opts = [
+    {value:'final',   label:'Final exam score'},
+    {value:'cum_all', label:'Cumulative (all attempts)'},
+  ];
+  const max = maxCompletedAttempts(exams);
+  for(let n = 1; n <= Math.min(max, 6); n++){
+    opts.push({value:'cum_' + n, label:`Cumulative after ${n} attempt${n===1?'':'s'}`});
+  }
+  return opts;
+}
 
 function sortProgressExams(exams, mode){
   const sorted = exams.slice();
@@ -7832,6 +8268,7 @@ async function renderProgressView(){
   missedRequested = false;
   missedError = null;
   missedRevealed = new Set();
+  missedSearchQuery = '';
   missedExamFilter = 'all';
   progressPanel.innerHTML = `<h1>Progress</h1>${renderProgressSkeleton()}`;
   try{
@@ -8306,8 +8743,12 @@ function renderProgressPanel(){
       <div class="stat-row">
         <div class="stat-pill">${icon('library')}<strong>${d.exams.length}</strong><span class="stat-label">exam${d.exams.length===1?'':'s'} started</span></div>
         <div class="stat-pill">${icon('check')}<strong>${d.masteredRounds} of ${d.totalRounds}</strong><span class="stat-label">round${d.totalRounds===1?'':'s'} mastered</span></div>
+        ${(()=>{ const m = resolveScoreMetric(d.exams, progressScoreMetric); return m
+          ? `<div class="stat-pill" title="${escapeHtml(m.help)}">${icon('progress')}<strong>${m.pct.toFixed(1)}%</strong><span class="stat-label">avg ${escapeHtml(m.label)}</span></div>`
+          : ''; })()}
       </div>
       ${(isMobileViewport || progressTab==='missed') ? '' : `<div class="progress-toolbar-controls">${controlsRowHtml}</div>`}
+      ${(d.exams.length && progressTab !== 'missed') ? `<div class="score-metric-row">${renderDropdown({ id:'progressScoreMetric', ariaLabel:'Which score average to show', selected: progressScoreMetric, options: scoreMetricOptions(d.exams) })}</div>` : ''}
     </div>
     <div class="msg" id="progressMsg"></div>
   `;
@@ -8520,6 +8961,7 @@ function renderProgressPanel(){
   wireProgressTabs();
   wireProgressAiFeedbackBlock();
   wireProgressFollowUps();
+  wireDropdown('progressScoreMetric', (value)=>{ progressScoreMetric = value; renderProgressPanel(); }, renderProgressPanel);
   wireDropdown('progressSort', (value)=>{ progressSortMode = value; renderProgressPanel(); }, renderProgressPanel);
   /* Each filter collapses any expanded round first. Otherwise a round you'd
      expanded could be filtered out while progressExpandedRoundId still
@@ -8631,8 +9073,22 @@ function findRoundById(roundId){
    from that. If no attempts remain at all, the round itself is now just
    clutter and is deleted along with it, rather than left behind empty. */
 function deleteAttemptFromProgress(attemptId, attemptNumber, round){
+  /* Later attempts in the same round go too. exam_attempts.source_attempt_id
+     is a self-FK with no ON DELETE clause, so a missed-only retake pins the
+     attempt it was built from: deleting an earlier attempt on its own raised
+     a foreign key violation, which is why this used to appear to demand
+     newest-first. Same cause and same resolution as the admin drilldown --
+     see migration 0070's header. Verified on live data that these chains
+     never cross a round and never point forward, so "everything later in
+     this round" covers every referencing row. */
+  const laterAttempts = (round.attempts || [])
+    .filter(a=>a.attempt_number > attemptNumber)
+    .sort((a,b)=>b.attempt_number - a.attempt_number); // descending: child before parent
+  const warning = laterAttempts.length
+    ? `Delete Attempt ${attemptNumber} on Round ${round.round_number} of "${round.exam_title}"?\n\nThis will ALSO delete the ${laterAttempts.length} later attempt${laterAttempts.length===1?'':'s'} in this round, because each missed-question retake is built from the attempt before it. ${laterAttempts.length + 1} attempts will be removed in total.\n\nThis can't be undone.`
+    : `Delete Attempt ${attemptNumber} on Round ${round.round_number} of "${round.exam_title}"? This can't be undone.`;
   showConfirmDialog(
-    `Delete Attempt ${attemptNumber} on Round ${round.round_number} of "${round.exam_title}"? This can't be undone.`,
+    warning,
     async ()=>{
       const msg = document.getElementById('progressMsg');
       try{
@@ -8640,7 +9096,16 @@ function deleteAttemptFromProgress(attemptId, attemptNumber, round){
            fetched -- reuse it instead of a redundant query, to check
            whether the attempt being deleted was the round's current max. */
         const maxNumBefore = round.attempts.length ? Math.max(...round.attempts.map(a=>a.attempt_number)) : 0;
-        const wasLatest = attemptNumber === maxNumBefore;
+        /* After the cascade the target is always the round's top, so the
+           funnel always needs recomputing -- but keep reading it from the
+           pre-delete snapshot rather than assuming, so the branch below is
+           still correct if round.attempts was ever stale. */
+        const wasLatest = attemptNumber === maxNumBefore || laterAttempts.length > 0;
+        // Newest first: a parent cannot be removed while its retake still
+        // references it, and these are separate statements, not one DELETE.
+        for(const later of laterAttempts){
+          await onlineStore.discardAttempt(later.id);
+        }
         await onlineStore.discardAttempt(attemptId);
         if(wasLatest){
           const maxNum = await onlineStore.maxAttemptNumber(round.id);
@@ -8681,7 +9146,13 @@ function deleteAttemptFromProgress(attemptId, attemptNumber, round){
         }
         await renderProgressView();
         const freshMsg = document.getElementById('progressMsg');
-        if(freshMsg){ freshMsg.textContent = `Attempt ${attemptNumber} deleted.`; freshMsg.className = 'msg ok'; }
+        if(freshMsg){
+          const nGone = laterAttempts.length + 1;
+          freshMsg.textContent = nGone === 1
+            ? `Attempt ${attemptNumber} deleted.`
+            : `${nGone} attempts (${attemptNumber} onward) deleted.`;
+          freshMsg.className = 'msg ok';
+        }
       } catch(err){
         if(msg){ msg.textContent = 'Could not delete: ' + err.message; msg.className = 'msg err'; }
       }
@@ -8815,8 +9286,172 @@ let adminSubView = 'accounts'; // 'accounts' | 'auditLog' | 'errors' | 'feedback
    Feedback view above, which filters in-browser -- that one is bounded by
    how many people actually submit feedback; these are machine-generated. */
 const ADMIN_LOG_PAGE_SIZE = 50;
+/* One account expanded at a time in the Accounts list. Each row used to
+   render seven controls inline (View Progress, View Security Events, AI
+   Settings, Exam Access, Resend Welcome Packet, Approve/Suspend, Delete)
+   plus its flag badges, which at any real account count turned the screen
+   into a wall of near-identical links -- reported as "it got too crowded".
+   Single-open rather than a set: this is a scan-then-act list, and several
+   accounts expanded at once reproduces the exact density being fixed. */
+let adminExpandedUserId = null;
+
+/* The admin drilldown's own Missed-questions tab. Deliberately a SEPARATE
+   set of variables from the student globals (missedRows / missedSortMode /
+   missedRevealed / ...) rather than a shared context object: those globals
+   are what the admin's OWN Progress tab renders from, and letting an admin
+   drilldown write to them is precisely the "show the admin their own data
+   under someone else's name" failure the drilldown was designed to avoid --
+   in the other direction. Cleared whenever a different account is opened. */
+/* Which account the per-account view state below currently belongs to.
+   The resets are keyed on this rather than run unconditionally, because
+   renderAdminUserProgress() re-runs on every re-render of the drilldown --
+   including after a delete, and after every tab/filter/search change --
+   not only when a different account is opened. Resetting unconditionally
+   meant the Missed tab bounced straight back to Rounds the instant it was
+   clicked, and (pre-existing) that the mastery/exam/round filters silently
+   cleared after every attempt deletion. */
+let adminProgressStateForUserId = null;
+let adminProgressSubjectLabel = '';   // the viewed account's email, for AI-feedback copy
+let adminProgressTab = 'rounds';   // 'rounds' | 'missed'
+let adminScoreMetric = 'final';    // same options as progressScoreMetric
+let adminMissedRows = null;        // null = not loaded for this account yet
+let adminMissedLoading = false;
+let adminMissedError = null;
+let adminMissedRequested = false;
+let adminMissedSort = 'count_desc';
+let adminMissedExamFilter = 'all';
+let adminMissedSearch = '';
+let adminMissedRevealed = new Set();
+
+/* AI feedback ABOUT the account being viewed. Separate from the student's
+   own progressAiFeedback* state for the same reason the missed list is --
+   these must never render under the wrong header. No follow-up state here
+   on purpose: the follow-up thread is keyed by user_id server-side, so an
+   admin follow-up has no correct thread to join (the edge function refuses
+   it explicitly rather than answering against the admin's own). */
+let adminAiFeedback = null;
+let adminAiFeedbackLoading = false;
+let adminAiFeedbackError = null;
+
+function resetAdminMissedState(){
+  adminAiFeedback = null;
+  adminAiFeedbackLoading = false;
+  adminAiFeedbackError = null;
+  adminProgressTab = 'rounds';
+  adminScoreMetric = 'final';
+  adminMissedRows = null;
+  adminMissedLoading = false;
+  adminMissedError = null;
+  adminMissedRequested = false;
+  adminMissedSort = 'count_desc';
+  adminMissedExamFilter = 'all';
+  adminMissedSearch = '';
+  adminMissedRevealed = new Set();
+}
+
+/* Mirrors visibleMissedRows() against the admin state. */
+function visibleAdminMissedRows(){
+  let rows = (adminMissedRows || []).slice();
+  if(adminMissedExamFilter !== 'all') rows = rows.filter(r=>r.examTitle === adminMissedExamFilter);
+  const q = stripWatermarkChars(adminMissedSearch).trim().toLowerCase();
+  if(q){
+    rows = rows.filter(r=>
+      stripWatermarkChars(r.text || '').toLowerCase().includes(q) ||
+      (r.examTitle || '').toLowerCase().includes(q)
+    );
+  }
+  if(adminMissedSort === 'recent'){
+    rows.sort((a,b)=> (b.lastMissedAt||'').localeCompare(a.lastMissedAt||''));
+  } else if(adminMissedSort === 'exam'){
+    rows.sort((a,b)=> a.examTitle.localeCompare(b.examTitle, undefined, {numeric:true}) || ((a.originalNumber||0)-(b.originalNumber||0)));
+  } else {
+    rows.sort((a,b)=> (b.count-a.count) || (b.lastMissedAt||'').localeCompare(a.lastMissedAt||''));
+  }
+  return rows;
+}
+
 let adminAuditSearch = '', adminAuditAction = 'all', adminAuditRange = 'all', adminAuditSort = 'desc', adminAuditPage = 0;
 let adminErrorsSearch = '', adminErrorsScope = 'all', adminErrorsRange = 'all', adminErrorsSort = 'desc', adminErrorsPage = 0;
+
+/* Multi-select for the two log views. Held as Sets of row id, same shape as
+   flashSelectedAttemptIds in the flashcard picker.
+
+   Selection is deliberately CLEARED whenever the visible result set changes
+   (filter, search, sort, page). Carrying a selection across a filter change
+   would mean the "Delete selected" button acts on rows that are no longer on
+   screen -- the user would be confirming a count without being able to see
+   what it refers to. Clearing costs a re-tick; not clearing risks deleting
+   something invisible. */
+let adminAuditSelected = new Set();
+let adminErrorsSelected = new Set();
+
+/* Mirrors is_primary_admin() from migration 0068. The server is the real
+   gate -- admin_delete_action_log_entries() raises for anyone else, so a
+   tampered client gets an error rather than a deletion. This only decides
+   whether the control is worth rendering. Kept as a function rather than a
+   cached boolean because `profile` is reassigned on sign-in/out. */
+const PRIMARY_ADMIN_EMAIL = 'ahrontoporowitz@gmail.com';
+function isPrimaryAdmin(){
+  return !!(profile && profile.role === 'admin' && profile.email === PRIMARY_ADMIN_EMAIL);
+}
+
+/* The bulk-action bar shown above both log lists. Rendered at all times (not
+   only when something is selected) so the row of controls doesn't appear and
+   disappear as you tick boxes, which reflows the list under the cursor. */
+function renderAdminLogSelectBar(cfg){
+  const n = cfg.selected.size;
+  return `<div class="admin-log-selectbar">
+    <label class="admin-log-selectall">
+      <input type="checkbox" id="${cfg.selectAllId}" ${cfg.pageIds.length && cfg.pageIds.every(id=>cfg.selected.has(id)) ? 'checked' : ''} ${cfg.pageIds.length ? '' : 'disabled'}>
+      <span>Select all on this page</span>
+    </label>
+    <span class="format-help" id="${cfg.countId}">${n ? `${n.toLocaleString()} selected` : 'None selected'}</span>
+    <button type="button" class="btn btn-ghost" id="${cfg.clearSelId}" ${n ? '' : 'disabled'}>Clear selection</button>
+    <button type="button" class="btn btn-ghost admin-log-delete-selected" id="${cfg.deleteId}" ${n ? '' : 'disabled'}>Delete selected</button>
+  </div>`;
+}
+
+/* Shared checkbox cell for a log row. */
+function renderLogRowCheckbox(attr, id, selected){
+  return `<label class="admin-log-check"><input type="checkbox" data-${attr}="${escapeHtml(id)}" ${selected.has(id) ? 'checked' : ''} aria-label="Select this entry"></label>`;
+}
+
+/* Shared wiring for the select bar + per-row checkboxes. Re-renders through
+   cfg.rerender so the bar's own counts/disabled states stay in sync. */
+function wireAdminLogSelection(cfg){
+  const root = document.getElementById('adminSubPanel');
+  root.querySelectorAll(`[data-${cfg.attr}]`).forEach(box=>{
+    box.onchange = ()=>{
+      const id = box.dataset[cfg.datasetKey];
+      if(box.checked) cfg.selected.add(id); else cfg.selected.delete(id);
+      cfg.rerender();
+    };
+  });
+  const all = document.getElementById(cfg.selectAllId);
+  if(all) all.onchange = ()=>{
+    if(all.checked) cfg.pageIds.forEach(id=>cfg.selected.add(id));
+    else cfg.pageIds.forEach(id=>cfg.selected.delete(id));
+    cfg.rerender();
+  };
+  const clearSel = document.getElementById(cfg.clearSelId);
+  if(clearSel) clearSel.onclick = ()=>{ cfg.selected.clear(); cfg.rerender(); };
+  const del = document.getElementById(cfg.deleteId);
+  if(del) del.onclick = ()=>{
+    const ids = [...cfg.selected];
+    if(!ids.length) return;
+    showConfirmDialog(cfg.confirmMessage(ids.length), async ()=>{
+      const { data, error } = await supabaseClient.rpc(cfg.rpc, { p_ids: ids });
+      if(error){ alert('Could not delete: ' + error.message); return; }
+      cfg.selected.clear();
+      // Deleting everything on the last page would otherwise strand the view
+      // on an empty page past the end of the now-shorter result set.
+      cfg.onDeleted(Number(data) || 0);
+      await cfg.rerender();
+      const msg = document.querySelector('.admin-log-selectbar .format-help');
+      if(msg) msg.textContent = `Deleted ${Number(data)||0} entr${(Number(data)||0)===1?'y':'ies'}.`;
+    }, 'Delete', true);
+  };
+}
 
 /* PostgREST's .or() takes a comma-separated filter list, and its ilike
    patterns are parsed out of that same string -- so a search containing a
@@ -9331,26 +9966,37 @@ function renderAdminAccountsView(){
     if(flags.aiHeavyUsage){
       badges.push(`<span class="lib-badge" style="background:var(--bad-bg);color:var(--bad);">${flags.aiPeriodUsed}/${flags.aiEffectivePeriodLimit} AI follow-ups this period</span>`);
     }
+    /* The badges stay in the collapsed header on purpose. They are the only
+       part of a row that says "this one needs your attention" -- hiding a
+       security flag behind a click would defeat the point of the list. The
+       ACTIONS are what collapse. */
+    const expanded = adminExpandedUserId === p.user_id;
     return `
-      <div class="lib-row">
-        <div class="lib-info">
-          <div class="lib-title">${escapeHtml(p.email)} ${p.role==='admin' ? '<span class="lib-badge verified">Admin</span>' : ''} ${p.approved ? '' : '<span class="lib-badge" style="background:var(--chip);">Pending</span>'}</div>
-          <div class="lib-meta">Signed up ${new Date(p.created_at).toLocaleDateString()} · Last active ${p.last_seen_at ? new Date(p.last_seen_at).toLocaleString() : 'never'}</div>
-          ${badges.length ? `<div class="lib-meta" style="margin-top:4px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">${badges.join('')}</div>` : ''}
+      <div class="admin-account ${expanded ? 'expanded' : ''}">
+        <div class="admin-account-head">
+          <button type="button" class="admin-account-toggle" data-expand-user="${p.user_id}" aria-expanded="${expanded}">
+            <span class="admin-account-chev">${icon('chevronDown')}</span>
+            <span class="lib-info">
+              <span class="lib-title">${escapeHtml(p.email)} ${p.role==='admin' ? '<span class="lib-badge verified">Admin</span>' : ''} ${p.approved ? '' : '<span class="lib-badge" style="background:var(--chip);">Pending</span>'}</span>
+              <span class="lib-meta">Signed up ${new Date(p.created_at).toLocaleDateString()} · Last active ${p.last_seen_at ? new Date(p.last_seen_at).toLocaleString() : 'never'}</span>
+            </span>
+          </button>
+          ${badges.length ? `<div class="admin-account-badges">${badges.join('')}</div>` : ''}
         </div>
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        ${expanded ? `
+        <div class="admin-account-actions">
           <button class="link-btn" data-view-user="${p.user_id}">View Progress</button>
           <button class="link-btn" data-view-events="${p.user_id}">View Security Events</button>
           <button class="link-btn" data-ai-settings-user="${p.user_id}" data-ai-settings-email="${escapeHtml(p.email)}">AI Settings</button>
           <button class="link-btn" data-exam-access-user="${p.user_id}" data-exam-access-email="${escapeHtml(p.email)}">Exam Access</button>
           <button class="link-btn" data-resend-welcome-user="${p.user_id}" data-resend-welcome-email="${escapeHtml(p.email)}">Resend Welcome Packet</button>
-          ${isSelf ? '' : isProtected ? `
+          ${isSelf ? '<span class="lib-badge" style="background:var(--chip);">This is you</span>' : isProtected ? `
             <span class="lib-badge" style="background:var(--chip);" title="Suspend/delete/role-change are blocked server-side for this account">Protected account</span>
           ` : `
             <button class="btn ${p.approved ? 'btn-ghost' : 'btn-primary'}" data-toggle-approve="${p.user_id}" data-new-approved="${!p.approved}">${p.approved ? 'Suspend' : 'Approve'}</button>
             <button class="link-btn danger" data-delete-user="${p.user_id}" data-delete-email="${escapeHtml(p.email)}">Permanently Delete</button>
           `}
-        </div>
+        </div>` : ''}
       </div>
     `;
   }).join('') || `<div class="format-help">No accounts match this filter.</div>`;
@@ -9395,6 +10041,21 @@ function renderAdminAccountsView(){
     </div>
     ${rowsHtml}
   `;
+
+  /* The badges (which carry their own Dismiss / Un-dismiss buttons) are a
+     SIBLING of the toggle button, not inside it. That is deliberate and
+     load-bearing: a <button> may not contain another <button>, and when it
+     did, the HTML parser hoisted the badge controls out of the header
+     entirely -- they rendered outside the indented column and no longer sat
+     with the account they belonged to. Keeping them as a sibling is what
+     makes both the row toggle and the badge actions work. */
+  sub.querySelectorAll('button[data-expand-user]').forEach(toggle=>{
+    toggle.onclick = ()=>{
+      const id = toggle.dataset.expandUser;
+      adminExpandedUserId = (adminExpandedUserId === id) ? null : id;
+      renderAdminAccountsView();
+    };
+  });
 
   const showPendingBtn = document.getElementById('showPendingOnlyBtn');
   if(showPendingBtn) showPendingBtn.onclick = ()=>{ adminFilter = 'pending'; renderAdminAccountsView(); };
@@ -9552,11 +10213,18 @@ async function renderAdminAuditLogView(){
       dismiss_flag: 'Dismissed flag for', undismiss_flag: 'Un-dismissed flag for',
       update_site_email_config: 'Updated site email settings',
       update_welcome_packet_config: 'Updated welcome packet',
+      purge_action_log: 'Retired old audit entries',
+      delete_action_log_entries: 'Deleted audit entries',
       add_welcome_packet_attachment: 'Added welcome packet attachment',
       remove_welcome_packet_attachment: 'Removed welcome packet attachment',
       send_welcome_email: 'Sent welcome packet to'
     };
     const filtersActive = !!term || adminAuditAction !== 'all' || adminAuditRange !== 'all';
+    const pageIds = rows.map(r=>r.id);
+    /* Per-entry deletion is the primary admin's alone -- see migration 0068.
+       An ordinary admin never sees the checkboxes or the bulk bar, and the
+       RPC refuses them anyway if they forge the call. */
+    const canDeleteAudit = isPrimaryAdmin();
     sub.innerHTML = `
       <div class="admin-log-toolbar">
         <input type="search" id="auditSearchInput" placeholder="Search admin, account, or action…" value="${escapeHtml(adminAuditSearch)}" aria-label="Search audit log">
@@ -9577,11 +10245,17 @@ async function renderAdminAuditLogView(){
         ]})}
       </div>
       ${renderAdminLogSummary(count, adminAuditPage, filtersActive, 'admin action', 'auditClearFilters')}
+      ${canDeleteAudit && rows.length ? renderAdminLogSelectBar({
+        selected: adminAuditSelected, pageIds,
+        selectAllId:'auditSelectAll', countId:'auditSelCount',
+        clearSelId:'auditClearSel', deleteId:'auditDeleteSelected'
+      }) : ''}
       ${rows.length ? rows.map(r=>{
         const label = actionLabels[r.action] || r.action;
         const flagType = r.detail && r.detail.flag_type ? ` (${r.detail.flag_type})` : '';
         return `
           <div class="lib-row">
+            ${canDeleteAudit ? renderLogRowCheckbox('select-audit', r.id, adminAuditSelected) : ''}
             <div class="lib-info">
               <div class="lib-title">${escapeHtml(r.actor_email || 'Unknown admin')} — ${label}${flagType} ${escapeHtml(r.target_email || r.target_user_id || '')}</div>
               <div class="lib-meta">${new Date(r.created_at).toLocaleString()}</div>
@@ -9591,24 +10265,39 @@ async function renderAdminAuditLogView(){
       }).join('') : `<div class="format-help">${filtersActive ? 'No admin actions match these filters.' : 'No admin actions recorded yet.'}</div>`}
       ${renderAdminLogPager(count, adminAuditPage, 'auditPrevPage', 'auditNextPage')}
       <div class="admin-log-purge">
-        <span class="format-help">Audit entries are kept indefinitely. Individual entries can't be deleted — that's deliberate, since this is the record of what admins did to other people's accounts. Whole age bands can be retired, no closer than 90 days.</span>
+        <span class="format-help">${canDeleteAudit
+          ? 'Audit entries are kept indefinitely. As the primary admin you can delete individual entries, and every deletion is itself recorded here — so a removal leaves a visible scar rather than a silent gap. Other admins cannot delete entries at all.'
+          : "Audit entries are kept indefinitely. Individual entries can't be deleted — that's deliberate, since this is the record of what admins did to other people's accounts. Whole age bands can be retired, no closer than 90 days."}</span>
         <button type="button" class="btn btn-ghost" id="auditPurgeOld">Retire entries older than 1 year</button>
       </div>
     `;
     wireAdminLogControls({
       searchId: 'auditSearchInput',
-      onSearch: v=>{ adminAuditSearch = v; adminAuditPage = 0; },
+      // Every one of these changes which rows are visible, so the selection
+      // is dropped with it -- see the comment on adminAuditSelected.
+      onSearch: v=>{ adminAuditSearch = v; adminAuditPage = 0; adminAuditSelected.clear(); },
       dropdowns: [
-        ['auditActionFilter', v=>{ adminAuditAction = v; adminAuditPage = 0; }],
-        ['auditRangeFilter',  v=>{ adminAuditRange  = v; adminAuditPage = 0; }],
-        ['auditSortOrder',    v=>{ adminAuditSort   = v; adminAuditPage = 0; }]
+        ['auditActionFilter', v=>{ adminAuditAction = v; adminAuditPage = 0; adminAuditSelected.clear(); }],
+        ['auditRangeFilter',  v=>{ adminAuditRange  = v; adminAuditPage = 0; adminAuditSelected.clear(); }],
+        ['auditSortOrder',    v=>{ adminAuditSort   = v; adminAuditPage = 0; adminAuditSelected.clear(); }]
       ],
       clearId: 'auditClearFilters',
-      onClear: ()=>{ adminAuditSearch=''; adminAuditAction='all'; adminAuditRange='all'; adminAuditPage=0; },
+      onClear: ()=>{ adminAuditSearch=''; adminAuditAction='all'; adminAuditRange='all'; adminAuditPage=0; adminAuditSelected.clear(); },
       prevId: 'auditPrevPage', nextId: 'auditNextPage',
-      onPage: delta=>{ adminAuditPage += delta; },
+      onPage: delta=>{ adminAuditPage += delta; adminAuditSelected.clear(); },
       rerender: renderAdminAuditLogView
     });
+    if(canDeleteAudit){
+      wireAdminLogSelection({
+        attr: 'select-audit', datasetKey: 'selectAudit',
+        selected: adminAuditSelected, pageIds,
+        selectAllId:'auditSelectAll', clearSelId:'auditClearSel', deleteId:'auditDeleteSelected',
+        rpc: 'admin_delete_action_log_entries',
+        confirmMessage: n=>`Permanently delete ${n} audit entr${n===1?'y':'ies'}? A record of this deletion (including which entries were removed) is written to this same log. This cannot be undone.`,
+        onDeleted: ()=>{ if(rows.length === pageIds.length && adminAuditPage > 0) adminAuditPage -= 1; },
+        rerender: renderAdminAuditLogView
+      });
+    }
     const auditPurge = document.getElementById('auditPurgeOld');
     if(auditPurge) auditPurge.onclick = ()=>{
       showConfirmDialog(
@@ -9724,6 +10413,10 @@ async function renderAdminErrorsView(){
       (profiles||[]).forEach(p=>{ emailByUserId[p.user_id] = p.email; });
     }
     const filtersActive = !!term || adminErrorsScope !== 'all' || adminErrorsRange !== 'all';
+    /* Unlike the audit log, this is open to every admin: client_errors is
+       diagnostic noise with no integrity value (migration 0062's reasoning),
+       so there is nothing here an admin could destroy evidence of. */
+    const pageIds = (rows || []).map(r=>r.id);
     sub.innerHTML = `
       <div class="admin-log-toolbar">
         <input type="search" id="errorsSearchInput" placeholder="Search message, URL, or stack…" value="${escapeHtml(adminErrorsSearch)}" aria-label="Search client errors">
@@ -9747,8 +10440,14 @@ async function renderAdminErrorsView(){
         ]})}
       </div>
       ${renderAdminLogSummary(count, adminErrorsPage, filtersActive, 'client error', 'errorsClearFilters')}
+      ${rows && rows.length ? renderAdminLogSelectBar({
+        selected: adminErrorsSelected, pageIds,
+        selectAllId:'errorsSelectAll', countId:'errorsSelCount',
+        clearSelId:'errorsClearSel', deleteId:'errorsDeleteSelected'
+      }) : ''}
       ${rows && rows.length ? rows.map(r=>`
         <div class="lib-row">
+          ${renderLogRowCheckbox('select-error', r.id, adminErrorsSelected)}
           <div class="lib-info">
             <div class="lib-title">${escapeHtml(r.message)}</div>
             <div class="lib-meta">${new Date(r.created_at).toLocaleString()} · ${escapeHtml(r.user_id ? (emailByUserId[r.user_id] || r.user_id) : 'signed out')} · ${escapeHtml(r.url || '')}</div>
@@ -9766,16 +10465,27 @@ async function renderAdminErrorsView(){
     `;
     wireAdminLogControls({
       searchId: 'errorsSearchInput',
-      onSearch: v=>{ adminErrorsSearch = v; adminErrorsPage = 0; },
+      // Selection dropped alongside any change to what's visible -- see the
+      // comment on adminErrorsSelected.
+      onSearch: v=>{ adminErrorsSearch = v; adminErrorsPage = 0; adminErrorsSelected.clear(); },
       dropdowns: [
-        ['errorsScopeFilter', v=>{ adminErrorsScope = v; adminErrorsPage = 0; }],
-        ['errorsRangeFilter', v=>{ adminErrorsRange = v; adminErrorsPage = 0; }],
-        ['errorsSortOrder',   v=>{ adminErrorsSort  = v; adminErrorsPage = 0; }]
+        ['errorsScopeFilter', v=>{ adminErrorsScope = v; adminErrorsPage = 0; adminErrorsSelected.clear(); }],
+        ['errorsRangeFilter', v=>{ adminErrorsRange = v; adminErrorsPage = 0; adminErrorsSelected.clear(); }],
+        ['errorsSortOrder',   v=>{ adminErrorsSort  = v; adminErrorsPage = 0; adminErrorsSelected.clear(); }]
       ],
       clearId: 'errorsClearFilters',
-      onClear: ()=>{ adminErrorsSearch=''; adminErrorsScope='all'; adminErrorsRange='all'; adminErrorsPage=0; },
+      onClear: ()=>{ adminErrorsSearch=''; adminErrorsScope='all'; adminErrorsRange='all'; adminErrorsPage=0; adminErrorsSelected.clear(); },
       prevId: 'errorsPrevPage', nextId: 'errorsNextPage',
-      onPage: delta=>{ adminErrorsPage += delta; },
+      onPage: delta=>{ adminErrorsPage += delta; adminErrorsSelected.clear(); },
+      rerender: renderAdminErrorsView
+    });
+    wireAdminLogSelection({
+      attr: 'select-error', datasetKey: 'selectError',
+      selected: adminErrorsSelected, pageIds,
+      selectAllId:'errorsSelectAll', clearSelId:'errorsClearSel', deleteId:'errorsDeleteSelected',
+      rpc: 'admin_delete_client_errors',
+      confirmMessage: n=>`Delete ${n} error entr${n===1?'y':'ies'}? This cannot be undone.`,
+      onDeleted: ()=>{ if(rows.length === pageIds.length && adminErrorsPage > 0) adminErrorsPage -= 1; },
       rerender: renderAdminErrorsView
     });
     /* Deletion goes through RPCs, not a client-side .delete(): client_errors
@@ -9871,9 +10581,10 @@ async function renderAdminFeedbackView(){
           <div class="lib-meta">${new Date(r.created_at).toLocaleString()} · ${escapeHtml(emailByUserId[r.user_id] || r.user_id)}${r.page ? ' · ' + escapeHtml(r.page) : ''}</div>
           ${r.admin_reply ? `<div class="lib-meta" style="margin-top:6px;color:var(--ink);"><strong>Replied</strong> ${new Date(r.replied_at).toLocaleString()}: <span style="white-space:pre-wrap;">${escapeHtml(r.admin_reply)}</span></div>` : ''}
           <div id="feedbackReplyBox_${r.id}" ${adminFeedbackReplyOpenFor===r.id ? '' : 'hidden'} style="margin-top:8px;">
-            <textarea id="feedbackReplyText_${r.id}" placeholder="Write a reply — sent by email from the site's address" style="min-height:80px;width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--line);box-sizing:border-box;font-family:system-ui,sans-serif;"></textarea>
+            <textarea id="feedbackReplyText_${r.id}" placeholder="Write a reply — shown to them in the app, and optionally emailed" style="min-height:80px;width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--line);box-sizing:border-box;font-family:system-ui,sans-serif;"></textarea>
             <div style="display:flex;gap:8px;margin-top:6px;">
-              <button class="btn btn-primary" data-send-reply="${r.id}">Send Reply</button>
+              <button class="btn btn-primary" data-reply-in-app="${r.id}">Reply in App</button>
+              <button class="btn btn-ghost" data-send-reply="${r.id}">Reply + Email</button>
               <button class="btn btn-ghost" data-cancel-reply="${r.id}">Cancel</button>
             </div>
             <div class="msg" id="feedbackReplyResult_${r.id}"></div>
@@ -9882,6 +10593,7 @@ async function renderAdminFeedbackView(){
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <button class="link-btn" data-toggle-resolved="${r.id}" data-new-resolved="${!r.resolved}">${r.resolved ? 'Mark Unresolved' : 'Mark Resolved'}</button>
           <button class="link-btn" data-open-reply="${r.id}">${r.admin_reply ? 'Reply Again' : 'Reply'}</button>
+          ${r.admin_reply ? `<span class="lib-badge" style="background:${r.reply_read_at ? 'var(--good-bg)' : 'var(--chip)'};color:${r.reply_read_at ? 'var(--good)' : 'var(--muted)'};">${r.reply_read_at ? 'Read ' + new Date(r.reply_read_at).toLocaleDateString() : 'Unread'}</span>` : ''}
         </div>
       </div>
     `;
@@ -9977,6 +10689,35 @@ function wireAdminFeedbackControls(rows, emailByUserId){
       renderAdminFeedbackView();
     };
   });
+  /* In-app reply. Deliberately the PRIMARY action: it writes the reply to
+     the row directly, so it cannot be lost to a mail failure. The email
+     path below only records admin_reply AFTER Resend accepts the send --
+     which is why two real replies (2026-08-20, 2026-08-21) were never
+     saved at all when the API key was rejected. */
+  sub.querySelectorAll('button[data-reply-in-app]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const id = btn.dataset.replyInApp;
+      const textEl = document.getElementById('feedbackReplyText_' + id);
+      const resultEl = document.getElementById('feedbackReplyResult_' + id);
+      const replyText = textEl.value.trim();
+      if(!replyText){ resultEl.className = 'msg err'; resultEl.textContent = 'Write a reply first.'; return; }
+      btn.disabled = true;
+      resultEl.className = 'msg';
+      resultEl.textContent = 'Saving…';
+      try{
+        const { error } = await supabaseClient.rpc('admin_reply_to_feedback_in_app', {
+          p_feedback_id: id, p_reply_text: replyText
+        });
+        if(error) throw error;
+        adminFeedbackReplyOpenFor = null;
+        await renderAdminView();
+      } catch(err){
+        resultEl.className = 'msg err';
+        resultEl.textContent = 'Could not save: ' + err.message;
+        btn.disabled = false;
+      }
+    };
+  });
   sub.querySelectorAll('button[data-send-reply]').forEach(btn=>{
     btn.onclick = async ()=>{
       const id = btn.dataset.sendReply;
@@ -9989,7 +10730,23 @@ function wireAdminFeedbackControls(rows, emailByUserId){
       resultEl.textContent = 'Sending…';
       try{
         const { data, error } = await supabaseClient.functions.invoke('send-feedback-reply', { body: { feedback_id: id, reply_text: replyText } });
-        if(error) throw error;
+        /* supabase-js turns any non-2xx into a FunctionsHttpError whose
+           .message is the generic "Edge Function returned a non-2xx status
+           code" -- the function's own { error: "..." } body is only
+           reachable through .context. Without this unwrap the admin sees a
+           meaningless failure for every cause alike.
+
+           This is not hypothetical: admin_action_log recorded two real
+           failed replies (2026-08-20 and 2026-08-21) whose stored detail
+           said "API key is invalid" -- a Resend credential problem that was
+           fully diagnosable server-side, while the admin on screen was told
+           only that something returned non-2xx. Same unwrap the AI chat
+           path at askAiFollowUp() already does. */
+        if(error){
+          let errBody = null;
+          try{ errBody = error.context ? await error.context.json() : null; }catch(e){}
+          throw new Error((errBody && errBody.error) ? errBody.error : error.message);
+        }
         if(data && data.error) throw new Error(data.error);
         adminFeedbackReplyOpenFor = null;
         await renderAdminView();
@@ -11367,6 +12124,137 @@ function filterAdminExams(exams){
    the only action is opening an attempt's read-only review, exactly as
    before. That was the original design's explicit rationale for being a
    separate function; the reskin changes how it looks, not what it can do. */
+/* The admin drilldown's Missed-questions list. Reuses renderMissedRowsHtml()
+   -- the same markup the student sees -- so what is revealed can't drift
+   between the two surfaces.
+
+   Deliberately WITHOUT "Study these as flashcards": that button builds a deck
+   into the signed-in account's own flashcard state, so on this screen it
+   would silently load another person's missed questions into the ADMIN's
+   deck. Exactly the class of bug the drilldown's header warns about. */
+function renderAdminMissedList(){
+  if(adminMissedLoading) return `<div class="format-help">Loading this account's missed questions…</div>`;
+  if(adminMissedError) return `<div class="msg err">Could not load missed questions: ${escapeHtml(adminMissedError)}</div>`;
+  if(!adminMissedRows) return '';
+  if(!adminMissedRows.length){
+    return `<div class="format-help">This account has no missed questions on any completed attempt.</div>`;
+  }
+  const examTitles = Array.from(new Set(adminMissedRows.map(r=>r.examTitle).filter(Boolean)))
+    .sort((a,b)=> a.localeCompare(b, undefined, {numeric:true}));
+  const rows = visibleAdminMissedRows();
+  const controls = `
+    <input type="search" id="adminMissedSearchInput" class="missed-search" placeholder="Search this account's missed questions…" value="${escapeHtml(adminMissedSearch)}" aria-label="Search missed questions">
+    <div class="progress-toolbar-controls" style="margin-bottom:14px;">
+      ${renderDropdown({ id:'adminMissedSort', ariaLabel:'Sort missed questions', selected: adminMissedSort, options:[
+        {value:'count_desc', label:'Sort: Most missed'},
+        {value:'recent', label:'Sort: Most recent'},
+        {value:'exam', label:'Sort: By exam'}
+      ]})}
+      ${examTitles.length > 1 ? renderDropdown({ id:'adminMissedExam', ariaLabel:'Filter by exam', selected: adminMissedExamFilter, options:[
+        {value:'all', label:'All exams'},
+        ...examTitles.map(t=>({value:t, label:t}))
+      ]}) : ''}
+    </div>
+    <div class="format-help">${rows.length} question${rows.length===1?'':'s'} missed${adminMissedExamFilter==='all' ? '' : ` in ${escapeHtml(adminMissedExamFilter)}`}${adminMissedSearch.trim() ? ` matching “${escapeHtml(adminMissedSearch.trim())}”` : ''}, deduplicated across every completed attempt.</div>
+  `;
+  if(!rows.length){
+    return controls + `<div class="format-help">No missed questions match that search. <button type="button" class="link-btn" id="adminMissedClearSearch">Clear search</button></div>`;
+  }
+  return controls + renderMissedRowsHtml(rows, adminMissedRevealed);
+}
+
+/* Mirrors the student's AI feedback block, minus follow-ups. The label is
+   explicit that this is about the student, not the admin -- the same text
+   under a different account's header is exactly the confusion this whole
+   drilldown is careful about. */
+function renderAdminAiFeedbackBlock(label){
+  if(!aiFeatureFlags.progress_feedback_enabled) return '';
+  let html = `<div class="admin-ai-feedback" style="margin:16px 0;">`;
+  if(adminAiFeedbackLoading){
+    html += aiThinkingHtml('Analyzing this account', 2);
+  } else if(adminAiFeedbackError){
+    html += `<div class="msg err">${escapeHtml(adminAiFeedbackError)}</div>`;
+  } else if(adminAiFeedback){
+    html += `<div class="review-explanation">${aiExplanationHtml(adminAiFeedback)}</div>`;
+  }
+  if(!adminAiFeedbackLoading){
+    html += `<button type="button" class="link-btn" id="adminAiFeedbackBtn">${icon('feedback')}${adminAiFeedback ? 'Refresh AI feedback' : 'Get AI feedback on this account'}</button>`;
+  }
+  html += `<div class="format-help" style="margin-top:6px;">Generated about ${escapeHtml(label)}'s progress. This is billed to your own AI allowance and is not saved to their account — they will not see it.</div>`;
+  html += `</div>`;
+  return html;
+}
+
+async function loadAdminAiFeedback(targetUserId, examsMap){
+  adminAiFeedbackLoading = true;
+  adminAiFeedbackError = null;
+  renderAdminExamsSection(examsMap);
+  try{
+    const { data, error } = await supabaseClient.functions.invoke('ai-progress-feedback', {
+      body: { target_user_id: targetUserId }
+    });
+    /* Same unwrap the feedback-reply path needed: supabase-js turns a
+       non-2xx into a generic "non-2xx status code" and only exposes the
+       function's own { error } through .context. */
+    if(error){
+      let errBody = null;
+      try{ errBody = error.context ? await error.context.json() : null; }catch(e){}
+      throw new Error((errBody && errBody.error) ? errBody.error : error.message);
+    }
+    if(data && data.error) throw new Error(data.error);
+    adminAiFeedback = data.feedback;
+  }catch(err){
+    adminAiFeedbackError = err.message || 'Could not generate feedback.';
+  }finally{
+    adminAiFeedbackLoading = false;
+    renderAdminExamsSection(examsMap);
+  }
+}
+
+function wireAdminAiFeedback(section, examsMap){
+  const btn = section.querySelector('#adminAiFeedbackBtn');
+  if(btn) btn.onclick = (ev)=>{
+    ev.stopPropagation();
+    loadAdminAiFeedback(adminDrilldownUserId, examsMap);
+  };
+}
+
+function wireAdminProgressTabs(section){
+  section.querySelectorAll('[data-admin-progress-tab]').forEach(btn=>{
+    btn.onclick = (ev)=>{
+      ev.stopPropagation();
+      adminProgressTab = btn.dataset.adminProgressTab;
+      renderAdminPanel();
+    };
+  });
+}
+
+function wireAdminMissedList(section){
+  const input = section.querySelector('#adminMissedSearchInput');
+  if(input){
+    input.oninput = (e)=>{
+      adminMissedSearch = e.target.value;
+      const caret = e.target.selectionStart;
+      renderAdminPanel();
+      const again = document.getElementById('adminMissedSearchInput');
+      if(again){ again.focus(); try{ again.setSelectionRange(caret, caret); }catch(err){} }
+    };
+  }
+  const clear = section.querySelector('#adminMissedClearSearch');
+  if(clear) clear.onclick = ()=>{ adminMissedSearch = ''; renderAdminPanel(); };
+  wireDropdown('adminMissedSort', (v)=>{ adminMissedSort = v; renderAdminPanel(); }, ()=>renderAdminPanel());
+  wireDropdown('adminMissedExam', (v)=>{ adminMissedExamFilter = v; renderAdminPanel(); }, ()=>renderAdminPanel());
+  section.querySelectorAll('button[data-missed-reveal]').forEach(btn=>{
+    btn.onclick = (ev)=>{
+      ev.stopPropagation();
+      const key = btn.dataset.missedReveal;
+      if(adminMissedRevealed.has(key)) adminMissedRevealed.delete(key);
+      else adminMissedRevealed.add(key);
+      renderAdminPanel();
+    };
+  });
+}
+
 function renderAdminExamsSection(examsMap){
   const section = document.getElementById('adminExamsSection');
   if(!section) return;
@@ -11384,14 +12272,53 @@ function renderAdminExamsSection(examsMap){
   const shownRounds = filtered.reduce((n,e)=>n+e.rounds.length, 0);
   const filtersActive = adminProgressFilterMastery !== 'all' || adminProgressFilterExam !== 'all' || adminProgressFilterRound !== 'all';
 
+  /* Same helper the student's own Progress header uses, so an admin and a
+     student looking at the same account read identical numbers. */
+  const metric = resolveScoreMetric(allExams, adminScoreMetric);
+
   let html = `
     <div class="progress-toolbar">
       <div class="stat-row">
         <div class="stat-pill">${icon('library')}<strong>${allExams.length}</strong><span class="stat-label">exam${allExams.length===1?'':'s'} started</span></div>
         <div class="stat-pill">${icon('check')}<strong>${masteredRounds} of ${totalRounds}</strong><span class="stat-label">round${totalRounds===1?'':'s'} mastered</span></div>
+        ${metric ? `<div class="stat-pill" title="${escapeHtml(metric.help)}">${icon('progress')}<strong>${metric.pct.toFixed(1)}%</strong><span class="stat-label">avg ${escapeHtml(metric.label)}</span></div>` : ''}
       </div>
+      ${allExams.length ? `<div class="score-metric-row">${renderDropdown({ id:'adminScoreMetric', ariaLabel:'Which score average to show', selected: adminScoreMetric, options: scoreMetricOptions(allExams) })}</div>` : ''}
     </div>
   `;
+  /* AI feedback about this account, when the site-wide flag allows it.
+     Placed under the stat pills, matching where the student's own block
+     sits on their Progress tab. */
+  html += renderAdminAiFeedbackBlock(adminProgressSubjectLabel || 'this account');
+
+  /* Rounds / Missed questions, mirroring the student's own tab switch. The
+     misses are read for the ACCOUNT BEING VIEWED, never the admin, and are
+     held in their own adminMissed* state -- see resetAdminMissedState(). */
+  if(allExams.length && studentFeatureFlags.missed_list_enabled){
+    html += `
+      <div class="progress-filters-row">
+        <div class="study-mode-switch view-mode-switch progress-tab-switch" role="group" aria-label="Progress section" style="margin-bottom:0;">
+          <button type="button" data-admin-progress-tab="rounds" class="${adminProgressTab==='rounds'?'active':''}">Rounds</button>
+          <button type="button" data-admin-progress-tab="missed" class="${adminProgressTab==='missed'?'active':''}">${window.innerWidth <= 900 ? 'Missed' : 'Missed questions'}</button>
+        </div>
+      </div>`;
+  }
+  if(adminProgressTab === 'missed' && allExams.length && studentFeatureFlags.missed_list_enabled){
+    html += renderAdminMissedList();
+    section.innerHTML = html;
+    wireAdminProgressTabs(section);
+    wireAdminAiFeedback(section, examsMap);
+    wireAdminMissedList(section);
+    if(!adminMissedRequested){
+      adminMissedRequested = true;
+      adminMissedLoading = true;
+      loadMissedQuestions(adminDrilldownUserId)
+        .then(rows=>{ adminMissedRows = rows; })
+        .catch(err=>{ adminMissedError = err.message; adminMissedRows = []; })
+        .finally(()=>{ adminMissedLoading = false; renderAdminExamsSection(examsMap); });
+    }
+    return;
+  }
   if(allExams.length){
     html += `<div class="progress-filters-row">
       ${renderDropdown({ id:'adminProgressFilterMastery', ariaLabel:'Filter by mastery', selected: adminProgressFilterMastery, options:[
@@ -11433,7 +12360,7 @@ function renderAdminExamsSection(examsMap){
           return `
             <div class="admin-attempt-row">
               <button class="link-btn" data-review-attempt="${a.id}" data-review-label="${escapeHtml(label)}">Attempt ${a.attempt_number} — ${a.correct_count}/${a.total_questions} (${pct}%)${a.status==='in_progress' ? ' · in progress' : ''}</button>
-              <button class="link-btn admin-attempt-delete" data-delete-attempt="${a.id}" data-attempt-number="${a.attempt_number}" data-round-label="${escapeHtml(ex.examTitle + ' — Round ' + r.round_number)}" data-round-attempts="${r.attempts.length}" aria-label="Delete attempt ${a.attempt_number}">Delete</button>
+              <button class="link-btn admin-attempt-delete" data-delete-attempt="${a.id}" data-attempt-number="${a.attempt_number}" data-round-label="${escapeHtml(ex.examTitle + ' — Round ' + r.round_number)}" data-round-attempts="${r.attempts.length}" data-later-attempts="${r.attempts.filter(x=>x.attempt_number > a.attempt_number).length}" aria-label="Delete attempt ${a.attempt_number}">Delete</button>
             </div>`;
         }).join('');
         if(!r.attempts.length) attemptsHtml = `<div class="lib-meta" style="margin-top:4px;">No attempts recorded.</div>`;
@@ -11459,6 +12386,13 @@ function renderAdminExamsSection(examsMap){
   });
   html += gridHtml ? `<div class="round-grid">${gridHtml}</div>` : (allExams.length ? '' : `<div class="format-help">No online attempts for this account.</div>`);
   section.innerHTML = html;
+
+  // The Rounds/Missed switch is rendered on BOTH paths, so it has to be
+  // wired on both -- wiring it only in the missed branch left the button
+  // inert on the rounds view, which is the only place you can click it from.
+  wireAdminProgressTabs(section);
+  wireAdminAiFeedback(section, examsMap);
+  wireDropdown('adminScoreMetric', (v)=>{ adminScoreMetric = v; renderAdminExamsSection(examsMap); }, ()=>renderAdminExamsSection(examsMap));
 
   wireDropdown('adminProgressFilterMastery', (v)=>{ adminProgressFilterMastery = v; adminExpandedRoundId = null; renderAdminExamsSection(examsMap); }, ()=>renderAdminExamsSection(examsMap));
   wireDropdown('adminProgressFilterExam',    (v)=>{ adminProgressFilterExam = v;    adminExpandedRoundId = null; renderAdminExamsSection(examsMap); }, ()=>renderAdminExamsSection(examsMap));
@@ -11514,10 +12448,18 @@ function renderAdminExamsSection(examsMap){
       const num = btn.dataset.attemptNumber;
       const roundLabel = btn.dataset.roundLabel;
       const isLastAttempt = Number(btn.dataset.roundAttempts) === 1;
-      /* Say plainly when the round goes with it. The server deletes a round
-         that has no attempts left, so a confirm that only mentioned the
-         attempt would understate what is about to happen. */
-      const warning = isLastAttempt
+      const laterCount = Number(btn.dataset.laterAttempts) || 0;
+      /* Say plainly what else goes with it. Two separate consequences, and a
+         confirm naming only the clicked attempt would understate both:
+           - every LATER attempt in the round goes too (migration 0070: a
+             missed-only retake references the attempt it was built from, so
+             the tail cannot outlive its parent), and
+           - the round itself is removed once nothing is left in it.
+         Counted from the attempt list already in hand -- no round-trip just
+         to phrase the question. */
+      const warning = laterCount > 0
+        ? `Delete Attempt ${num} on ${roundLabel}?\n\nThis will ALSO delete the ${laterCount} later attempt${laterCount===1?'':'s'} in this round, because each missed-question retake is built from the attempt before it. ${laterCount + 1} attempts will be removed in total.\n\nThis can't be undone.`
+        : isLastAttempt
         ? `Delete Attempt ${num} on ${roundLabel}?\n\nThis is the round's only attempt, so the round will be removed as well. This can't be undone.`
         : `Delete Attempt ${num} on ${roundLabel}? This can't be undone.`;
       showConfirmDialog(warning, async ()=>{
@@ -11533,9 +12475,12 @@ function renderAdminExamsSection(examsMap){
           if(panel){
             const note = document.createElement('div');
             note.className = 'msg ok';
+            // Report what the SERVER says it removed, not what we predicted.
+            const nGone = (data && Number(data.deleted_count)) || 1;
+            const what = nGone === 1 ? `Attempt ${num}` : `${nGone} attempts (${num} onward)`;
             note.textContent = (data && data.round_deleted)
-              ? `Attempt ${num} deleted, and the round was removed with it.`
-              : `Attempt ${num} deleted.`;
+              ? `${what} deleted, and the round was removed with it.`
+              : `${what} deleted.`;
             panel.insertBefore(note, panel.firstChild ? panel.firstChild.nextSibling : null);
           }
         }catch(err){
@@ -11596,18 +12541,33 @@ async function renderAdminUserProgress(targetUserId){
     document.getElementById('backToAdminBtn').onclick = ()=>{ adminDrilldownUserId = null; renderAdminPanel(); };
     // Fresh per account visit -- an admin switching between accounts
     // shouldn't land with exams already expanded just because the last
-    // account they looked at was left that way.
-    adminExamCollapsed = {};
+    // account they looked at was left that way. Guarded for the same reason
+    // as the filters below: re-rendering the same account must not collapse
+    // everything the admin just opened.
+    if(adminProgressStateForUserId !== targetUserId) adminExamCollapsed = {};
     // Reset the drilldown's own filters and expansion per account visit, for
     // the same reason the collapse map is reset: an admin who filtered one
     // student's rounds to "Not mastered" and then opened a different account
     // would otherwise see a filtered view of someone else, with the reason
     // parked in a dropdown they'd have to notice -- which reads as "this
     // student has barely done anything".
-    adminProgressFilterMastery = 'all';
-    adminProgressFilterExam = 'all';
-    adminProgressFilterRound = 'all';
-    adminExpandedRoundId = null;
+    /* Only when the account actually changed -- see
+       adminProgressStateForUserId. An admin who filtered one student's
+       rounds to "Not mastered" and then opened a different account would
+       otherwise see a filtered view of someone else, with the reason parked
+       in a dropdown they'd have to notice; but re-rendering the SAME
+       account must preserve where they were. */
+    if(adminProgressStateForUserId !== targetUserId){
+      adminProgressStateForUserId = targetUserId;
+      adminProgressSubjectLabel = label;
+      adminProgressFilterMastery = 'all';
+      adminProgressFilterExam = 'all';
+      adminProgressFilterRound = 'all';
+      adminExpandedRoundId = null;
+      // A previous student's misses must never render under a different
+      // student's header.
+      resetAdminMissedState();
+    }
     renderAdminExamsSection(examsMap);
   } catch(err){
     if(myToken !== adminUserProgressRequestToken) return; // superseded -- don't clobber newer data with a stale error either
