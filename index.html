@@ -1260,6 +1260,12 @@ if('serviceWorker' in navigator){
     margin-left:auto;max-width:85%;width:fit-content;
   }
   .progress-followup-a{margin:0 0 4px;}
+  /* Admin drilldown: one attempt per row, its Delete pushed to the far end
+     so the destructive control is never adjacent to the one that just opens
+     a read-only review. */
+  .admin-attempt-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:4px;}
+  .admin-attempt-row .link-btn{text-align:left;}
+  .admin-attempt-delete{color:var(--bad);flex:0 0 auto;}
   .progress-filters-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:12px;}
   /* The tab switch is sized identically to the dropdowns beside it so the
      row reads as one set of equal controls rather than a pill plus some
@@ -11375,7 +11381,15 @@ function renderAdminExamsSection(examsMap){
         attemptsHtml = r.attempts.map(a=>{
           const pct = a.total_questions ? ((a.correct_count/a.total_questions)*100).toFixed(1) : '0.0';
           const label = `${ex.examTitle} — Round ${r.round_number}, Attempt ${a.attempt_number}`;
-          return `<button class="link-btn" style="display:block;margin-top:4px;" data-review-attempt="${a.id}" data-review-label="${escapeHtml(label)}">Attempt ${a.attempt_number} — ${a.correct_count}/${a.total_questions} (${pct}%)${a.status==='in_progress' ? ' · in progress' : ''}</button>`;
+          /* Delete sits beside the attempt, never alone on the card, so it
+             can't be mistaken for "delete this round". It is the one
+             destructive control in this view -- everything else here is
+             read-only oversight (see this function's header). */
+          return `
+            <div class="admin-attempt-row">
+              <button class="link-btn" data-review-attempt="${a.id}" data-review-label="${escapeHtml(label)}">Attempt ${a.attempt_number} — ${a.correct_count}/${a.total_questions} (${pct}%)${a.status==='in_progress' ? ' · in progress' : ''}</button>
+              <button class="link-btn admin-attempt-delete" data-delete-attempt="${a.id}" data-attempt-number="${a.attempt_number}" data-round-label="${escapeHtml(ex.examTitle + ' — Round ' + r.round_number)}" data-round-attempts="${r.attempts.length}" aria-label="Delete attempt ${a.attempt_number}">Delete</button>
+            </div>`;
         }).join('');
         if(!r.attempts.length) attemptsHtml = `<div class="lib-meta" style="margin-top:4px;">No attempts recorded.</div>`;
       }
@@ -11422,6 +11436,43 @@ function renderAdminExamsSection(examsMap){
       adminReviewFilter = 'missed';
       adminReviewAttempt = { id: btn.dataset.reviewAttempt, label: btn.dataset.reviewLabel };
       renderAdminPanel();
+    };
+  });
+  section.querySelectorAll('button[data-delete-attempt]').forEach(btn=>{
+    btn.onclick = (ev)=>{
+      ev.stopPropagation();
+      const id = btn.dataset.deleteAttempt;
+      const num = btn.dataset.attemptNumber;
+      const roundLabel = btn.dataset.roundLabel;
+      const isLastAttempt = Number(btn.dataset.roundAttempts) === 1;
+      /* Say plainly when the round goes with it. The server deletes a round
+         that has no attempts left, so a confirm that only mentioned the
+         attempt would understate what is about to happen. */
+      const warning = isLastAttempt
+        ? `Delete Attempt ${num} on ${roundLabel}?\n\nThis is the round's only attempt, so the round will be removed as well. This can't be undone.`
+        : `Delete Attempt ${num} on ${roundLabel}? This can't be undone.`;
+      showConfirmDialog(warning, async ()=>{
+        try{
+          const { data, error } = await supabaseClient.rpc('admin_delete_exam_attempt', { p_attempt_id: id });
+          if(error) throw error;
+          adminExpandedRoundId = null;
+          // Refetch rather than splice the local copy: the server may also
+          // have deleted the round, recomputed its funnel, or un-abandoned
+          // the previous round, and none of that is knowable client-side.
+          await renderAdminUserProgress(adminDrilldownUserId);
+          const panel = document.getElementById('adminPanel');
+          if(panel){
+            const note = document.createElement('div');
+            note.className = 'msg ok';
+            note.textContent = (data && data.round_deleted)
+              ? `Attempt ${num} deleted, and the round was removed with it.`
+              : `Attempt ${num} deleted.`;
+            panel.insertBefore(note, panel.firstChild ? panel.firstChild.nextSibling : null);
+          }
+        }catch(err){
+          alert('Could not delete attempt: ' + (err.message || err));
+        }
+      }, 'Delete', true);
     };
   });
 }
