@@ -8488,6 +8488,7 @@ function renderProgressPanel(){
             <div class="round-card-actions">
               ${canContinue ? `<button class="btn btn-ghost" data-continue-round="${r.id}">Continue</button>` : ''}
               <button class="link-btn" data-round-toggle="${r.id}">${expanded ? 'Hide' : 'Show'} attempts</button>
+              ${r.attempts.length === 0 ? `<button class="link-btn admin-attempt-delete" data-delete-empty-round="${r.id}">Delete round</button>` : ''}
             </div>
             ${expanded ? renderRoundAttemptsHtml(r) : ''}
           </div>
@@ -8503,6 +8504,7 @@ function renderProgressPanel(){
               </div>
               <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                 ${canContinue ? `<button class="btn btn-ghost" data-continue-round="${r.id}" style="padding:4px 10px;font-size:.8rem;">Continue (Missed Only)</button>` : ''}
+                ${r.attempts.length === 0 ? `<button class="link-btn admin-attempt-delete" data-delete-empty-round="${r.id}" style="font-size:.8rem;">Delete round</button>` : ''}
                 <span class="link-btn">${expanded ? 'Hide' : 'Show'} attempts</span>
               </div>
             </div>
@@ -8552,6 +8554,49 @@ function renderProgressPanel(){
     el.onclick = async (ev)=>{
       ev.stopPropagation();
       await openAttemptReview(el.dataset.reviewAttempt, el.dataset.examKey);
+    };
+  });
+  /* A round with zero attempts previously had no deletion path at all: the
+     per-attempt delete has nothing to act on, so it sat on Progress
+     permanently. 14 of 108 rounds were in that state (all 'abandoned' with
+     an untouched funnel) -- leftovers from a session dropped between
+     beginOnlineAttempt() creating the round and creating its first attempt.
+     A round WITH attempts is still removed by deleting those one at a time,
+     so this never becomes a shortcut for wiping real history. */
+  progressPanel.querySelectorAll('[data-delete-empty-round]').forEach(el=>{
+    el.onclick = async (ev)=>{
+      ev.stopPropagation();   // stacked mode wraps the whole row in the expand toggle
+      const roundId = el.dataset.deleteEmptyRound;
+      const round = (progressData.exams || []).flatMap(x=>x.rounds).find(x=>x.id===roundId);
+      if(!round) return;
+      showConfirmDialog(
+        `Delete Round ${round.round_number} of "${round.exam_title}"? It has no recorded attempts. This can't be undone.`,
+        async ()=>{
+          const msg = document.getElementById('progressMsg');
+          try{
+            /* Mirrors deleteAttemptFromProgress()'s own un-abandon step: this
+               round's existence may be the only reason the one before it was
+               marked abandoned, so with it gone the previous round is current
+               again. Checked BEFORE the delete, while the row still exists. */
+            // progressData rounds are the raw exam_rounds row spread with
+            // their attempts, so exam_key / exam_title are present as-is.
+            const examKey = round.exam_key;
+            const latestBefore = await onlineStore.findLatestRound(examKey);
+            const wasLatestRound = latestBefore && latestBefore.id === round.id;
+            await onlineStore.deleteRound(round.id);
+            if(wasLatestRound && round.round_number > 1){
+              const prev = await onlineStore.findRoundByNumber(examKey, round.round_number - 1);
+              if(prev && prev.status === 'abandoned'){
+                await onlineStore.updateRound(prev.id, prev.funnel_missed_count, false, null);
+              }
+            }
+            await renderProgressView();
+            const fresh = document.getElementById('progressMsg');
+            if(fresh){ fresh.textContent = `Round ${round.round_number} deleted.`; fresh.className = 'msg ok'; }
+          }catch(err){
+            if(msg){ msg.textContent = 'Could not delete: ' + err.message; msg.className = 'msg err'; }
+          }
+        }, 'Delete', true);
     };
   });
   progressPanel.querySelectorAll('[data-continue-round]').forEach(el=>{
@@ -11405,6 +11450,7 @@ function renderAdminExamsSection(examsMap){
           <div class="round-card-meta">${masteredSoFar} of ${r.original_total} mastered${r.status!=='mastered' ? ` · ${r.original_total - masteredSoFar} left` : ''} · ${r.attempts.length} attempt(s)</div>
           <div class="round-card-actions">
             <button class="link-btn" data-admin-round-toggle="${escapeHtml(r.id)}">${expanded ? 'Hide' : 'Show'} attempts</button>
+            ${r.attempts.length === 0 ? `<button class="link-btn admin-attempt-delete" data-delete-empty-round="${escapeHtml(r.id)}" data-round-label="${escapeHtml(ex.examTitle + ' — Round ' + r.round_number)}">Delete round</button>` : ''}
           </div>
           ${attemptsHtml}
         </div>
@@ -11436,6 +11482,29 @@ function renderAdminExamsSection(examsMap){
       adminReviewFilter = 'missed';
       adminReviewAttempt = { id: btn.dataset.reviewAttempt, label: btn.dataset.reviewLabel };
       renderAdminPanel();
+    };
+  });
+  /* Only offered on a round with zero attempts. A round WITH attempts is
+     removed by deleting them one at a time (which recomputes funnel state as
+     it goes and drops the round with the last one) -- the server refuses a
+     one-click wipe of a round that still has history, and the button isn't
+     rendered for that case either. */
+  section.querySelectorAll('button[data-delete-empty-round]').forEach(btn=>{
+    btn.onclick = (ev)=>{
+      ev.stopPropagation();
+      const id = btn.dataset.deleteEmptyRound;
+      showConfirmDialog(
+        `Delete ${btn.dataset.roundLabel}? It has no recorded attempts. This can't be undone.`,
+        async ()=>{
+          try{
+            const { error } = await supabaseClient.rpc('admin_delete_empty_exam_round', { p_round_id: id });
+            if(error) throw error;
+            adminExpandedRoundId = null;
+            await renderAdminUserProgress(adminDrilldownUserId);
+          }catch(err){
+            alert('Could not delete round: ' + (err.message || err));
+          }
+        }, 'Delete', true);
     };
   });
   section.querySelectorAll('button[data-delete-attempt]').forEach(btn=>{
