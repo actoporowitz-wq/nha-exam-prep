@@ -11060,49 +11060,154 @@ async function renderAdminAiUsageSection(targetUserId){
    the data doesn't change just because an admin expanded a different
    exam's history. */
 let adminExamCollapsed = {};
+/* Admin "View Progress" drilldown state. Deliberately SEPARATE variables
+   from the student Progress tab's own progressFilter... and
+   progressExpandedRoundId, rather than shared: an admin flicking through
+   several accounts, then
+   returning to their own Progress tab, should not find their personal view
+   silently filtered by whatever they last looked at on someone else's. */
+let adminProgressFilterMastery = 'all';
+let adminProgressFilterExam = 'all';
+let adminProgressFilterRound = 'all';
+let adminExpandedRoundId = null;
+
+/* Same filtering rules as the student tab's filterProgressExams(): mastery
+   keyed off the round's own cumulative status (never recomputed from a
+   percentage, so it can't disagree with the badge on the same card),
+   'not_mastered' deliberately keeps abandoned rounds, and the source array
+   is never mutated. */
+function filterAdminExams(exams){
+  if(adminProgressFilterMastery === 'all' && adminProgressFilterExam === 'all' && adminProgressFilterRound === 'all') return exams;
+  return exams
+    .filter(ex => adminProgressFilterExam === 'all' || ex.examTitle === adminProgressFilterExam)
+    .map(ex => ({
+      ...ex,
+      rounds: ex.rounds.filter(r => {
+        if(adminProgressFilterMastery === 'mastered' && r.status !== 'mastered') return false;
+        if(adminProgressFilterMastery === 'not_mastered' && r.status === 'mastered') return false;
+        if(adminProgressFilterRound !== 'all' && String(r.round_number) !== adminProgressFilterRound) return false;
+        return true;
+      })
+    }))
+    .filter(ex => ex.rounds.length > 0);
+}
+
+/* Reskinned to match the student Progress tab: stat pills, the same
+   filter row, and the same .round-card / renderProgressRing() grid, per
+   direct user request ("the same info that each user sees in their own
+   progress tab ... i want it to look more or less the same").
+
+   What is deliberately NOT carried over, and must not be: Continue,
+   Delete, Export/Import, the Resume banner, the Missed-questions tab and
+   the AI-feedback block. Those are all wired against currentUser.id and
+   would either mutate another person's account or show the admin their own
+   data under someone else's name. This view stays read-only oversight --
+   the only action is opening an attempt's read-only review, exactly as
+   before. That was the original design's explicit rationale for being a
+   separate function; the reskin changes how it looks, not what it can do. */
 function renderAdminExamsSection(examsMap){
   const section = document.getElementById('adminExamsSection');
   if(!section) return;
-  section.innerHTML = Object.entries(examsMap).map(([examKey, ex])=>{
-    const isCollapsed = adminExamCollapsed[examKey] !== false;
-    let inner = '';
-    if(!isCollapsed){
-      ex.rounds.forEach(r=>{
-        const masteredSoFar = r.original_total - r.funnel_missed_count;
-        const masteredPct = r.original_total ? ((masteredSoFar / r.original_total) * 100).toFixed(1) : '0.0';
-        inner += `
-          <div class="lib-row">
-            <div class="lib-info">
-              <div class="lib-title">Round ${r.round_number} ${r.status==='mastered' ? '<span class="lib-badge verified">Mastered</span>' : r.status==='abandoned' ? '<span class="lib-meta">(abandoned)</span>' : ''}</div>
-              <div class="lib-meta">${masteredPct}% — ${masteredSoFar} of ${r.original_total} mastered so far · ${r.attempts.length} attempt(s)</div>
-            </div>
-          </div>
-        `;
-        r.attempts.forEach(a=>{
-          const pct = a.total_questions ? ((a.correct_count/a.total_questions)*100).toFixed(1) : '0.0';
-          const attemptLabel = `${ex.examTitle} — Round ${r.round_number}, Attempt ${a.attempt_number}`;
-          inner += `<button class="link-btn" style="display:block;padding-left:14px;margin-top:2px;" data-review-attempt="${a.id}" data-review-label="${escapeHtml(attemptLabel)}">Attempt ${a.attempt_number} — ${a.correct_count}/${a.total_questions} (${pct}%)${a.status==='in_progress' ? ' · in progress' : ''}</button>`;
-        });
-      });
-    }
-    return `
-      <div class="subsection">
-        <button type="button" class="link-btn collapse-toggle-btn" data-exam-toggle="${escapeHtml(examKey)}" aria-expanded="${!isCollapsed}" style="font-size:1.05em;">
-          ${icon('chevronDown')}<strong>${escapeHtml(ex.examTitle)}</strong>
-        </button>
-        ${inner}
+
+  const allExams = Object.entries(examsMap).map(([examKey, ex])=>({ examKey, examTitle: ex.examTitle, rounds: ex.rounds }));
+  // Option lists come from the UNFILTERED set, so picking one exam can't
+  // strip every other exam out of the dropdown and strand the admin with no
+  // route back to "All".
+  const allExamTitles = [...new Set(allExams.map(e=>e.examTitle))].sort((a,b)=>a.localeCompare(b));
+  const allRoundNumbers = [...new Set(allExams.flatMap(e=>e.rounds.map(r=>r.round_number)))].sort((a,b)=>a-b);
+  const totalRounds = allExams.reduce((n,e)=>n+e.rounds.length, 0);
+  const masteredRounds = allExams.reduce((n,e)=>n+e.rounds.filter(r=>r.status==='mastered').length, 0);
+
+  const filtered = filterAdminExams(allExams);
+  const shownRounds = filtered.reduce((n,e)=>n+e.rounds.length, 0);
+  const filtersActive = adminProgressFilterMastery !== 'all' || adminProgressFilterExam !== 'all' || adminProgressFilterRound !== 'all';
+
+  let html = `
+    <div class="progress-toolbar">
+      <div class="stat-row">
+        <div class="stat-pill">${icon('library')}<strong>${allExams.length}</strong><span class="stat-label">exam${allExams.length===1?'':'s'} started</span></div>
+        <div class="stat-pill">${icon('check')}<strong>${masteredRounds} of ${totalRounds}</strong><span class="stat-label">round${totalRounds===1?'':'s'} mastered</span></div>
       </div>
-    `;
-  }).join('');
-  section.querySelectorAll('button[data-exam-toggle]').forEach(btn=>{
-    btn.onclick = ()=>{
-      const key = btn.dataset.examToggle;
-      adminExamCollapsed[key] = adminExamCollapsed[key] === false ? true : false;
+    </div>
+  `;
+  if(allExams.length){
+    html += `<div class="progress-filters-row">
+      ${renderDropdown({ id:'adminProgressFilterMastery', ariaLabel:'Filter by mastery', selected: adminProgressFilterMastery, options:[
+        {value:'all', label:'Any status'},
+        {value:'mastered', label:'Mastered only'},
+        {value:'not_mastered', label:'Not mastered'}
+      ]})}
+      ${allExamTitles.length > 1 ? renderDropdown({ id:'adminProgressFilterExam', ariaLabel:'Filter by exam', selected: adminProgressFilterExam, options:[
+        {value:'all', label:'All exams'},
+        ...allExamTitles.map(t=>({value:t, label:t}))
+      ]}) : ''}
+      ${allRoundNumbers.length > 1 ? renderDropdown({ id:'adminProgressFilterRound', ariaLabel:'Filter by round', selected: adminProgressFilterRound, options:[
+        {value:'all', label:'All rounds'},
+        ...allRoundNumbers.map(n=>({value:String(n), label:`Round ${n}`}))
+      ]}) : ''}
+    </div>`;
+  }
+  if(filtersActive && allExams.length){
+    html += shownRounds
+      ? `<div class="format-help" style="margin-bottom:10px;">Showing ${shownRounds} of ${totalRounds} round${totalRounds===1?'':'s'}. <button type="button" class="link-btn" id="adminClearProgressFilters">Clear filters</button></div>`
+      : `<div class="format-help" style="margin-bottom:10px;">No rounds match these filters. <button type="button" class="link-btn" id="adminClearProgressFilters">Clear filters</button></div>`;
+  }
+
+  let gridHtml = '';
+  filtered.forEach(ex=>{
+    ex.rounds.forEach(r=>{
+      const masteredSoFar = r.original_total - r.funnel_missed_count;
+      const pctNum = r.original_total ? (masteredSoFar / r.original_total) * 100 : 0;
+      const expanded = adminExpandedRoundId === r.id;
+      let attemptsHtml = '';
+      if(expanded){
+        attemptsHtml = r.attempts.map(a=>{
+          const pct = a.total_questions ? ((a.correct_count/a.total_questions)*100).toFixed(1) : '0.0';
+          const label = `${ex.examTitle} — Round ${r.round_number}, Attempt ${a.attempt_number}`;
+          return `<button class="link-btn" style="display:block;margin-top:4px;" data-review-attempt="${a.id}" data-review-label="${escapeHtml(label)}">Attempt ${a.attempt_number} — ${a.correct_count}/${a.total_questions} (${pct}%)${a.status==='in_progress' ? ' · in progress' : ''}</button>`;
+        }).join('');
+        if(!r.attempts.length) attemptsHtml = `<div class="lib-meta" style="margin-top:4px;">No attempts recorded.</div>`;
+      }
+      gridHtml += `
+        <div class="round-card ${r.status==='mastered'?'mastered':''} ${r.status==='abandoned'?'abandoned':''}">
+          <div class="round-card-top" data-admin-round-toggle="${escapeHtml(r.id)}">
+            <div>
+              <div class="round-card-name">${escapeHtml(ex.examTitle)} — Round ${r.round_number}</div>
+              <div class="round-card-tag">${r.status==='mastered'?'Mastered':r.status==='abandoned'?'Abandoned':'In progress'}</div>
+            </div>
+            ${renderProgressRing(pctNum, r.status==='mastered')}
+          </div>
+          <div class="round-card-meta">${masteredSoFar} of ${r.original_total} mastered${r.status!=='mastered' ? ` · ${r.original_total - masteredSoFar} left` : ''} · ${r.attempts.length} attempt(s)</div>
+          <div class="round-card-actions">
+            <button class="link-btn" data-admin-round-toggle="${escapeHtml(r.id)}">${expanded ? 'Hide' : 'Show'} attempts</button>
+          </div>
+          ${attemptsHtml}
+        </div>
+      `;
+    });
+  });
+  html += gridHtml ? `<div class="round-grid">${gridHtml}</div>` : (allExams.length ? '' : `<div class="format-help">No online attempts for this account.</div>`);
+  section.innerHTML = html;
+
+  wireDropdown('adminProgressFilterMastery', (v)=>{ adminProgressFilterMastery = v; adminExpandedRoundId = null; renderAdminExamsSection(examsMap); }, ()=>renderAdminExamsSection(examsMap));
+  wireDropdown('adminProgressFilterExam',    (v)=>{ adminProgressFilterExam = v;    adminExpandedRoundId = null; renderAdminExamsSection(examsMap); }, ()=>renderAdminExamsSection(examsMap));
+  wireDropdown('adminProgressFilterRound',   (v)=>{ adminProgressFilterRound = v;   adminExpandedRoundId = null; renderAdminExamsSection(examsMap); }, ()=>renderAdminExamsSection(examsMap));
+  const clearBtn = document.getElementById('adminClearProgressFilters');
+  if(clearBtn) clearBtn.onclick = ()=>{
+    adminProgressFilterMastery = 'all'; adminProgressFilterExam = 'all'; adminProgressFilterRound = 'all';
+    adminExpandedRoundId = null; renderAdminExamsSection(examsMap);
+  };
+  section.querySelectorAll('[data-admin-round-toggle]').forEach(el=>{
+    el.onclick = (ev)=>{
+      ev.stopPropagation();
+      const id = el.dataset.adminRoundToggle;
+      adminExpandedRoundId = (adminExpandedRoundId === id) ? null : id;
       renderAdminExamsSection(examsMap);
     };
   });
   section.querySelectorAll('button[data-review-attempt]').forEach(btn=>{
-    btn.onclick = ()=>{
+    btn.onclick = (ev)=>{
+      ev.stopPropagation();
       adminReviewFilter = 'missed';
       adminReviewAttempt = { id: btn.dataset.reviewAttempt, label: btn.dataset.reviewLabel };
       renderAdminPanel();
@@ -11162,6 +11267,16 @@ async function renderAdminUserProgress(targetUserId){
     // shouldn't land with exams already expanded just because the last
     // account they looked at was left that way.
     adminExamCollapsed = {};
+    // Reset the drilldown's own filters and expansion per account visit, for
+    // the same reason the collapse map is reset: an admin who filtered one
+    // student's rounds to "Not mastered" and then opened a different account
+    // would otherwise see a filtered view of someone else, with the reason
+    // parked in a dropdown they'd have to notice -- which reads as "this
+    // student has barely done anything".
+    adminProgressFilterMastery = 'all';
+    adminProgressFilterExam = 'all';
+    adminProgressFilterRound = 'all';
+    adminExpandedRoundId = null;
     renderAdminExamsSection(examsMap);
   } catch(err){
     if(myToken !== adminUserProgressRequestToken) return; // superseded -- don't clobber newer data with a stale error either
