@@ -966,6 +966,44 @@ if('serviceWorker' in navigator){
   .loading-dots span:nth-child(3){animation-delay:.4s;}
   @keyframes loadingDotPulse{0%,80%,100%{opacity:.25;}40%{opacity:1;}}
   @media (prefers-reduced-motion: reduce){ .loading-dots span{animation:none;opacity:1;} }
+
+  /* ===== AI thinking / reveal =====
+     The AI calls are plain request/response (no token streaming), so every
+     surface had a dead pause of a few real seconds where nothing moved.
+     Three of the four showed a static <em> during it, which is exactly when
+     a wait starts reading as a hang.
+
+     Deliberately NOT token streaming: that would mean reworking every AI
+     edge function to stream, for a nicer wait. This is the cheap 90% --
+     shimmer lines shaped like the answer that is coming, then a short
+     reveal when it lands.
+
+     Reuses .skel's gradient and keyframes rather than inventing a second
+     shimmer, so the AI wait and the Progress-panel skeleton read as the
+     same system. The width taper mimics a real paragraph's ragged last
+     line instead of three identical bars. */
+  .ai-thinking{display:flex;flex-direction:column;gap:8px;padding:2px 0 4px;margin-bottom:12px;}
+  .ai-thinking-label{font-family:system-ui,sans-serif;font-size:.84rem;color:var(--muted);display:flex;align-items:center;gap:6px;}
+  .ai-thinking-line{height:11px;border-radius:4px;}
+  .ai-thinking-line:nth-child(2){width:96%;}
+  .ai-thinking-line:nth-child(3){width:88%;}
+  .ai-thinking-line:nth-child(4){width:62%;}
+  /* Stagger so the lines don't pulse in lockstep, which reads mechanical. */
+  .ai-thinking-line:nth-child(3){animation-delay:.18s;}
+  .ai-thinking-line:nth-child(4){animation-delay:.36s;}
+
+  @keyframes aiReveal{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
+  /* Applied to AI text the moment it replaces the shimmer. Short and small
+     -- a 4px rise, not a slide -- because this fires on content someone is
+     about to read, and anything longer delays them for decoration. */
+  .ai-reveal{animation:aiReveal .28s ease-out both;}
+
+  @media (prefers-reduced-motion: reduce){
+    /* .skel's own rule already stops the shimmer; these stop the rest, so
+       the whole feature degrades to plain static text and instant swaps. */
+    .ai-thinking-line{animation:none;}
+    .ai-reveal{animation:none;}
+  }
   .review-explain-row{margin-top:6px;}
   .review-explain-row .ai-explain-btn{margin-top:6px;}
   .review-explain-row .ai-chat-open-btn{margin-top:6px;margin-left:14px;}
@@ -1205,6 +1243,23 @@ if('serviceWorker' in navigator){
      without it a .dd cannot shrink below its label's content width and a
      long label claims a whole line, producing a ragged wrap. The trigger's
      inner span already ellipsizes, so a narrow box degrades cleanly. */
+  /* Follow-up thread under progress feedback. Reuses .ai-chat-input-bar and
+     .ai-chat-send-btn from review chat so the two follow-up surfaces look
+     like one feature rather than two -- but note those were tuned for the
+     chat panel's own fixed footer, so the wrapper below supplies the
+     spacing that footer would otherwise have provided (the shared-component
+     margin trap documented in .claude/rules/frontend.md). */
+  .progress-followups{margin:10px 0 4px;}
+  .progress-followups .ai-chat-input-bar{margin-top:8px;}
+  .progress-followup-q{
+    background:var(--accent-soft);color:var(--ink);border-radius:10px;
+    padding:8px 12px;margin:8px 0 4px;font-family:system-ui,sans-serif;
+    font-size:.88rem;line-height:1.45;overflow-wrap:break-word;
+    /* Right-aligned but capped, so a one-word question reads as a short
+       bubble rather than a full-width banner. */
+    margin-left:auto;max-width:85%;width:fit-content;
+  }
+  .progress-followup-a{margin:0 0 4px;}
   .progress-filters-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:12px;}
   /* The tab switch is sized identically to the dropdowns beside it so the
      row reads as one set of equal controls rather than a pill plus some
@@ -3361,7 +3416,7 @@ function renderQuestion(){
         </div>
       `;
       if(recallAiToggle && aiFeatureFlags.explain_enabled){
-        html += `<div class="review-explanation" id="aiExplainBlock">${loadingDotsHtml('Loading explanation')}</div>`;
+        html += `<div class="review-explanation" id="aiExplainBlock">${aiThinkingHtml('Writing an explanation', 3)}</div>`;
       }
     }
   } else {
@@ -3383,7 +3438,7 @@ function renderQuestion(){
     // so this always starts as a loading placeholder, never a flash of
     // stale content from the previous question.
     if(showFeedback && aiFeatureFlags.explain_enabled){
-      html += `<div class="review-explanation" id="aiExplainBlock">${loadingDotsHtml('Loading explanation')}</div>`;
+      html += `<div class="review-explanation" id="aiExplainBlock">${aiThinkingHtml('Writing an explanation', 3)}</div>`;
     }
   }
   html += `</div>`; // closes .quiz-question-block
@@ -3789,7 +3844,7 @@ function wireReviewList(container, questions){
       btn.setAttribute('aria-pressed','true');
       btn.disabled = true;
       textEl.hidden = false;
-      textEl.innerHTML = loadingDotsHtml('Loading explanation');
+      textEl.innerHTML = aiThinkingHtml('Writing an explanation', 3);
       fetchAiExplanation(q).then(explanation=>{
         textEl.innerHTML = aiExplanationHtml(explanation);
         btn.disabled = false;
@@ -3854,7 +3909,9 @@ function renderReviewPanel(missed, total){
    do NOT get this marker -- the whole point is that the two are now
    distinguishable at a glance. */
 function aiExplanationHtml(text){
-  return `<div class="ai-label">${icon('info')}AI-generated · double-check anything you'd rely on</div>${escapeHtml(text)}`;
+  // .ai-reveal on the wrapper, not the label alone, so the whole answer
+  // fades in together as one block when it replaces the shimmer.
+  return `<div class="ai-reveal"><div class="ai-label">${icon('info')}AI-generated · double-check anything you'd rely on</div>${escapeHtml(text)}</div>`;
 }
 
 function computeQuestionKey(text){
@@ -3905,6 +3962,25 @@ function optionLabel(i){
    each of the three places an explanation can be loading. */
 function loadingDotsHtml(label){
   return `<em>${escapeHtml(label)}<span class="loading-dots"><span>.</span><span>.</span><span>.</span></span></em>`;
+}
+
+/* Waiting state for any AI surface: a labelled set of shimmer lines shaped
+   like the paragraph that's coming. Used everywhere an AI call is in
+   flight, so all four surfaces (question explanation, flashcard
+   explanation, progress feedback, follow-ups) wait the same way instead of
+   three of them sitting on a static <em>.
+   `lines` lets a short answer shimmer at 2 and a long one at 4 rather than
+   promising a wall of text the model may not produce. */
+function aiThinkingHtml(label, lines){
+  const n = Math.max(1, Math.min(4, lines || 3));
+  let html = `<div class="ai-thinking" role="status" aria-live="polite">`;
+  // An empty label suppresses the heading entirely -- used where the control
+  // that triggered the call already says "Analyzing your progress…", so the
+  // shimmer doesn't repeat it two lines below.
+  if(label) html += `<div class="ai-thinking-label">${icon('info')}${escapeHtml(label)}<span class="loading-dots"><span>.</span><span>.</span><span>.</span></span></div>`;
+  for(let i=0;i<n;i++) html += `<div class="skel ai-thinking-line"></div>`;
+  html += `</div>`;
+  return html;
 }
 
 /* ================= icon system =================
@@ -5009,7 +5085,7 @@ function renderFlashExplainRow(card){
   let html = `<div class="review-explain-row">`;
   if(showAi){
     html += loading
-      ? `<div class="review-explanation" data-role="explain-text"><em>Loading explanation…</em></div>`
+      ? `<div class="review-explanation" data-role="explain-text">${aiThinkingHtml('Writing an explanation', 3)}</div>`
       : `<div class="review-explanation" data-role="explain-text">${aiExplanationHtml(flashAiExplainText || '')}</div>`;
   } else if(card.explanation){
     html += `<div class="review-explanation" data-role="explain-text"><strong>Explanation:</strong> ${escapeHtml(card.explanation)}</div>`;
@@ -7700,6 +7776,16 @@ let progressAiFeedback = null; // the returned feedback text, once loaded
 let progressAiFeedbackLoading = false;
 let progressAiFeedbackError = null;
 let progressAiFeedbackCollapsed = false; // manual show/hide once feedback exists -- reset to expanded on every fresh generation
+/* Follow-up thread on the current progress feedback. Client-side only for
+   the visible transcript -- the server keeps the authoritative thread in
+   ai_chat_messages, keyed to a hash of the feedback text, so regenerating
+   feedback starts a fresh thread there. This array is cleared to match
+   whenever new feedback is generated, so the transcript on screen can never
+   look like it belongs to feedback that is no longer shown. */
+let progressFollowUps = [];      // [{role:'user'|'assistant', content}]
+let progressFollowUpLoading = false;
+let progressFollowUpError = null;
+let progressFollowUpCapped = false;  // turn/period cap hit -- disable the input rather than let it fail again
 
 function sortProgressExams(exams, mode){
   const sorted = exams.slice();
@@ -7723,6 +7809,10 @@ async function renderProgressView(){
   progressAiFeedbackLoading = false;
   progressAiFeedbackError = null;
   progressAiFeedbackCollapsed = false;
+  progressFollowUps = [];
+  progressFollowUpLoading = false;
+  progressFollowUpError = null;
+  progressFollowUpCapped = false;
   progressExpandedRoundId = null;
   /* Start every visit on Rounds, and drop the cached misses. The cache
      reset is the load-bearing half: finishing an exam is exactly what
@@ -7902,7 +7992,10 @@ function findMostRecentResumableRound(d){
 function renderProgressAiFeedbackControls(){
   if(!aiFeatureFlags.progress_feedback_enabled) return '';
   if(progressAiFeedbackLoading){
-    return `<span class="stat-label"><em>Analyzing your progress…</em></span>`;
+    // Rendered as the control's own label (it sits in the toolbar row), so
+    // the shimmer block goes in the content area below via
+    // renderProgressAiFeedbackContent(); this stays a compact inline label.
+    return `<span class="stat-label">${loadingDotsHtml('Analyzing your progress')}</span>`;
   }
   let html = '';
   if(progressAiFeedback){
@@ -7927,10 +8020,95 @@ function renderProgressAiFeedbackContent(){
   if(progressAiFeedbackError){
     html += `<div class="msg err" style="margin-bottom:10px;">${escapeHtml(progressAiFeedbackError)}</div>`;
   }
+  /* Shimmer only while generating a FRESH summary. When a previous summary
+     is still on screen it stays put and the toolbar label carries the
+     waiting state instead -- replacing readable feedback with placeholder
+     bars would be a downgrade, not an animation. */
+  if(progressAiFeedbackLoading && !progressAiFeedback){
+    html += aiThinkingHtml('', 4);   // toolbar control already says it
+  }
   if(progressAiFeedback && !progressAiFeedbackCollapsed){
     html += `<div class="review-explanation" style="margin-bottom:10px;">${aiExplanationHtml(progressAiFeedback)}</div>`;
+    html += renderProgressFollowUps();
   }
   return html;
+}
+
+/* Follow-up questions on progress feedback. Gated on the SAME admin switch
+   as review chat (aiFeatureFlags.chat_enabled) because they share one
+   configuration server-side -- turn limit, period limit and period length
+   all come from the chat_* fields, and the period budget is genuinely
+   shared, not merely similar. See ai-progress-feedback's own note.
+   Only rendered once feedback exists: there is nothing to follow up on
+   before that, and the server returns 409 for exactly that case. */
+function renderProgressFollowUps(){
+  if(!aiFeatureFlags.chat_enabled) return '';
+  let html = '<div class="progress-followups">';
+  progressFollowUps.forEach(m=>{
+    html += m.role === 'user'
+      ? `<div class="progress-followup-q">${escapeHtml(m.content)}</div>`
+      : `<div class="review-explanation progress-followup-a">${aiExplanationHtml(m.content)}</div>`;
+  });
+  if(progressFollowUpLoading){
+    html += aiThinkingHtml('Thinking', 2);
+  }
+  if(progressFollowUpError){
+    html += `<div class="msg err" style="margin:6px 0;">${escapeHtml(progressFollowUpError)}</div>`;
+  }
+  if(!progressFollowUpCapped){
+    html += `
+      <div class="ai-chat-input-bar" id="progressFollowUpBar">
+        <textarea id="progressFollowUpInput" rows="1" placeholder="Ask a follow-up about this feedback…" ${progressFollowUpLoading ? 'disabled' : ''}></textarea>
+        <button type="button" class="ai-chat-send-btn" id="progressFollowUpSend" aria-label="Send follow-up" ${progressFollowUpLoading ? 'disabled' : ''}>${icon('send')}</button>
+      </div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+async function sendProgressFollowUp(){
+  const input = document.getElementById('progressFollowUpInput');
+  if(!input) return;
+  const text = input.value.trim();
+  if(!text || progressFollowUpLoading) return;
+  progressFollowUps.push({ role:'user', content: text });
+  progressFollowUpLoading = true;
+  progressFollowUpError = null;
+  renderProgressPanel();
+  try{
+    const { data, error } = await supabaseClient.functions.invoke('ai-progress-feedback', { body: { follow_up: text } });
+    if(error) throw error;
+    if(data && data.error){
+      /* Both caps disable the input rather than leaving a control that is
+         guaranteed to fail. The server sets these flags explicitly instead
+         of the client pattern-matching the message text -- the review-chat
+         path has to string-match because of an older contract, and that is
+         exactly the fragility not worth repeating here. */
+      if(data.turn_limit_reached || data.period_limit_reached) progressFollowUpCapped = true;
+      throw new Error(data.error);
+    }
+    progressFollowUps.push({ role:'assistant', content: data.reply });
+  }catch(err){
+    // Drop the unanswered question back out of the transcript so a retry
+    // doesn't leave an orphaned prompt sitting above an error.
+    progressFollowUps = progressFollowUps.filter((m,i)=> !(m.role==='user' && i===progressFollowUps.length-1));
+    progressFollowUpError = err.message || 'Could not send that follow-up.';
+  }finally{
+    progressFollowUpLoading = false;
+    renderProgressPanel();
+  }
+}
+
+function wireProgressFollowUps(){
+  const send = document.getElementById('progressFollowUpSend');
+  if(send) send.onclick = sendProgressFollowUp;
+  const input = document.getElementById('progressFollowUpInput');
+  if(input){
+    input.onkeydown = (e)=>{
+      // Enter sends, Shift+Enter newlines -- same convention as review chat.
+      if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); sendProgressFollowUp(); }
+    };
+  }
 }
 
 function wireProgressAiFeedbackBlock(){
@@ -7957,6 +8135,14 @@ function wireProgressAiFeedbackBlock(){
           if(errBody.feedback){
             progressAiFeedback = errBody.feedback;
             progressAiFeedbackCollapsed = false;
+            // Feedback text changed -> the server's thread key (a hash of it)
+            // changed too, so the old transcript no longer belongs to what is
+            // on screen.
+  progressFollowUps = [];
+  progressFollowUpLoading = false;
+  progressFollowUpError = null;
+  progressFollowUpCapped = false;
+
           }
         } else {
           progressAiFeedbackError = (errBody && errBody.error) || "Couldn't load feedback right now.";
@@ -7969,6 +8155,13 @@ function wireProgressAiFeedbackBlock(){
         // from a previous summary shouldn't carry over and hide the new
         // one the student just asked for.
         progressAiFeedbackCollapsed = false;
+        // Fresh feedback = fresh server-side thread (keyed by its hash), so
+        // clear the visible transcript to match rather than leaving replies
+        // about a summary the student can no longer see.
+  progressFollowUps = [];
+  progressFollowUpLoading = false;
+  progressFollowUpError = null;
+  progressFollowUpCapped = false;
       }
     } catch(err){
       progressAiFeedbackError = err.message || "Couldn't load feedback right now.";
@@ -8110,7 +8303,6 @@ function renderProgressPanel(){
       </div>
       ${(isMobileViewport || progressTab==='missed') ? '' : `<div class="progress-toolbar-controls">${controlsRowHtml}</div>`}
     </div>
-    ${(isMobileViewport || progressTab==='missed') ? '' : renderProgressAiFeedbackContent()}
     <div class="msg" id="progressMsg"></div>
   `;
   /* The Rounds/Missed switch is NOT rendered here any more, on any viewport.
@@ -8156,9 +8348,17 @@ function renderProgressPanel(){
   if(!d.exams.length){
     html += `<div class="format-help">No attempts yet — start an exam from the Test Library.</div>`;
   }
-  if(isMobileViewport && d.exams.length){
+  if(isMobileViewport){
+    /* No outer exams.length gate. Every control inside controlsRowHtml is
+       already conditioned individually -- the sort dropdown on
+       d.exams.length, Grid/Stacked on desktop -- so with no rounds yet this
+       row renders exactly one thing: the Get AI Feedback button. Gating the
+       whole row meant a student who had started nothing saw that button on
+       desktop but not on mobile, because the desktop branch never had that
+       condition. The button is useful there: with no rounds the feedback
+       still comes back with real copy ("you haven't started any practice
+       rounds yet..."), which is a better empty state than no control. */
     html += `<div class="progress-toolbar-controls" style="margin-bottom:14px;">${controlsRowHtml}</div>`;
-    html += renderProgressAiFeedbackContent();
   }
   /* Grid mode: one continuous grid across ALL exams, not one grid per
      exam subsection -- an account where most exams have just 1 round
@@ -8181,6 +8381,16 @@ function renderProgressPanel(){
      alone on a line: the row always spans the full column width. */
   if(tabSwitchHtml || filterDropdownsHtml){
     html += `<div class="progress-filters-row">${tabSwitchHtml}${filterDropdownsHtml}</div>`;
+  }
+  /* AI feedback renders HERE -- after every control, directly above the
+     cards -- on both viewports. It used to sit between the toolbar and the
+     filters row, which split the controls into two groups separated by a
+     block of text (and, once the thinking shimmer existed, by four grey
+     bars). Grouping all the controls together and letting the summary sit
+     immediately above the rounds it describes reads as one page rather
+     than controls-text-controls. */
+  if(progressTab !== 'missed'){
+    html += renderProgressAiFeedbackContent();
   }
   /* Only shown while a filter is on. Without it, a filter that matches
      nothing renders as a blank area under the toolbar that's
@@ -8301,6 +8511,7 @@ function renderProgressPanel(){
   progressPanel.innerHTML = html;
   wireProgressTabs();
   wireProgressAiFeedbackBlock();
+  wireProgressFollowUps();
   wireDropdown('progressSort', (value)=>{ progressSortMode = value; renderProgressPanel(); }, renderProgressPanel);
   /* Each filter collapses any expanded round first. Otherwise a round you'd
      expanded could be filtered out while progressExpandedRoundId still
