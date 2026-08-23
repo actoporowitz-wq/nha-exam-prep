@@ -1323,6 +1323,12 @@ if('serviceWorker' in navigator){
      the pill it controls is directly above it, rather than across the
      toolbar from it. */
   .score-metric-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
+  /* [hidden] has to win here. The attribute's display:none comes from the UA
+     stylesheet, so ANY author display rule outranks it -- which left an empty
+     red pill rendering permanently beside "Send feedback" even with zero
+     unread replies. Reported as "a weird red circle that serves no function",
+     and it was exactly that. */
+  .fb-unread-dot[hidden]{display:none;}
   .fb-unread-dot{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;margin-left:7px;padding:0 5px;border-radius:9px;background:var(--bad);color:#fff;font-size:.7rem;font-weight:700;font-family:system-ui,sans-serif;line-height:1;}
   .fb-reply{border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-bottom:10px;background:var(--surface-2);}
   .fb-reply.unread{border-color:var(--accent);background:var(--accent-soft);}
@@ -6164,7 +6170,6 @@ function renderAuthView(){
       <div class="auth-links-row" style="margin-top:14px;font-family:system-ui,sans-serif;font-size:.85rem;display:flex;gap:16px;flex-wrap:wrap;">
         <button class="text-link" id="goSignupBtn">Request early access</button>
         <button class="text-link" id="goForgotBtn">Forgot password?</button>
-        <button class="text-link" id="goLandingBtn">What is this?</button>
       </div>
     `;
   } else if(authScreen === 'signup'){
@@ -6254,12 +6259,6 @@ function renderAuthView(){
      passkey to sign in with, so they keep the plain always-eye version. */
   if(authScreen === 'signin') wireAuthPasswordToggle(); else wirePasswordToggle('authPassword', 'authPasswordToggle');
   wirePasswordToggle('authNewPassword', 'authNewPasswordToggle');
-  /* Keeps the landing page reachable from the sign-in form. Without it the
-     landing page is a one-way door: once dismissed (or auto-skipped in the
-     installed mobile PWA) there is no route back to it in the running app
-     short of clearing site data. */
-  const goLanding = document.getElementById('goLandingBtn');
-  if(goLanding) goLanding.onclick = ()=>{ showLanding = true; updateLandingGate(); };
   const goSignup = document.getElementById('goSignupBtn');
   if(goSignup) goSignup.onclick = ()=>{ authScreen='signup'; authError=''; authErrorIsPasskeyNudge=false; authMessage=''; renderAuthView(); };
   const goSignin = document.getElementById('goSigninBtn');
