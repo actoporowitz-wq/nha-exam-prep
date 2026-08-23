@@ -9319,6 +9319,7 @@ let adminProgressStateForUserId = null;
 let adminProgressSubjectLabel = '';   // the viewed account's email, for AI-feedback copy
 let adminProgressTab = 'rounds';   // 'rounds' | 'missed'
 let adminScoreMetric = 'final';    // same options as progressScoreMetric
+let adminProgressSortMode = 'name_asc';  // same four modes as progressSortMode
 let adminMissedRows = null;        // null = not loaded for this account yet
 let adminMissedLoading = false;
 let adminMissedError = null;
@@ -12264,16 +12265,31 @@ function renderAdminExamsSection(examsMap){
   const section = document.getElementById('adminExamsSection');
   if(!section) return;
 
-  /* Sorted numerically, not left in map-insertion order. examsMap is built
-     from a query ordered by exam_title, and that is a plain text sort in
-     Postgres -- so it hands back Exam 1, Exam 10, Exam 11 ... Exam 2, and
-     the drilldown rendered "Exam 2" after "Exam 11". The student's own
-     Progress tab never showed this because it re-sorts through
-     sortProgressExams(), which is numeric-aware; this view had no
-     equivalent step. */
+  /* Never left in map-insertion order. examsMap is built from a query
+     ordered by exam_title, and that is a plain TEXT sort in Postgres -- so
+     it hands back Exam 1, Exam 10, Exam 11 ... Exam 2, which is how the
+     drilldown came to render "Exam 2" after "Exam 11".
+
+     Sorted through sortProgressExams(), the same function the student's own
+     Progress tab uses, so the two views can never disagree about ordering
+     and the numeric-aware name comparison comes for free. That needs
+     firstAttemptAt / lastAttemptAt, which renderProgressView() computes for
+     its own data and this view did not -- derived here from the attempts
+     already in hand rather than by re-querying. */
   const allExams = Object.entries(examsMap)
-    .map(([examKey, ex])=>({ examKey, examTitle: ex.examTitle, rounds: ex.rounds }))
-    .sort((a,b)=> a.examTitle.localeCompare(b.examTitle, undefined, { numeric: true, sensitivity: 'base' }));
+    .map(([examKey, ex])=>{
+      const starts = [];
+      ex.rounds.forEach(r=>(r.attempts || []).forEach(a=>{
+        const t = a.started_at ? new Date(a.started_at).getTime() : NaN;
+        if(!isNaN(t)) starts.push(t);
+      }));
+      return {
+        examKey, examTitle: ex.examTitle, rounds: ex.rounds,
+        firstAttemptAt: starts.length ? Math.min(...starts) : 0,
+        lastAttemptAt:  starts.length ? Math.max(...starts) : 0,
+      };
+    });
+  const sortedExams = sortProgressExams(allExams, adminProgressSortMode);
   // Option lists come from the UNFILTERED set, so picking one exam can't
   // strip every other exam out of the dropdown and strand the admin with no
   // route back to "All".
@@ -12283,7 +12299,7 @@ function renderAdminExamsSection(examsMap){
   const totalRounds = allExams.reduce((n,e)=>n+e.rounds.length, 0);
   const masteredRounds = allExams.reduce((n,e)=>n+e.rounds.filter(r=>r.status==='mastered').length, 0);
 
-  const filtered = filterAdminExams(allExams);
+  const filtered = filterAdminExams(sortedExams);
   const shownRounds = filtered.reduce((n,e)=>n+e.rounds.length, 0);
   const filtersActive = adminProgressFilterMastery !== 'all' || adminProgressFilterExam !== 'all' || adminProgressFilterRound !== 'all';
 
@@ -12336,6 +12352,12 @@ function renderAdminExamsSection(examsMap){
   }
   if(allExams.length){
     html += `<div class="progress-filters-row">
+      ${renderDropdown({ id:'adminProgressSort', ariaLabel:'Sort progress list', selected: adminProgressSortMode, options:[
+        {value:'name_asc',  label:'Sort: Name (A–Z)'},
+        {value:'name_desc', label:'Sort: Name (Z–A)'},
+        {value:'last',      label:'Sort: Last Attempt'},
+        {value:'first',     label:'Sort: First Attempt'}
+      ]})}
       ${renderDropdown({ id:'adminProgressFilterMastery', ariaLabel:'Filter by mastery', selected: adminProgressFilterMastery, options:[
         {value:'all', label:'Any status'},
         {value:'mastered', label:'Mastered only'},
@@ -12409,6 +12431,10 @@ function renderAdminExamsSection(examsMap){
   wireAdminAiFeedback(section, examsMap);
   wireDropdown('adminScoreMetric', (v)=>{ adminScoreMetric = v; renderAdminExamsSection(examsMap); }, ()=>renderAdminExamsSection(examsMap));
 
+  /* Collapse expanded rounds on a sort change, same as the filters do -- the
+     expanded round would otherwise stay open while everything reorders
+     around it, which reads as the wrong round having opened. */
+  wireDropdown('adminProgressSort', (v)=>{ adminProgressSortMode = v; adminExpandedRoundId = null; renderAdminExamsSection(examsMap); }, ()=>renderAdminExamsSection(examsMap));
   wireDropdown('adminProgressFilterMastery', (v)=>{ adminProgressFilterMastery = v; adminExpandedRoundId = null; renderAdminExamsSection(examsMap); }, ()=>renderAdminExamsSection(examsMap));
   wireDropdown('adminProgressFilterExam',    (v)=>{ adminProgressFilterExam = v;    adminExpandedRoundId = null; renderAdminExamsSection(examsMap); }, ()=>renderAdminExamsSection(examsMap));
   wireDropdown('adminProgressFilterRound',   (v)=>{ adminProgressFilterRound = v;   adminExpandedRoundId = null; renderAdminExamsSection(examsMap); }, ()=>renderAdminExamsSection(examsMap));
@@ -12578,6 +12604,7 @@ async function renderAdminUserProgress(targetUserId){
       adminProgressFilterMastery = 'all';
       adminProgressFilterExam = 'all';
       adminProgressFilterRound = 'all';
+      adminProgressSortMode = 'name_asc';
       adminExpandedRoundId = null;
       // A previous student's misses must never render under a different
       // student's header.
