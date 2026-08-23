@@ -4357,7 +4357,9 @@ async function loadFlashOnlineAttempts(){
         correctCount: a.correct_count,
         totalQuestions: a.total_questions
       };
-    }).sort((a,b)=> a.examTitle.localeCompare(b.examTitle) || a.roundNumber - b.roundNumber || a.attemptNumber - b.attemptNumber);
+    // Numeric-aware, same as every other exam-title sort in the app -- a
+    // plain localeCompare puts Exam 11 above Exam 2 in this picker too.
+    }).sort((a,b)=> a.examTitle.localeCompare(b.examTitle, undefined, { numeric: true, sensitivity: 'base' }) || a.roundNumber - b.roundNumber || a.attemptNumber - b.attemptNumber);
     // Defaults to none selected -- picking specific attempts is the whole
     // point of this picker (vs. "Add all missed questions" elsewhere), and
     // starting fully pre-checked meant most users' first action was
@@ -8671,7 +8673,11 @@ function renderProgressPanel(){
      they were derived from the already-filtered set, choosing "Exam 3"
      would remove every other exam from the exam dropdown, leaving no way
      back to "All" except a page reload -- a dead-end control. */
-  const allExamTitles = [...new Set(d.exams.map(ex=>ex.examTitle))].sort((a,b)=>a.localeCompare(b));
+  // Numeric-aware for the same reason everywhere else is: the grid itself
+  // was already correct via sortProgressExams(), but this dropdown listed
+  // Exam 11 above Exam 2.
+  const allExamTitles = [...new Set(d.exams.map(ex=>ex.examTitle))]
+    .sort((a,b)=> a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
   const allRoundNumbers = [...new Set(d.exams.flatMap(ex=>ex.rounds.map(r=>r.round_number)))].sort((a,b)=>a-b);
   const controlsRowHtml = `
     ${d.exams.length ? renderDropdown({ id:'progressSort', ariaLabel:'Sort progress list', selected: progressSortMode, options:[
@@ -12258,11 +12264,21 @@ function renderAdminExamsSection(examsMap){
   const section = document.getElementById('adminExamsSection');
   if(!section) return;
 
-  const allExams = Object.entries(examsMap).map(([examKey, ex])=>({ examKey, examTitle: ex.examTitle, rounds: ex.rounds }));
+  /* Sorted numerically, not left in map-insertion order. examsMap is built
+     from a query ordered by exam_title, and that is a plain text sort in
+     Postgres -- so it hands back Exam 1, Exam 10, Exam 11 ... Exam 2, and
+     the drilldown rendered "Exam 2" after "Exam 11". The student's own
+     Progress tab never showed this because it re-sorts through
+     sortProgressExams(), which is numeric-aware; this view had no
+     equivalent step. */
+  const allExams = Object.entries(examsMap)
+    .map(([examKey, ex])=>({ examKey, examTitle: ex.examTitle, rounds: ex.rounds }))
+    .sort((a,b)=> a.examTitle.localeCompare(b.examTitle, undefined, { numeric: true, sensitivity: 'base' }));
   // Option lists come from the UNFILTERED set, so picking one exam can't
   // strip every other exam out of the dropdown and strand the admin with no
   // route back to "All".
-  const allExamTitles = [...new Set(allExams.map(e=>e.examTitle))].sort((a,b)=>a.localeCompare(b));
+  const allExamTitles = [...new Set(allExams.map(e=>e.examTitle))]
+    .sort((a,b)=> a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
   const allRoundNumbers = [...new Set(allExams.flatMap(e=>e.rounds.map(r=>r.round_number)))].sort((a,b)=>a-b);
   const totalRounds = allExams.reduce((n,e)=>n+e.rounds.length, 0);
   const masteredRounds = allExams.reduce((n,e)=>n+e.rounds.filter(r=>r.status==='mastered').length, 0);
