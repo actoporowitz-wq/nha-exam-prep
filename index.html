@@ -349,6 +349,12 @@ if('serviceWorker' in navigator){
      exactly what happens on the render right after an option is picked. */
   .flash-flip-outer{perspective:1600px;width:100%;max-width:400px;flex:none;}
   .flash-flip-inner{position:relative;transform-style:preserve-3d;min-height:260px;}
+  /* Reserves the explanation row's height on an unanswered card so the flip
+     container is sized for the back face it will ACTUALLY have once
+     answered. visibility:hidden rather than display:none on purpose: the
+     box has to stay in layout for scrollHeight to count it. */
+  .flash-explain-reserve{visibility:hidden;}
+
   /* Rotating the parent -180deg (not +180) while the back face keeps its
      own +180deg pre-rotation -- same-axis rotations add, so the back
      face's total ends up at 0deg (facing forward, unmirrored) either way;
@@ -2735,6 +2741,40 @@ if('serviceWorker' in navigator){
    banner even if something else later reintroduces a stacking context. */
 .craft .score-hero.is-open{position:relative;z-index:60;}
 
+/* ---- B6. Entrances belong to ARRIVING at a screen, not to every render --
+   MEASURED BUG: every control on Progress made the whole screen blink.
+
+   craft-layer applies its entrance animation unconditionally to .stat-pill,
+   .round-card, .lib-row and friends. Those are fine on first paint, but
+   renderProgressPanel() and every sibling renderer rebuild their panel by
+   replacing innerHTML -- so picking a sort option, a filter, or a tab
+   destroys and recreates every element, and all of them run their entrance
+   again. Measured: opacity 0 -> 1 on the stat pills and all 43 round cards
+   after a single dropdown selection, with the stagger delays spreading it
+   over ~560ms. That is the blink.
+
+   The animation is switched off by default and restored only underneath
+   .tx-entering, which txEnterView() puts on a view for the length of one
+   entrance. Only animation-NAME is touched, so the layer keeps ownership of
+   duration, easing, fill and the nth-child stagger delays. */
+.craft .stat-pill,
+.craft .round-grid > .round-card,
+.craft .lib-row,
+.craft .review-item,
+.craft .score-big,
+.craft .score-sub,
+.craft .result-actions,
+.craft .skel-row{animation-name:none;}
+
+.craft .tx-entering .stat-pill,
+.craft .tx-entering .round-grid > .round-card,
+.craft .tx-entering .lib-row,
+.craft .tx-entering .review-item,
+.craft .tx-entering .score-sub,
+.craft .tx-entering .result-actions,
+.craft .tx-entering .skel-row{animation-name:craftViewIn;}
+.craft .tx-entering .score-big{animation-name:craftScoreIn;}
+
 /* ---- B3. Reduced motion for everything added above -------------
    craft-layer's own reduced-motion block already covers `.craft *`,
    which includes all of the selectors above. Restated only for the
@@ -3541,11 +3581,30 @@ function txHideNow(el){
    animation has to be restarted by hand -- remove the class, force a reflow
    to flush the removal, then re-add. Without the reflow the browser coalesces
    both changes into no change at all and nothing plays. */
+/* Window during which a view's CHILDREN are allowed to run their entrance
+   (see B6 in the stylesheet). Long enough to cover the 320ms entrance plus
+   the 240ms nth-child stagger, with headroom for a panel that renders
+   slightly late because its data was still being fetched. */
+const TX_ENTER_MS = 900;
+let txEnterTimer = null;
+
 function txEnterView(el){
   if(!el || !txMotionOn()) return;
+  if(txEnterTimer) clearTimeout(txEnterTimer);
+  document.querySelectorAll('.tx-entering').forEach(n=>n.classList.remove('tx-entering'));
   el.classList.remove('craft-view');
-  void el.offsetWidth;
+  void el.offsetWidth;              // flush the removal, or the browser
+                                    // coalesces both changes into no change
   el.classList.add('craft-view');
+  /* .tx-entering is what re-enables the per-element entrances underneath
+     this view. It is removed again shortly after, so a later re-render --
+     which is what every dropdown, filter and tab does -- rebuilds the panel
+     with those animations switched off and nothing blinks. */
+  el.classList.add('tx-entering');
+  txEnterTimer = setTimeout(()=>{
+    el.classList.remove('tx-entering');
+    txEnterTimer = null;
+  }, TX_ENTER_MS);
 }
 
 function pushModalClose(closeFn){
@@ -6707,7 +6766,27 @@ function renderFlashcard(){
         <span class="letter">${optionLabel(oi)}</span><span>${escapeHtml(opt)}${tag}</span>
       </button>`;
     });
-    const explanationHtml = answered ? renderFlashExplainRow(card) : '';
+    /* THE FLIP-RESIZE FIX. The back face is measured below to set the flip
+       container's min-height, but this row used to be omitted entirely until
+       the card was answered -- so the container was sized to a back face that
+       had no explanation in it, and answering re-rendered a taller one, which
+       grew min-height mid-flip. Measured at 104px of growth at 390 and 68px
+       at 1280.
+
+       The row is now always rendered, and merely made invisible while
+       unanswered, so its height is reserved from the start and answering
+       changes nothing. visibility:hidden (not display:none) is the whole
+       point -- it keeps the box in layout, which is what scrollHeight needs.
+       It also drops the subtree from the a11y tree and the tab order, so the
+       duplicate AI-explain button inside it is inert.
+
+       No answer is leaked by this: backOptsHtml above already marks the
+       correct option regardless of `answered`, so the back face has always
+       carried the answer. Only the prose was being withheld. */
+    const explainRowHtml = renderFlashExplainRow(card);
+    const explanationHtml = answered
+      ? explainRowHtml
+      : `<div class="flash-explain-reserve" aria-hidden="true">${explainRowHtml}</div>`;
     html = `
       ${topRowHtml}
       <div class="progress-row" id="flashProgressAnchor">
