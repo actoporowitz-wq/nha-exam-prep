@@ -805,7 +805,12 @@ if('serviceWorker' in navigator){
      CSS needed here, the JS just doesn't render them; noted for whoever
      goes looking for a display:none rule that doesn't exist. */
 
-  .opt{display:flex;align-items:flex-start;gap:12px;padding:13px 16px;border:1px solid var(--line);border-radius:10px;margin:0 0 10px;width:100%;font-family:inherit;color:inherit;cursor:pointer;font-size:1rem;line-height:1.45;transition:border-color .15s, background .15s;background:var(--panel);}
+  /* text-align:left is NOT redundant. .opt is a <button>, and the UA default
+     for buttons is text-align:center -- inherited by the option's text span,
+     so every answer that wrapped to a second line was centre-set. Nothing in
+     this file ever overrode it. Applies to the quiz, the results review and
+     flashcards, which all reuse .opt. */
+  .opt{display:flex;align-items:flex-start;gap:12px;padding:13px 16px;border:1px solid var(--line);border-radius:10px;margin:0 0 10px;width:100%;font-family:inherit;color:inherit;cursor:pointer;font-size:1rem;line-height:1.45;text-align:left;transition:border-color .15s, background .15s;background:var(--panel);}
   .opt:hover{border-color:var(--accent);}
   .opt .letter{font-family:system-ui,sans-serif;font-weight:700;font-size:.82rem;color:var(--muted);min-width:20px;}
   .opt.selected{border-color:var(--accent);background:var(--accent-soft);}
@@ -3348,9 +3353,23 @@ document.querySelectorAll('[data-mode-btn]').forEach(btn=>{
 (function setupSettingsPopover(){
   const trigger = document.getElementById('settingsBtn');
   const pop = document.getElementById('settingsPop');
-  function close(){ pop.hidden = true; trigger.setAttribute('aria-expanded','false'); }
-  function open(){ pop.hidden = false; trigger.setAttribute('aria-expanded','true'); }
-  trigger.onclick = (e)=>{ e.stopPropagation(); pop.hidden ? open() : close(); };
+  /* `closing` guards re-entry: the outside-click and Escape listeners can
+     both fire while the exit animation is still running, and a second
+     txClose() would restart it and leave the popover visible. */
+  let closing = false;
+  function close(){
+    if(pop.hidden || closing) return;
+    closing = true;
+    trigger.setAttribute('aria-expanded','false');
+    txClose(pop, ()=>{ pop.hidden = true; closing = false; });
+  }
+  function open(){
+    closing = false;
+    pop.hidden = false;
+    trigger.setAttribute('aria-expanded','true');
+    txOpen(pop, 'popover');
+  }
+  trigger.onclick = (e)=>{ e.stopPropagation(); (pop.hidden || closing) ? open() : close(); };
   document.addEventListener('click', (e)=>{ if(!pop.hidden && !pop.contains(e.target) && e.target!==trigger) close(); });
   document.addEventListener('keydown', (e)=>{ if(e.key==='Escape' && !pop.hidden) close(); });
 })();
@@ -3385,15 +3404,32 @@ document.querySelectorAll('[data-bb]').forEach(btn=>{
 (function setupMoreSheet(){
   const trigger = document.getElementById('bbMoreBtn');
   const sheet = document.getElementById('moreSheet');
-  function close(){ sheet.hidden = true; trigger.setAttribute('aria-expanded','false'); }
-  function open(){ sheet.hidden = false; trigger.setAttribute('aria-expanded','true'); }
-  trigger.onclick = (e)=>{ e.stopPropagation(); sheet.hidden ? open() : close(); };
+  /* Same re-entry guard as the settings popover above. */
+  let closing = false;
+  function close(){
+    if(sheet.hidden || closing) return;
+    closing = true;
+    trigger.setAttribute('aria-expanded','false');
+    txClose(sheet, ()=>{ sheet.hidden = true; closing = false; });
+  }
+  function open(){
+    closing = false;
+    sheet.hidden = false;
+    trigger.setAttribute('aria-expanded','true');
+    txOpen(sheet, 'sheet');
+  }
+  trigger.onclick = (e)=>{ e.stopPropagation(); (sheet.hidden || closing) ? open() : close(); };
   document.addEventListener('click', (e)=>{ if(!sheet.hidden && !sheet.contains(e.target) && e.target!==trigger) close(); });
   document.getElementById('moreAdminBtn').onclick = ()=>{ close(); tabAdmin.click(); };
 })();
 function closeAccountMenus(){
-  document.getElementById('settingsPop').hidden = true;
-  document.getElementById('moreSheet').hidden = true;
+  /* txHideNow, not txClose: these are instant hides from elsewhere in the
+     app (opening feedback, signing out), not a user dismissing the menu.
+     Clearing data-state is what matters -- leaving it at "open" means the
+     next open() writes the same value, the attribute never changes, and
+     the entrance animation silently stops replaying from then on. */
+  txHideNow(document.getElementById('settingsPop'));
+  txHideNow(document.getElementById('moreSheet'));
 }
 
 /* ---- modal dialogs consume the Back button instead of it navigating the
@@ -3434,6 +3470,84 @@ let modalCloseStack = [];
    pushModalClose() always pushes an entry before this can run, so every
    increment is guaranteed a matching popstate to consume it. */
 let pendingModalUnwinds = 0;
+/* ---- transitions-layer.css's markup contract, in one place -------------
+   The stylesheet shipped with the design layer but was inert until this
+   existed: it keys entirely off two attributes that nothing was setting.
+
+     data-tx="menu|popover|sheet|modal|backdrop|panel|fullscreen"
+     data-state="open"     while entering / open
+     data-state="closing"  on dismiss, cleared when the animation ends
+
+   Entrances are free once data-state="open" is on the element. EXITS need
+   JS, because the surface has to stay in the DOM and visible until the
+   closing animation finishes -- that single step is the whole difference
+   between a designed dismissal and a cheap one, and it is why the layer
+   does nothing on its own.
+
+   Both helpers no-op when the craft layer is off or the user has asked for
+   reduced motion, so neither can strand a surface half-closed. */
+const TX_FALLBACK_MS = 420;   // longest exit in transitions-layer.css is 280ms
+
+function txMotionOn(){
+  return document.body.classList.contains('craft')
+      && !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
+
+function txOpen(el, kind, opts){
+  if(!el) return;
+  opts = opts || {};
+  el.dataset.tx = kind;
+  if(opts.anchor) el.dataset.anchor = opts.anchor;
+  if(opts.edge) el.dataset.edge = opts.edge;
+  el.dataset.state = 'open';
+}
+
+/* Runs `done` after the closing animation, or immediately when motion is off.
+   The timeout is NOT belt-and-braces: animationend genuinely never fires if
+   the element is display:none, was never painted, or its animation is
+   cancelled by a re-render mid-flight -- and without a fallback the surface
+   would sit on screen forever, which is a far worse bug than a missing
+   animation. `finished` guards against both firing. */
+function txClose(el, done){
+  if(!el || !el.dataset.tx || !txMotionOn()){
+    if(el) delete el.dataset.state;
+    done();
+    return;
+  }
+  let finished = false;
+  function finish(){
+    if(finished) return;
+    finished = true;
+    el.removeEventListener('animationend', onEnd);
+    delete el.dataset.state;
+    done();
+  }
+  function onEnd(e){ if(e.target === el) finish(); }
+  el.addEventListener('animationend', onEnd);
+  el.dataset.state = 'closing';
+  setTimeout(finish, TX_FALLBACK_MS);
+}
+
+/* Instant hide that still resets the transition state. Used where the app
+   closes a menu for its own reasons rather than the user dismissing it. */
+function txHideNow(el){
+  if(!el) return;
+  delete el.dataset.state;
+  el.hidden = true;
+}
+
+/* Re-triggers the .craft-view entrance on a view the router just swapped in.
+   showView() toggles `display` rather than recreating the element, so the
+   animation has to be restarted by hand -- remove the class, force a reflow
+   to flush the removal, then re-add. Without the reflow the browser coalesces
+   both changes into no change at all and nothing plays. */
+function txEnterView(el){
+  if(!el || !txMotionOn()) return;
+  el.classList.remove('craft-view');
+  void el.offsetWidth;
+  el.classList.add('craft-view');
+}
+
 function pushModalClose(closeFn){
   history.pushState({modal:true}, '', location.pathname + location.search);
   modalCloseStack.push(closeFn);
@@ -3694,8 +3808,13 @@ async function markFeedbackRepliesRead(){
 }
 
 function openFeedbackPanel(){
-  document.getElementById('settingsPop').hidden = true;
-  document.getElementById('moreSheet').hidden = true;
+  /* txHideNow, not txClose: these are instant hides from elsewhere in the
+     app (opening feedback, signing out), not a user dismissing the menu.
+     Clearing data-state is what matters -- leaving it at "open" means the
+     next open() writes the same value, the attribute never changes, and
+     the entrance animation silently stops replaying from then on. */
+  txHideNow(document.getElementById('settingsPop'));
+  txHideNow(document.getElementById('moreSheet'));
   fbMsgEl.style.display = 'none';
   feedbackOverlayEl.hidden = false;
   renderFbCategoryDropdown();
@@ -3757,7 +3876,7 @@ document.addEventListener('keydown', (e)=>{
   else if(e.key === 'Escape'){
     if(!shortcutsOverlayEl.hidden) dismissModal(closeShortcutsOverlay);
     else if(!feedbackOverlayEl.hidden) dismissModal(closeFeedbackPanel);
-    else if(!document.getElementById('moreSheet').hidden) document.getElementById('moreSheet').hidden = true;
+    else if(!document.getElementById('moreSheet').hidden) txHideNow(document.getElementById('moreSheet'));
   }
 });
 
@@ -3767,6 +3886,20 @@ document.addEventListener('keydown', (e)=>{
    would spam history if routed per-question. */
 const PATH_FOR_VIEW = { quiz: '/', library: '/library', flash: '/flashcards', progress: '/progress', admin: '/admin' };
 const VIEW_FOR_PATH = { '/': 'quiz', '/library': 'library', '/flashcards': 'flash', '/progress': 'progress', '/admin': 'admin' };
+/* Which element carries the view-to-view entrance. A function, not a map,
+   because 'quiz' resolves to two different panels depending on whether the
+   exam has been submitted -- and the results screen arriving is exactly the
+   moment the entrance is most worth having. */
+function viewEntranceEl(v){
+  const id = v === 'quiz' ? (submitted ? 'resultsView' : 'quizView')
+    : v === 'library'  ? 'libraryView'
+    : v === 'flash'    ? 'flashView'
+    : v === 'progress' ? 'progressView'
+    : v === 'admin'    ? 'adminView'
+    : v === 'auth'     ? 'authView'
+    : null;
+  return id ? document.getElementById(id) : null;
+}
 
 function showView(v, opts){
   opts = opts || {};
@@ -3837,6 +3970,14 @@ function showView(v, opts){
   if(v==='auth') renderAuthView();
   if(v==='progress') renderProgressView();
   if(v==='admin') renderAdminView();
+
+  /* View-to-view entrance. Runs AFTER the per-view render calls above,
+     because several of them replace the panel's innerHTML -- animating
+     before that would play the entrance on content about to be thrown away.
+     Entrance only: an exit animation here would hold the old screen on
+     display while the new one is already rendered, which makes every
+     navigation feel slower rather than smoother. */
+  txEnterView(viewEntranceEl(v));
 
   const path = PATH_FOR_VIEW[v];
   if(path && !opts.fromPopState && location.pathname !== path){
@@ -4793,7 +4934,21 @@ function showConfirmDialog(message, onConfirm, confirmLabel, danger){
     </div>
   `;
   document.body.appendChild(overlay);
-  const closeFn = ()=> overlay.remove();
+  /* The backdrop and the card animate on separate curves on purpose -- the
+     backdrop is faster, so the dialog never looks like it is dragging a grey
+     sheet in behind it. */
+  const card = overlay.querySelector('[role="alertdialog"]');
+  txOpen(overlay, 'backdrop');
+  txOpen(card, 'modal');
+  /* The card is what we wait on: it is the slower of the two, so by the time
+     it finishes the backdrop has already faded. Removing the overlay takes
+     both out together. onConfirm still fires immediately on click -- only the
+     DOM removal is deferred, so nothing the caller does is delayed by the
+     animation. */
+  const closeFn = ()=>{
+    txClose(overlay, ()=>{});
+    txClose(card, ()=> overlay.remove());
+  };
   pushModalClose(closeFn);
   overlay.querySelector('#confirmCancelBtn').onclick = ()=> dismissModal(closeFn);
   overlay.querySelector('#confirmOkBtn').onclick = ()=>{ dismissModal(closeFn); onConfirm(); };
@@ -5236,7 +5391,14 @@ function renderDropdown(opts){
         <span aria-hidden="true" title="${escapeHtml(visibleText)}">${escapeHtml(visibleText)}</span>
         ${icon('chevronDown')}
       </button>
-      <div class="dd-menu" id="${opts.id}-menu" role="listbox" aria-label="${escapeHtml(opts.ariaLabel||'')}" ${isOpen?'':'hidden'}>
+      <!-- Entrance only, deliberately. wireDropdown closes by setting
+           openDropdownId=null and RE-RENDERING, so the menu node is destroyed
+           rather than dismissed -- there is nothing left to animate out. This
+           is the degradation transitions-layer.css documents: the exit falls
+           back to instant, the entrance still plays. Giving these an exit
+           would mean restructuring every dropdown call site to keep the node
+           alive through the animation, which is not worth it for a menu. -->
+      <div class="dd-menu" id="${opts.id}-menu" role="listbox" aria-label="${escapeHtml(opts.ariaLabel||'')}" data-tx="menu"${isOpen?' data-state="open"':''} ${isOpen?'':'hidden'}>
         ${opts.options.map(o=>`<button type="button" role="option" aria-selected="${o.value===opts.selected}" data-dd-value="${escapeHtml(o.value)}" title="${escapeHtml(o.label)}">${escapeHtml(o.label)}</button>`).join('')}
       </div>
     </div>
