@@ -3608,16 +3608,29 @@ function setPanelHtml(el, html){
   const y = sc.scrollTop;
   el.innerHTML = html;
   if(!y) return;
-  const restore = ()=>{ if(sc.scrollTop !== y && sc.scrollHeight - sc.clientHeight >= y) sc.scrollTop = y; };
+  /* Restoring once is not enough, and neither is once-plus-a-frame.
+
+     The admin shell rebuilds with an EMPTY #adminSubPanel and fills it
+     afterwards -- sometimes a frame later, sometimes several, depending on
+     the sub-view. Until that fill lands the document is only a few hundred
+     pixels tall, so the height guard (correctly) refuses to restore, and by
+     the time the page is tall again there is nothing left retrying. Measured
+     live on Admin: captured 400, one-frame retry still saw a short page, and
+     the position was gone.
+
+     So retry over a short window, and stop as soon as it takes. The guards
+     are what keep this from fighting the user: it only acts while the page
+     is still sitting at the top (the reset we are correcting), and only once
+     the height genuinely allows the old position. A deliberate scroll during
+     the window moves scrollTop away from 0 and ends it. */
+  let tries = 0;
+  const restore = ()=>{
+    if(sc.scrollTop === y) return;                       // already right
+    if(sc.scrollTop > 4) return;                         // user moved: leave them alone
+    if(sc.scrollHeight - sc.clientHeight >= y){ sc.scrollTop = y; return; }
+    if(++tries < 12) requestAnimationFrame(restore);     // ~200ms at 60fps
+  };
   restore();
-  /* A second pass on the next frame, because the synchronous one is not
-     always enough. The admin shell rebuilds with an EMPTY #adminSubPanel and
-     fills it immediately afterwards -- so at the moment of the first restore
-     the document is only a few hundred pixels tall, the assignment clamps to
-     roughly zero, and the page has already lost its place by the time the
-     sub-panel makes it tall again. Re-checking after layout has settled
-     catches that. Guarded on the height actually being available, so this
-     never fights a genuinely shorter page. */
   requestAnimationFrame(restore);
 }
 
