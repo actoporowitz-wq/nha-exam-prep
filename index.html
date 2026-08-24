@@ -2775,6 +2775,26 @@ if('serviceWorker' in navigator){
 .craft .tx-entering .skel-row{animation-name:craftViewIn;}
 .craft .tx-entering .score-big{animation-name:craftScoreIn;}
 
+/* The FIRST pass at this gated the cards but not their CONTENTS, and the
+   contents are what actually blinked. Measured on the live Progress tab with
+   43 real rounds: every re-render re-ran 43 mastery-ring sweeps plus 43
+   ring-number fades in grid mode, and 43 funnel-bar sweeps in stacked. The
+   cards sat still while everything inside them redrew from zero. */
+.craft .ring-wrap .fill,
+.craft .ring-num,
+.craft .funnel-bar-fill{animation-name:none;}
+.craft .tx-entering .ring-wrap .fill{animation-name:craftRingFill;}
+.craft .tx-entering .ring-num{animation-name:craftFadeIn;}
+.craft .tx-entering .funnel-bar-fill{animation-name:craftBarGrow;}
+
+/* Menus are owned by transitions-layer.css, which animates them off
+   data-state="open" — i.e. when they actually OPEN. craft-layer also animates
+   them on mere existence, so every re-render re-ran craftMenuIn on all five
+   dropdowns (invisible while closed, but it re-animated an OPEN one under the
+   user, and it is pure churn either way). One owner, not two. */
+.craft .dd-menu,
+.craft .settings-popover{animation-name:none;}
+
 /* ---- B3. Reduced motion for everything added above -------------
    craft-layer's own reduced-motion block already covers `.craft *`,
    which includes all of the selectors above. Restated only for the
@@ -3566,6 +3586,39 @@ function txClose(el, done){
   el.addEventListener('animationend', onEnd);
   el.dataset.state = 'closing';
   setTimeout(finish, TX_FALLBACK_MS);
+}
+
+/* Replaces a panel's contents WITHOUT losing the reader's place.
+
+   Every renderer here rebuilds by assigning innerHTML, which drops the
+   document's scroll position: for an instant the panel is empty, the browser
+   clamps scrollTop to the new (smaller) maximum, and the page jumps to the
+   top. Measured on the live Progress tab with 43 rounds -- a status filter
+   moved the page from 900 to 713, and the Rounds/Missed switch sent it to 0.
+   Nothing about choosing a filter should move the page.
+
+   Capture before the swap, restore after. If the new content is genuinely
+   shorter the browser clamps anyway, which is correct; an unchanged or taller
+   page stays exactly where it was. Reading scrollTop back before assigning
+   avoids a pointless write (and the scroll event that comes with it) in the
+   common case where nothing moved. */
+function setPanelHtml(el, html){
+  if(!el) return;
+  const sc = document.scrollingElement || document.documentElement;
+  const y = sc.scrollTop;
+  el.innerHTML = html;
+  if(!y) return;
+  const restore = ()=>{ if(sc.scrollTop !== y && sc.scrollHeight - sc.clientHeight >= y) sc.scrollTop = y; };
+  restore();
+  /* A second pass on the next frame, because the synchronous one is not
+     always enough. The admin shell rebuilds with an EMPTY #adminSubPanel and
+     fills it immediately afterwards -- so at the moment of the first restore
+     the document is only a few hundred pixels tall, the assignment clamps to
+     roughly zero, and the page has already lost its place by the time the
+     sub-panel makes it tall again. Re-checking after layout has settled
+     catches that. Guarded on the height actually being available, so this
+     never fights a genuinely shorter page. */
+  requestAnimationFrame(restore);
 }
 
 /* Instant hide that still resets the transition state. Used where the app
@@ -10084,7 +10137,7 @@ function renderProgressPanel(){
     // flex-grow takes the full width rather than leaving a stranded pill.
     html += `<div class="progress-filters-row">${tabSwitchHtml}</div>`;
     html += renderMissedList();
-    progressPanel.innerHTML = html;
+    setPanelHtml(progressPanel, html);
     wireProgressTabs();
     wireMissedList();
     if(!missedRequested){
@@ -10268,7 +10321,7 @@ function renderProgressPanel(){
     if(effectiveViewMode !== 'grid') html += `</div>`;
   });
   if(effectiveViewMode === 'grid' && gridHtml) html += `<div class="round-grid">${gridHtml}</div>`;
-  progressPanel.innerHTML = html;
+  setPanelHtml(progressPanel, html);
   wireProgressTabs();
   wireProgressAiFeedbackBlock();
   wireProgressFollowUps();
@@ -10937,7 +10990,7 @@ function renderAdminPanel(){
   if(adminDrilldownUserId){ renderAdminUserProgress(adminDrilldownUserId); return; }
   if(adminSecurityEventsUserId){ renderAdminSecurityEvents(adminSecurityEventsUserId); return; }
 
-  adminPanel.innerHTML = `
+  setPanelHtml(adminPanel, `
     <h1>Admin</h1>
     <div class="toplinks">
       <button id="adminNavAccounts" class="${adminSubView==='accounts'?'active':''}">Accounts</button>
@@ -10948,7 +11001,7 @@ function renderAdminPanel(){
       <button id="adminNavTools" class="${adminSubView==='tools'?'active':''}">Tools</button>
     </div>
     <div id="adminSubPanel"></div>
-  `;
+  `);
   document.getElementById('adminNavAccounts').onclick = ()=>{ adminSubView='accounts'; renderAdminPanel(); };
   document.getElementById('adminNavAuditLog').onclick = ()=>{ adminSubView='auditLog'; renderAdminPanel(); };
   document.getElementById('adminNavErrors').onclick = ()=>{ adminSubView='errors'; renderAdminPanel(); };
@@ -13678,7 +13731,7 @@ function renderAdminExamsSection(examsMap){
   }
   if(adminProgressTab === 'missed' && allExams.length && studentFeatureFlags.missed_list_enabled){
     html += renderAdminMissedList();
-    section.innerHTML = html;
+    setPanelHtml(section, html);
     wireAdminProgressTabs(section);
     wireAdminAiFeedback(section, examsMap);
     wireAdminMissedList(section);
@@ -13810,7 +13863,7 @@ function renderAdminExamsSection(examsMap){
      under their per-exam headings; only grid has a collected buffer to wrap. */
   if(adminEffectiveViewMode === 'grid' && gridHtml) html += `<div class="round-grid">${gridHtml}</div>`;
   if(!allExams.length) html += `<div class="format-help">No online attempts for this account.</div>`;
-  section.innerHTML = html;
+  setPanelHtml(section, html);
 
   // The Rounds/Missed switch is rendered on BOTH paths, so it has to be
   // wired on both -- wiring it only in the missed branch left the button
@@ -13949,6 +14002,20 @@ async function renderAdminUserProgress(targetUserId){
   const myToken = ++adminUserProgressRequestToken;
   const targetProfile = adminData.profiles.find(p=>p.user_id===targetUserId);
   const label = targetProfile ? targetProfile.email : targetUserId;
+  /* Captured BEFORE the loading placeholder goes in, and only when this is a
+     re-render of the account already on screen.
+
+     This function is async: it replaces the panel with a one-line "Loading…"
+     first, which collapses the document and makes the browser clamp scrollTop
+     to zero -- so by the time the real content arrives there is no position
+     left to restore. Every admin control routes through here, which is why
+     the drilldown jumped to the top on every click while Progress did not.
+
+     Opening a DIFFERENT account keeps the old behaviour of landing at the
+     top, which is correct: it is a new screen, and the position carried over
+     from the accounts list means nothing on it. */
+  const adminScroller = document.scrollingElement || document.documentElement;
+  const keepAdminY = adminProgressStateForUserId === targetUserId ? adminScroller.scrollTop : 0;
   adminPanel.innerHTML = `<h1>Admin — Progress for ${escapeHtml(label)}</h1><div class="format-help">Loading…</div>`;
   try{
     const { data: rounds, error: rErr } = await supabaseClient.from('exam_rounds')
@@ -13975,7 +14042,21 @@ async function renderAdminUserProgress(targetUserId){
       examsMap[r.exam_key].rounds.push({ ...r, attempts: attempts.filter(a=>a.round_id===r.id) });
     });
     html += `<div id="adminExamsSection"></div>`;
-    adminPanel.innerHTML = html;
+    /* Same nesting as the admin shell: this writes an EMPTY
+       #adminExamsSection and fills it a moment later, so the scroll restore
+       has to survive the gap where the document is briefly short. That is
+       what setPanelHtml's second, next-frame pass is for. On a first visit
+       the captured position is 0, so restoring it is a no-op and the admin
+       still lands at the top of a freshly opened account. */
+    setPanelHtml(adminPanel, html);
+    /* Restored after the section below fills, on the next frame, so the
+       measurement happens against the finished page rather than the empty
+       shell. No-op on a first visit, where keepAdminY is 0. */
+    if(keepAdminY){
+      requestAnimationFrame(()=>{
+        if(adminScroller.scrollHeight - adminScroller.clientHeight >= keepAdminY) adminScroller.scrollTop = keepAdminY;
+      });
+    }
     document.getElementById('backToAdminBtn').onclick = ()=>{ adminDrilldownUserId = null; renderAdminPanel(); };
     // Fresh per account visit -- an admin switching between accounts
     // shouldn't land with exams already expanded just because the last
