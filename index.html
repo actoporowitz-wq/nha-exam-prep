@@ -2741,6 +2741,30 @@ if('serviceWorker' in navigator){
    banner even if something else later reintroduces a stacking context. */
 .craft .score-hero.is-open{position:relative;z-index:60;}
 
+/* ---- B7. .craft-view MUST NOT CARRY A TRANSFORM ------------------------
+   REGRESSION I SHIPPED, and the worst one in this layer.
+
+   A transformed element becomes the containing block for any
+   position:fixed DESCENDANT -- fixed then resolves against that element
+   instead of the viewport. craft-layer animates .craft-view with
+   craftViewIn (which moves transform) using animation-fill-mode:both, so
+   the element keeps transform:matrix(1,0,0,1,0,0) forever afterwards.
+
+   That was harmless while nothing used the class. txEnterView() then began
+   putting it on #quizView and #flashView -- both of which CONTAIN fixed
+   chrome: the quiz's fixed bottom nav (.quiz-fullscreen bars, and the
+   sticky Previous/Next row), and flashcards' full-screen layout. Every one
+   of them silently stopped being viewport-fixed and started scrolling with
+   the content, covering it on the way.
+
+   So the view-level entrance is opacity-only. Opacity creates a stacking
+   context but NOT a containing block for fixed, so it is safe here;
+   transform is not, and no amount of tuning makes it safe on an element
+   that wraps fixed chrome. fill-mode:backwards on top, so nothing lingers
+   even mid-animation. The per-element entrances below still use transform
+   -- cards and pills contain no fixed chrome. */
+.craft .craft-view{animation-name:craftFadeIn;animation-fill-mode:backwards;}
+
 /* ---- B6. Entrances belong to ARRIVING at a screen, not to every render --
    MEASURED BUG: every control on Progress made the whole screen blink.
 
@@ -3607,6 +3631,10 @@ function setPanelHtml(el, html){
   const sc = document.scrollingElement || document.documentElement;
   const y = sc.scrollTop;
   el.innerHTML = html;
+  /* Tell the entrance machinery that the arriving view has actually painted.
+     The window has to stay open until this happens, not for a fixed time --
+     see txEnterView. */
+  txNoteEntranceRender(el);
   if(!y) return;
   /* Synchronous only, on purpose. An earlier version deferred a retry to
      requestAnimationFrame to cope with panels that fill late -- that is
@@ -3630,30 +3658,57 @@ function txHideNow(el){
    animation has to be restarted by hand -- remove the class, force a reflow
    to flush the removal, then re-add. Without the reflow the browser coalesces
    both changes into no change at all and nothing plays. */
-/* Window during which a view's CHILDREN are allowed to run their entrance
-   (see B6 in the stylesheet). Long enough to cover the 320ms entrance plus
-   the 240ms nth-child stagger, with headroom for a panel that renders
-   slightly late because its data was still being fetched. */
-const TX_ENTER_MS = 900;
+/* The window during which a view's CHILDREN may run their entrance (see B6
+   in the stylesheet) CANNOT be a fixed timer started at navigation.
+
+   Progress, Library and Admin all fetch before they render, and a real
+   Supabase round-trip routinely outlives any sane timeout -- so the window
+   closed before the content existed and the entrance never played at all.
+   Measured: the same content rendered immediately gave 132 elements
+   animating; rendered 1200ms later, 0. That is why the animations
+   "disappeared" after the anti-blink change.
+
+   So the window stays open until the view's content ACTUALLY paints, then
+   closes shortly after. setPanelHtml() reports that first paint. The
+   absolute cap exists only so a view that never renders (a failed fetch)
+   cannot leave the class armed forever. */
+const TX_ENTER_HOLD_MS = 700;    // after the content first appears
+const TX_ENTER_MAX_MS = 10000;   // safety net if content never arrives
+let txEnterEl = null;
 let txEnterTimer = null;
+let txEnterFired = false;
+
+function txClearEntering(){
+  if(txEnterTimer){ clearTimeout(txEnterTimer); txEnterTimer = null; }
+  if(txEnterEl){ txEnterEl.classList.remove('tx-entering'); txEnterEl = null; }
+  txEnterFired = false;
+}
+
+/* Only the FIRST paint inside the arriving view starts the clock. Later ones
+   are the user changing a filter, and extending the window for those would
+   bring the blink straight back. */
+function txNoteEntranceRender(el){
+  if(!txEnterEl || txEnterFired || !el) return;
+  if(txEnterEl !== el && !txEnterEl.contains(el)) return;
+  txEnterFired = true;
+  if(txEnterTimer) clearTimeout(txEnterTimer);
+  txEnterTimer = setTimeout(txClearEntering, TX_ENTER_HOLD_MS);
+}
 
 function txEnterView(el){
   if(!el || !txMotionOn()) return;
-  if(txEnterTimer) clearTimeout(txEnterTimer);
-  document.querySelectorAll('.tx-entering').forEach(n=>n.classList.remove('tx-entering'));
+  txClearEntering();
+  txEnterEl = el;
   el.classList.remove('craft-view');
   void el.offsetWidth;              // flush the removal, or the browser
                                     // coalesces both changes into no change
   el.classList.add('craft-view');
-  /* .tx-entering is what re-enables the per-element entrances underneath
-     this view. It is removed again shortly after, so a later re-render --
-     which is what every dropdown, filter and tab does -- rebuilds the panel
-     with those animations switched off and nothing blinks. */
+  /* .tx-entering re-enables the per-element entrances underneath this view.
+     Removed again once the content has painted and settled, so a later
+     re-render -- which is what every dropdown, filter and tab does --
+     rebuilds the panel with those animations off and nothing blinks. */
   el.classList.add('tx-entering');
-  txEnterTimer = setTimeout(()=>{
-    el.classList.remove('tx-entering');
-    txEnterTimer = null;
-  }, TX_ENTER_MS);
+  txEnterTimer = setTimeout(txClearEntering, TX_ENTER_MAX_MS);
 }
 
 function pushModalClose(closeFn){
