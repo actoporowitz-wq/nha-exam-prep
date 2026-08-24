@@ -15,13 +15,15 @@
    listener existing at all (the page never reloaded itself even once a new
    SW DID activate), this is the real reason "reload twice" repeatedly
    failed to show a genuinely new deploy across multiple rounds of testing. */
-const CACHE_NAME = 'nha-exam-prep-shell-v46';
+const CACHE_NAME = 'nha-exam-prep-shell-v47';
 const SHELL_URLS = [
   '/',
   '/index.html',
   '/manifest.json',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
+  '/icons/icon-192-maskable.png',
+  '/icons/icon-512-maskable.png',
   '/icons/apple-touch-icon.png'
 ];
 

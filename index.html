@@ -1322,13 +1322,94 @@ if('serviceWorker' in navigator){
   /* The score-average selector sits on its own row under the stat pills so
      the pill it controls is directly above it, rather than across the
      toolbar from it. */
-  .score-metric-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
+  /* .score-metric-row is gone: BOTH the student toolbar and the admin
+     drilldown now carry their picker inside the score hero instead, so the
+     separate row had no render site left. */
+
+  /* ---- Progress toolbar alignment -------------------------------------
+     MEASURED, not eyeballed, per .claude/rules/frontend.md. At 1500px the
+     row had three different top edges (141 / 142 / 173px), three heights
+     (pills stretched to 100px against 44px controls) and three font sizes
+     (16 / 13.6 / 13.12px). Causes, in order of how much they mattered:
+
+     1. .score-metric-row carried margin-top:8px while being a flex item of
+        an align-items:center row -- the exact margin-box trap already
+        documented for .view-mode-switch and the flashcards mode switch.
+        That control is gone from this row entirely now.
+     2. .stat-row was flex:1 1 220px, i.e. roughly a third of the width for
+        three pills, so the longest label wrapped to four lines and dragged
+        the whole row to 100px. It gets the larger share now, since it holds
+        the headline figures.
+     3. The toolbar inherited three font sizes because .link-btn (.82rem)
+        and .dd-trigger (.85rem) were never reconciled against the pills.
+
+     align-items:flex-start rather than center: the two groups are different
+     heights by design (a hero figure is taller than a row of buttons), and
+     centring them made the shorter one float mid-air. Top-aligned, they
+     share one edge, which is what reads as aligned. */
+  .progress-toolbar{align-items:flex-start;}
+  .progress-toolbar .stat-row{flex:2 1 480px;align-items:stretch;}
+  .progress-toolbar-controls{flex:1 1 320px;}
+  /* One control height and one font size across the whole controls group. */
+  .progress-toolbar-controls .dd-trigger,
+  .progress-toolbar-controls .link-btn,
+  .progress-toolbar-controls .view-mode-switch{
+    height:44px;box-sizing:border-box;font-size:.85rem;
+  }
+  .progress-toolbar-controls .link-btn{justify-content:center;}
+  .progress-toolbar-controls .view-mode-switch{align-items:center;}
+
+  /* ---- The score hero owns its own picker -----------------------------
+     The metric dropdown used to sit in its own row off to the right of the
+     toolbar with nothing tying it to the number it drove, so it read as an
+     unrelated stray control. It now lives INSIDE the pill, directly under
+     the figure: the trigger doubles as the figure's label, which is what
+     makes it self-explanatory without adding a separate caption. */
+  .score-hero{align-items:flex-start;}
+  .score-hero .score-hero-body{display:flex;flex-direction:column;gap:2px;min-width:0;}
+  .score-hero .score-hero-num{font-size:1.55rem;line-height:1.15;font-weight:800;letter-spacing:-.02em;color:var(--ink);}
+  .score-hero .score-hero-basis{font-size:.72rem;color:var(--muted);line-height:1.3;}
+  /* The trigger is text-with-a-chevron, not a boxed control sitting on top
+     of another boxed control. */
+  .score-hero .dd{display:block;flex:none;max-width:100%;}
+  .score-hero .dd-trigger{
+    height:auto;width:auto;padding:1px 0;border:none;background:none;
+    font-size:.78rem;font-weight:600;color:var(--accent);
+    gap:4px;justify-content:flex-start;white-space:normal;text-align:left;
+  }
+  .score-hero .dd-trigger:hover{text-decoration:underline;}
+  .score-hero .dd-trigger svg{flex:none;}
+  /* A filtered average is a different number from the all-rounds one, so the
+     pill says so rather than leaving the figure to be misread. */
+  .score-hero.is-filtered{border-color:var(--accent);}
+  .score-hero.is-filtered .score-hero-basis{color:var(--accent);}
   /* [hidden] has to win here. The attribute's display:none comes from the UA
      stylesheet, so ANY author display rule outranks it -- which left an empty
      red pill rendering permanently beside "Send feedback" even with zero
      unread replies. Reported as "a weird red circle that serves no function",
      and it was exactly that. */
   .fb-unread-dot[hidden]{display:none;}
+  /* The same dot now also rides the two controls a student sees BEFORE
+     opening anything -- the sidebar Settings trigger and the mobile More
+     button -- so a reply is visible on login rather than only once the
+     settings menu is already open. */
+  .bottom-bar button{position:relative;}
+  .fb-unread-dot.fb-dot-corner{
+    position:absolute;top:3px;left:50%;margin-left:6px;min-width:16px;height:16px;font-size:.62rem;
+  }
+  /* Collapsed sidebar hides the label but must keep the signal. */
+  .sidebar.collapsed .settings-trigger .fb-unread-dot{margin-left:2px;}
+  /* Archived replies: same card, visibly stood down. */
+  .fb-reply.archived{opacity:.72;}
+  .fb-reply-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
+  .fb-reply-actions .link-btn{font-size:.78rem;padding:5px 10px;}
+  .fb-archived-head{
+    display:flex;align-items:center;gap:8px;width:100%;background:none;border:none;cursor:pointer;
+    font-family:system-ui,sans-serif;font-size:.78rem;font-weight:700;color:var(--muted);
+    padding:6px 0;margin-top:4px;
+  }
+  .fb-archived-head svg{transition:transform .18s ease;}
+  .fb-archived-head[aria-expanded="true"] svg{transform:rotate(180deg);}
   .fb-unread-dot{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;margin-left:7px;padding:0 5px;border-radius:9px;background:var(--bad);color:#fff;font-size:.7rem;font-weight:700;font-family:system-ui,sans-serif;line-height:1;}
   .fb-reply{border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-bottom:10px;background:var(--surface-2);}
   .fb-reply.unread{border-color:var(--accent);background:var(--accent-soft);}
@@ -1894,9 +1975,794 @@ if('serviceWorker' in navigator){
     .dialog-actions{flex-direction:column;}
     .dialog-actions > *{width:100%;box-sizing:border-box;}
   }
+
+/* ================================================================
+   SITE PASS — ported from Claude Design project "Exam prep app
+   redesign", file set: baseline/craft/data/transitions.
+   Ported 2026-08-23. Layers below are VERBATIM from the design
+   source so a re-sync can overwrite them wholesale; the APP
+   BRIDGE at the end is the only hand-maintained part.
+
+   ONE GATE: every rule is scoped to .craft, which lives on <body>.
+   Remove class="craft" from <body> and the app is exactly as it
+   was before this block existed. Nothing else needs reverting.
+   ================================================================ */
+
+/* =============================================================
+   craft-layer.css — ADDITIVE polish layer for NHA Exam Prep.
+   Paste after current_styles.css. Nothing here changes layout,
+   structure, spacing, or copy. It only adds:
+     · motion (transitions, entrances, state changes)
+     · depth (layered elevation + a short gradient budget)
+     · micro-interactions (hover / focus / press / expand)
+
+   Every rule is scoped to `.craft`, so the whole layer ships
+   behind ONE markup change: <body class="craft">
+   Remove the class to instantly revert to today's app; delete
+   the prefix if you'd rather have it on unconditionally.
+
+   Budgets, deliberately narrow:
+     UI transitions 120–220ms · entrances ≤320ms · ease-out only
+     no bounce/elastic/spring · nothing loops but real loading
+     gradients ONLY on: mastery rings, progress fills, primary
+     action, landing hero, and barely-there surface sheen
+   ============================================================= */
+
+/* ---- 1. New tokens, alongside the existing ones ------------- */
+.craft{
+  --dur-fast:120ms;   /* state flips: hover, tick, press */
+  --dur:180ms;        /* default UI change */
+  --dur-slow:220ms;   /* larger reveals, expand/collapse */
+  --dur-enter:320ms;  /* first-paint entrances */
+  --ease:cubic-bezier(.22,.61,.36,1);       /* ease-out */
+  --ease-out-soft:cubic-bezier(.33,1,.68,1);
+
+  /* Elevation. Two stacked shadows each: a tight contact shadow
+     plus a wide ambient one — that pairing is what reads as
+     depth rather than as a grey blur. */
+  --elev-1:0 1px 2px rgba(16,20,30,.05), 0 2px 8px -4px rgba(16,20,30,.10);
+  --elev-2:0 1px 2px rgba(16,20,30,.06), 0 10px 24px -12px rgba(16,20,30,.20);
+  --elev-3:0 2px 4px rgba(16,20,30,.07), 0 22px 44px -18px rgba(16,20,30,.28);
+  --elev-accent:0 8px 22px -10px var(--glow);
+
+  /* Surface sheen: a 1-2% top-down lift so panels read as
+     objects with a lit edge, not as flat fills. Intentionally
+     near-invisible in isolation. */
+  --sheen:linear-gradient(180deg, rgba(255,255,255,.55), rgba(255,255,255,0) 60%);
+  --grad-accent:linear-gradient(135deg,
+    color-mix(in oklab, var(--accent) 82%, white),
+    var(--accent) 62%,
+    color-mix(in oklab, var(--accent) 88%, black));
+}
+:root[data-theme="night"] .craft,
+.craft:where([data-theme="night"] *){
+  --elev-1:0 1px 2px rgba(0,0,0,.40), 0 2px 8px -4px rgba(0,0,0,.50);
+  --elev-2:0 1px 2px rgba(0,0,0,.45), 0 10px 24px -12px rgba(0,0,0,.65);
+  --elev-3:0 2px 4px rgba(0,0,0,.5), 0 22px 44px -18px rgba(0,0,0,.75);
+  --sheen:linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,0) 60%);
+}
+
+/* ---- 2. Global: one honest focus ring, one press response --- */
+.craft :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:8px;}
+.craft .btn,.craft .link-btn,.craft .opt,.craft .navlink,.craft .dropdown,
+.craft .seg button,.craft .tabs button,.craft .bottom-nav .tab,.craft .flag-btn{
+  transition:background-color var(--dur) var(--ease),
+             border-color var(--dur) var(--ease),
+             color var(--dur) var(--ease),
+             box-shadow var(--dur) var(--ease),
+             transform var(--dur-fast) var(--ease);
+}
+.craft .btn:active,.craft .link-btn:active,.craft .opt:active,
+.craft .flag-btn:active,.craft .dropdown:active{transform:translateY(1px);}
+
+/* ---- 3. Primary action: the one strong gradient ------------- */
+.craft .btn-primary,.craft .resume-banner .go,.craft #progressResumeBtn .go{
+  background-image:var(--grad-accent);
+  box-shadow:var(--elev-accent);
+}
+.craft .btn-primary:hover{box-shadow:0 10px 26px -10px var(--glow);}
+.craft .btn-primary:disabled{background-image:none;box-shadow:none;}
+
+/* ---- 4. Surfaces: sheen + elevation that responds to state -- */
+.craft .panel,.craft .round-card,.craft .lib-row,.craft .flash-face,
+.craft .empty-state,.craft .resume-banner{
+  background-image:var(--sheen);
+  box-shadow:var(--elev-1);
+  transition:box-shadow var(--dur) var(--ease),
+             border-color var(--dur) var(--ease),
+             transform var(--dur) var(--ease);
+}
+/* Only things you can act on lift on hover. Read-only panels
+   never move — that's what makes the lift mean something. */
+.craft .round-card:hover,.craft .lib-row:hover{box-shadow:var(--elev-2);border-color:var(--accent);}
+.craft .round-card:hover .round-card-name{color:var(--accent);}
+.craft .stat-pill{background-image:var(--sheen);transition:border-color var(--dur) var(--ease);}
+
+/* ---- 5. Mastery rings: gradient stroke + fill on arrival ----
+   Needs the <defs> gradient in the ring SVG (see MARKUP NOTES).
+   Falls back to the existing flat stroke if the defs are absent. */
+.craft .ring-wrap .fill{stroke:url(#ringGradAccent);}
+.craft .ring-wrap .fill.mastered{stroke:url(#ringGradGood);}
+.craft .ring-grad-from{stop-color:color-mix(in oklab, var(--accent) 60%, white);}
+.craft .ring-grad-to{stop-color:var(--accent);}
+.craft .ring-grad-good-from{stop-color:color-mix(in oklab, var(--good) 55%, white);}
+.craft .ring-grad-good-to{stop-color:var(--good);}
+/* The sweep. --ring-circ is the circumference, already needed
+   inline for stroke-dasharray, so no new markup for this part. */
+@keyframes craftRingFill{from{stroke-dashoffset:var(--ring-circ);}}
+.craft .ring-wrap .fill{animation:craftRingFill var(--dur-enter) var(--ease-out-soft) both;}
+.craft .ring-num{animation:craftFadeIn var(--dur-enter) var(--ease) both;animation-delay:80ms;}
+
+/* ---- 6. Progress + funnel fills ---------------------------- */
+.craft .bar,.craft .funnel-bar{box-shadow:inset 0 1px 2px rgba(16,20,30,.08);}
+.craft .bar-fill,.craft .funnel-bar-fill{
+  background-image:var(--grad-accent);
+  transition:width var(--dur-slow) var(--ease);
+}
+@keyframes craftBarGrow{from{transform:scaleX(0);}}
+.craft .funnel-bar-fill{transform-origin:left center;animation:craftBarGrow var(--dur-enter) var(--ease-out-soft) both;}
+
+/* ---- 7. Answering a question ------------------------------- */
+.craft .opt:hover{border-color:var(--accent);box-shadow:var(--elev-1);}
+.craft .opt.selected{box-shadow:0 0 0 1px var(--accent) inset;}
+/* Verdict marks. Pseudo-elements, so no markup change. */
+.craft .opt.correct::after,.craft .opt.incorrect::after{
+  margin-left:auto;font-weight:800;font-size:.95rem;line-height:1.45;
+  animation:craftTick var(--dur-slow) var(--ease-out-soft) both;
+}
+.craft .opt.correct::after{content:"✓";color:var(--good);}
+.craft .opt.incorrect::after{content:"✕";color:var(--bad);}
+@keyframes craftTick{from{opacity:0;transform:scale(.72);}}
+/* Both verdicts resolve together, never red-then-green. */
+.craft .opt.correct,.craft .opt.incorrect{animation:craftVerdict var(--dur-slow) var(--ease) both;}
+@keyframes craftVerdict{from{background-color:var(--surface);border-color:var(--line);}}
+/* Question-number dots tick in. */
+.craft .dot{transition:background-color var(--dur-fast) var(--ease),
+            border-color var(--dur-fast) var(--ease),
+            transform var(--dur-fast) var(--ease);}
+.craft .dot:hover{transform:scale(1.12);}
+.craft .dot.selected{animation:craftTick var(--dur-fast) var(--ease-out-soft) both;}
+
+/* ---- 8. View-to-view transitions ---------------------------
+   Attach .craft-view to the panel the router swaps. Entrance
+   only — an exit animation would delay the next screen. */
+@keyframes craftViewIn{from{opacity:0;transform:translateY(8px);}}
+.craft .craft-view{animation:craftViewIn var(--dur-enter) var(--ease) both;}
+@keyframes craftFadeIn{from{opacity:0;}}
+
+/* Results arriving after submit: score leads, review follows. */
+.craft .score-big{animation:craftScoreIn var(--dur-enter) var(--ease-out-soft) both;}
+@keyframes craftScoreIn{from{opacity:0;transform:translateY(10px);}}
+.craft .score-sub{animation:craftViewIn var(--dur-enter) var(--ease) both;animation-delay:60ms;}
+.craft .result-actions{animation:craftViewIn var(--dur-enter) var(--ease) both;animation-delay:100ms;}
+.craft .review-item{animation:craftViewIn var(--dur-enter) var(--ease) both;}
+.craft .review-item:nth-child(1){animation-delay:120ms;}
+.craft .review-item:nth-child(2){animation-delay:160ms;}
+.craft .review-item:nth-child(3){animation-delay:200ms;}
+.craft .review-item:nth-child(n+4){animation-delay:240ms;}
+
+/* ---- 9. Lists that arrive in order ------------------------- */
+.craft .round-grid > .round-card,.craft .lib-row{animation:craftViewIn var(--dur-enter) var(--ease) both;}
+.craft .round-grid > .round-card:nth-child(1),.craft .lib-row:nth-child(1){animation-delay:0ms;}
+.craft .round-grid > .round-card:nth-child(2),.craft .lib-row:nth-child(2){animation-delay:40ms;}
+.craft .round-grid > .round-card:nth-child(3),.craft .lib-row:nth-child(3){animation-delay:80ms;}
+.craft .round-grid > .round-card:nth-child(4),.craft .lib-row:nth-child(4){animation-delay:120ms;}
+.craft .round-grid > .round-card:nth-child(n+5),.craft .lib-row:nth-child(n+5){animation-delay:160ms;}
+.craft .stat-pill{animation:craftViewIn var(--dur-enter) var(--ease) both;}
+.craft .stat-pill:nth-child(2){animation-delay:40ms;}
+.craft .stat-pill:nth-child(3){animation-delay:80ms;}
+
+/* ---- 10. Skeletons ----------------------------------------
+   The existing .skel already shimmers; this tightens it and
+   staggers rows so the block reads as one object loading. */
+.craft .skel{animation-duration:1.2s;}
+.craft .skel-row:nth-child(2) .skel{animation-delay:.08s;}
+.craft .skel-row:nth-child(3) .skel{animation-delay:.16s;}
+.craft .skel-row:nth-child(n+4) .skel{animation-delay:.24s;}
+.craft .skel-row{animation:craftFadeIn var(--dur) var(--ease) both;}
+
+/* ---- 11. Micro-interactions on chrome and controls --------- */
+.craft .navlink:hover{background:var(--nav-bg-2);color:#fff;}
+.craft .navlink.active{box-shadow:inset 2px 0 0 var(--accent);}
+.craft .bottom-nav .tab:hover{color:#fff;}
+.craft .bottom-nav .tab .ic{transition:transform var(--dur-fast) var(--ease);}
+.craft .bottom-nav .tab.active .ic{transform:translateY(-1px);}
+.craft .dropdown:hover{border-color:var(--accent);box-shadow:var(--elev-1);}
+.craft .dropdown .chev{transition:transform var(--dur) var(--ease);}
+.craft .dropdown[aria-expanded="true"] .chev,.craft .dropdown.open .chev{transform:rotate(180deg);}
+/* Dropdown / kebab menus opening. Verify the open-state hook
+   in your markup — see MARKUP NOTES. */
+@keyframes craftMenuIn{from{opacity:0;transform:translateY(-4px) scale(.985);}}
+.craft .dropdown-menu,.craft .set-menu,.craft .settings-popover{
+  animation:craftMenuIn var(--dur) var(--ease) both;transform-origin:top center;
+  box-shadow:var(--elev-3);
+}
+.craft .seg button:hover{color:var(--ink);}
+.craft .seg button.active{box-shadow:inset 0 -2px 0 var(--accent);}
+.craft .tabs button:hover{color:var(--ink);}
+.craft .tabs button{position:relative;}
+.craft .tabs button.active{border-bottom-color:transparent;}
+.craft .tabs button.active::after{
+  content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;
+  background:var(--accent);border-radius:2px;
+  animation:craftUnderline var(--dur-slow) var(--ease-out-soft) both;
+}
+@keyframes craftUnderline{from{transform:scaleX(.2);opacity:0;}}
+.craft .searchbox{transition:border-color var(--dur) var(--ease),box-shadow var(--dur) var(--ease);}
+.craft .searchbox:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+
+/* Expand / collapse (review items, round-card detail). Uses the
+   modern interpolate-size path where available and degrades to
+   an instant open elsewhere — no JS height measuring. */
+@supports (interpolate-size:allow-keywords){
+  .craft .craft-expandable{interpolate-size:allow-keywords;transition:height var(--dur-slow) var(--ease);height:0;overflow:hidden;}
+  .craft .craft-expandable[data-open]{height:auto;}
+}
+
+/* ---- 12. Badges arriving ----------------------------------- */
+/* One overshoot-free pop plus a single ping, then still. */
+@keyframes craftBadgeIn{from{opacity:0;transform:scale(.6);}}
+@keyframes craftPing{from{opacity:.55;transform:scale(.9);}to{opacity:0;transform:scale(2.1);}}
+.craft .badge-dot{position:relative;animation:craftBadgeIn var(--dur-slow) var(--ease-out-soft) both;}
+.craft .badge-dot::after{
+  content:"";position:absolute;inset:0;border-radius:inherit;background:inherit;
+  animation:craftPing 620ms var(--ease) 1 both;
+}
+.craft .lib-badge{transition:background-color var(--dur) var(--ease),color var(--dur) var(--ease);}
+
+/* ---- 13. Flashcard flip ------------------------------------
+   The app already flips at 750ms on a custom curve. Bring it
+   into budget and drop the S-curve for a plain ease-out. */
+.craft .flash-flip-inner.answered{animation-duration:var(--dur-slow);animation-timing-function:var(--ease-out-soft);}
+.craft .flash-face{box-shadow:var(--elev-2);}
+
+/* ---- 14. Empty states arrive ------------------------------- */
+.craft .empty-state .es-mark{animation:craftMarkIn var(--dur-enter) var(--ease-out-soft) both;}
+@keyframes craftMarkIn{from{opacity:0;transform:translateY(6px) scale(.94);}}
+.craft .empty-state .es-title{animation:craftViewIn var(--dur-enter) var(--ease) both;animation-delay:60ms;}
+.craft .empty-state .es-body{animation:craftViewIn var(--dur-enter) var(--ease) both;animation-delay:110ms;}
+.craft .empty-state .btn{animation:craftViewIn var(--dur-enter) var(--ease) both;animation-delay:160ms;}
+
+/* ---- 15. Landing hero ------------------------------------- */
+.craft .landing-hero{
+  background-image:
+    radial-gradient(120% 140% at 8% 0%, color-mix(in oklab, var(--accent) 34%, transparent), transparent 58%),
+    linear-gradient(160deg, var(--nav-bg-2), var(--nav-bg));
+  box-shadow:var(--elev-3);
+}
+.craft .landing-hero h1{animation:craftViewIn var(--dur-enter) var(--ease) both;}
+.craft .landing-hero p{animation:craftViewIn var(--dur-enter) var(--ease) both;animation-delay:60ms;}
+.craft .landing-hero .btn-row{animation:craftViewIn var(--dur-enter) var(--ease) both;animation-delay:110ms;}
+
+/* ---- 16. Reduced motion: the whole layer stands down -------
+   Depth, gradients and hover colour stay (they carry meaning
+   and cost nothing); every animation and transition goes. */
+@media (prefers-reduced-motion:reduce){
+  .craft *,.craft *::before,.craft *::after{
+    animation-duration:1ms !important;
+    animation-delay:0ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:1ms !important;
+  }
+  .craft .skel{animation:none !important;background-position:50% 0;}
+  .craft .badge-dot::after{display:none;}
+}
+
+
+/* =============================================================
+   data-layer.css — ADDITIVE, sits after craft-layer.css.
+   Adds: a real numeric type scale, light sparklines for
+   Progress, the richer charts for the OPT-IN Insights surface
+   only, abstract illustration, and the mastery moment.
+
+   The funnel graph is gone. The motif is now the mastery ring —
+   a shape the product already had — echoed as concentric arcs
+   in illustration and as a dashed ghost ring in empty states.
+
+   Scoped to .craft, same gate as craft-layer.
+   ============================================================= */
+
+/* ---- 1. Numeric type scale + tabular everywhere ------------- */
+.craft{
+  --num-hero:5.5rem;  /* score reveal */
+  --num-xl:3.4rem;    /* mastery % on a round card */
+  --num-lg:2rem;      /* stat headline */
+  --num-md:1.35rem;   /* inline emphasis */
+}
+.craft .score-big,.craft .ring-num,.craft .stat-pill strong,
+.craft .num,.craft .num-hero,.craft .num-xl,.craft .num-lg,
+.craft .chart-label,.craft .count-up::after,.craft .adm-num{
+  font-variant-numeric:tabular-nums;
+  font-feature-settings:"tnum" 1;
+}
+.craft .num-hero{font-size:var(--num-hero);font-weight:800;letter-spacing:-.045em;line-height:.9;}
+.craft .num-xl{font-size:var(--num-xl);font-weight:800;letter-spacing:-.04em;line-height:.92;}
+.craft .num-lg{font-size:var(--num-lg);font-weight:800;letter-spacing:-.03em;line-height:1;}
+.craft .num-unit{font-size:.38em;font-weight:700;letter-spacing:0;color:var(--muted);margin-left:.08em;}
+.craft .num-caption{font-size:.76rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
+.craft .score-big{font-size:var(--num-hero);letter-spacing:-.045em;line-height:.9;margin:2px 0 6px;}
+
+/* ---- 2. Light sparkline — the ONLY chart Progress gets ------
+   No axis, no legend, no gridlines. If it needs a key, it
+   belongs on Insights instead. */
+.craft .spark{display:block;overflow:visible;}
+.craft .spark .spark-line{fill:none;stroke:var(--accent);stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+.craft .spark .spark-line.mastered{stroke:var(--good);}
+.craft .spark .spark-area{fill:var(--accent);opacity:.12;}
+.craft .spark .spark-area.mastered{fill:var(--good);}
+.craft .spark .spark-end{fill:var(--accent);}
+.craft .spark .spark-end.mastered{fill:var(--good);}
+@keyframes drawLine{from{stroke-dashoffset:var(--len);}}
+.craft .spark .spark-line{stroke-dasharray:var(--len);animation:drawLine var(--dur-enter) var(--ease-out-soft) both;}
+
+/* ---- 3. INSIGHTS ONLY — heatmap + score-over-time ----------
+   Deliberately scoped under .insights so these can never leak
+   back onto Progress. */
+.craft .insights .heat{display:block;width:100%;height:auto;}
+.craft .insights .heat .cell{rx:5;}
+.craft .insights .heat .cell-none{fill:var(--surface-2);stroke:var(--line);stroke-width:1;}
+.craft .insights .heat .cell-part{fill:var(--accent);opacity:.42;}
+.craft .insights .heat .cell-done{fill:var(--good);}
+@keyframes heatCell{from{opacity:0;transform:scale(.72);}}
+.craft .insights .heat .cell-part,
+.craft .insights .heat .cell-done{transform-origin:center;animation:heatCell var(--dur-slow) var(--ease-out-soft) both;}
+
+.craft .insights .chart{display:block;width:100%;height:auto;overflow:visible;}
+.craft .insights .chart .axis{stroke:var(--line);stroke-width:1;}
+.craft .insights .chart .band-fill{fill:var(--accent);opacity:.10;}
+.craft .insights .chart .line-cold{fill:none;stroke:var(--muted);stroke-width:2;stroke-linejoin:round;stroke-linecap:round;stroke-dasharray:3 3;}
+.craft .insights .chart .line-cume{fill:none;stroke:var(--accent);stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round;}
+.craft .insights .chart .pt{fill:var(--accent);stroke:var(--surface);stroke-width:2;}
+.craft .insights .chart-label{fill:var(--muted);font-size:10px;font-weight:700;}
+.craft .chart-key{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;}
+.craft .chart-key span{display:flex;align-items:center;gap:6px;font-size:.74rem;font-weight:600;color:var(--muted);}
+.craft .chart-key i{width:14px;height:2px;border-radius:2px;background:var(--accent);flex:none;}
+.craft .chart-key i.cold{background:none;height:0;border-top:2px dashed var(--muted);}
+.craft .insights .chart .line-cume{stroke-dasharray:var(--len);animation:drawLine 320ms var(--ease-out-soft) both;animation-delay:60ms;}
+.craft .insights .chart .pt{animation:craftFadeIn var(--dur-slow) var(--ease) both;animation-delay:240ms;}
+
+/* Insights is opt-in: it announces itself as a distinct place. */
+.craft .insights-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:4px;}
+.craft .insights-badge{
+  font-size:.64rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent-line,var(--line));
+  border-radius:999px;padding:4px 10px;
+}
+
+/* ---- 4. Illustration — concentric arcs + a dot field -------
+   Echoes the mastery ring the product already draws, so it
+   introduces no second visual language. */
+.craft .art{display:block;width:100%;height:auto;overflow:visible;}
+.craft .art .art-grid{stroke:currentColor;stroke-width:1;opacity:.13;}
+.craft .art .art-arc{fill:none;stroke:currentColor;stroke-width:2;opacity:.30;}
+.craft .art .art-arc-hit{fill:none;stroke:#4ADE80;stroke-width:3;stroke-linecap:round;opacity:.95;}
+.craft .art .art-dot{fill:currentColor;opacity:.34;}
+.craft .art .art-dot-hit{fill:#4ADE80;opacity:.9;}
+.craft .art .art-halo{fill:var(--accent);opacity:.14;}
+@keyframes artDot{from{opacity:0;transform:translateY(5px);}}
+.craft .art .art-dot,.craft .art .art-dot-hit{transform-origin:center;animation:artDot var(--dur-enter) var(--ease) both;}
+@keyframes artArc{from{stroke-dashoffset:var(--len);}}
+.craft .art .art-arc-hit{stroke-dasharray:var(--len);animation:artArc 420ms var(--ease-out-soft) both;animation-delay:120ms;}
+
+/* Ghost ring — the empty-state mark, same geometry as .ring-wrap */
+.craft .ghost-ring circle{fill:none;stroke:var(--line);stroke-width:5;stroke-dasharray:5 6;}
+.craft .ghost-ring .hint{stroke:var(--accent);stroke-dasharray:20 200;opacity:.7;}
+
+/* ---- 5. THE MASTERY MOMENT -------------------------------- */
+@property --cu{syntax:"<integer>";initial-value:0;inherits:false;}
+.craft .count-up{position:relative;}
+.craft .count-up::after{counter-reset:cu var(--cu);content:counter(cu) "%";}
+@keyframes countTo{from{--cu:0;}to{--cu:var(--cu-to);}}
+.craft .mastery-moment .count-up::after{animation:countTo 900ms var(--ease-out-soft) both;}
+.craft .mastery-moment .ring-wrap .fill{animation-duration:900ms;}
+.craft .mastery-moment{position:relative;}
+.craft .mastery-halo{
+  position:absolute;border-radius:999px;border:1.5px solid var(--good);
+  pointer-events:none;animation:masteryHalo 900ms var(--ease) 1 both;animation-delay:220ms;
+}
+@keyframes masteryHalo{from{opacity:.5;transform:scale(.82);}to{opacity:0;transform:scale(1.5);}}
+.craft .mastery-tag{
+  display:inline-flex;align-items:center;gap:6px;font-size:.7rem;font-weight:800;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--good);
+  background:var(--good-bg);border-radius:999px;padding:5px 11px;
+  animation:craftViewIn var(--dur-enter) var(--ease) both;animation-delay:640ms;
+}
+
+/* ---- 6. Admin density relief ------------------------------ */
+.craft .adm-num{font-weight:700;}
+.craft .adm-table{width:100%;border-collapse:collapse;}
+.craft .adm-table th{
+  text-align:left;font-size:.68rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--muted);padding:10px 12px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--surface);
+}
+.craft .adm-table td{padding:11px 12px;border-bottom:1px solid var(--line);font-size:.85rem;vertical-align:top;}
+.craft .adm-table tbody tr{transition:background-color var(--dur-fast) var(--ease);}
+.craft .adm-table tbody tr:hover{background:var(--surface-2);}
+.craft .adm-sev{display:inline-flex;align-items:center;gap:6px;font-size:.7rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;border-radius:999px;padding:3px 9px;}
+.craft .adm-sev.err{background:var(--bad-bg);color:var(--bad);}
+.craft .adm-sev.warn{background:var(--flag-bg);color:var(--flag);}
+.craft .adm-sev.ok{background:var(--good-bg);color:var(--good);}
+.craft .adm-mono{font-family:var(--font-mono);font-size:.78rem;color:var(--muted);}
+
+/* ---- 7. Reduced motion ----------------------------------- */
+@media (prefers-reduced-motion:reduce){
+  .craft .insights .heat .cell-part,.craft .insights .heat .cell-done,
+  .craft .insights .chart .line-cume,.craft .insights .chart .pt,
+  .craft .spark .spark-line,
+  .craft .art .art-dot,.craft .art .art-dot-hit,.craft .art .art-arc-hit,
+  .craft .mastery-moment .count-up::after,
+  .craft .mastery-tag{animation:none !important;}
+  .craft .mastery-halo{display:none;}
+  .craft .count-up{--cu:var(--cu-to);}
+}
+
+
+/* =============================================================
+   transitions-layer.css — ADDITIVE. Sits after craft-layer.css.
+   Nothing in this product should click-and-appear.
+
+   THE TWO RULES
+   1. Direction carries meaning. A menu grows from the control
+      that opened it. A sheet rises from the edge it lives on.
+      Going deeper moves forward; Back reverses the same move,
+      so Back never reads as a new screen.
+   2. Exits matter as much as entrances. Everything that
+      animates open animates closed. That is the single biggest
+      difference between "designed" and "cheap".
+
+   MARKUP CONTRACT — one attribute pair, no class renames:
+      data-tx="menu|popover|sheet|modal|backdrop|panel|drawer"
+      data-state="open"     while entering / open
+      data-state="closing"  set on dismiss, removed on animationend
+   Directional views:  data-nav="forward|back"
+   Expanders:          .tx-expand + [data-open]
+   Tab panels:         .tx-tabpanel + data-nav
+
+   If your dismiss path can't set data-state="closing" and wait
+   for animationend, the exits silently degrade to instant —
+   entrances still work. See the note on Progress in the docs.
+   ============================================================= */
+
+.craft{
+  --tx-fast:140ms;   /* menus, chevrons, tab underlines */
+  --tx:200ms;        /* modals, expands, panels */
+  --tx-enter:280ms;  /* sheets and full-screen */
+  --tx-ease:cubic-bezier(.22,.61,.36,1);
+}
+
+/* ---- 1. Menus & custom dropdowns ---------------------------
+   These replace every native <select>, so they open constantly.
+   They grow from the control: origin top, a slight vertical
+   scale, never a centre fade. */
+.craft [data-tx="menu"]{transform-origin:top center;}
+.craft [data-tx="menu"][data-state="open"]{animation:txMenuIn var(--tx-fast) var(--tx-ease) both;}
+.craft [data-tx="menu"][data-state="closing"]{animation:txMenuOut var(--tx-fast) var(--tx-ease) both;pointer-events:none;}
+@keyframes txMenuIn {from{opacity:0;transform:translateY(-6px) scaleY(.94);}}
+@keyframes txMenuOut{to{opacity:0;transform:translateY(-4px) scaleY(.97);}}
+/* Anchored variants — the menu grows from its own corner. */
+.craft [data-tx="menu"][data-anchor="top-right"]{transform-origin:top right;}
+.craft [data-tx="menu"][data-anchor="bottom-left"]{transform-origin:bottom left;}
+.craft [data-tx="menu"][data-anchor="bottom-right"]{transform-origin:bottom right;}
+
+/* Settings popover: same grammar, anchored to the gear. */
+.craft [data-tx="popover"]{transform-origin:bottom left;}
+.craft [data-tx="popover"][data-state="open"]{animation:txPopIn var(--tx-fast) var(--tx-ease) both;}
+.craft [data-tx="popover"][data-state="closing"]{animation:txPopOut var(--tx-fast) var(--tx-ease) both;pointer-events:none;}
+@keyframes txPopIn {from{opacity:0;transform:translateY(6px) scale(.96);}}
+@keyframes txPopOut{to{opacity:0;transform:translateY(4px) scale(.98);}}
+
+/* ---- 2. Mobile more-sheet — rises from the edge it lives on */
+.craft [data-tx="sheet"][data-state="open"]{animation:txSheetIn var(--tx-enter) var(--tx-ease) both;}
+.craft [data-tx="sheet"][data-state="closing"]{animation:txSheetOut var(--tx) var(--tx-ease) both;pointer-events:none;}
+@keyframes txSheetIn {from{transform:translateY(100%);}}
+@keyframes txSheetOut{to{transform:translateY(100%);}}
+
+/* ---- 3. Modal dialogs + backdrop --------------------------
+   The backdrop is a separate, faster curve so the dialog never
+   appears to drag a grey sheet behind it. */
+.craft [data-tx="modal"][data-state="open"]{animation:txModalIn var(--tx) var(--tx-ease) both;}
+.craft [data-tx="modal"][data-state="closing"]{animation:txModalOut var(--tx-fast) var(--tx-ease) both;pointer-events:none;}
+@keyframes txModalIn {from{opacity:0;transform:translateY(10px) scale(.97);}}
+@keyframes txModalOut{to{opacity:0;transform:translateY(6px) scale(.985);}}
+.craft [data-tx="backdrop"][data-state="open"]{animation:txFadeIn 160ms var(--tx-ease) both;}
+.craft [data-tx="backdrop"][data-state="closing"]{animation:txFadeOut var(--tx-fast) var(--tx-ease) both;}
+@keyframes txFadeIn {from{opacity:0;}}
+@keyframes txFadeOut{to{opacity:0;}}
+
+/* ---- 4. Side panels — feedback, AI chat -------------------
+   Slide from the edge they're docked to, and back out the same
+   way. Never a fade. */
+.craft [data-tx="panel"][data-state="open"]{animation:txPanelIn var(--tx-enter) var(--tx-ease) both;}
+.craft [data-tx="panel"][data-state="closing"]{animation:txPanelOut var(--tx) var(--tx-ease) both;pointer-events:none;}
+@keyframes txPanelIn {from{transform:translateX(100%);}}
+@keyframes txPanelOut{to{transform:translateX(100%);}}
+.craft [data-tx="panel"][data-edge="left"][data-state="open"]{animation-name:txPanelInL;}
+.craft [data-tx="panel"][data-edge="left"][data-state="closing"]{animation-name:txPanelOutL;}
+@keyframes txPanelInL {from{transform:translateX(-100%);}}
+@keyframes txPanelOutL{to{transform:translateX(-100%);}}
+
+/* ---- 5. Full-screen mode, in and out ---------------------
+   Chrome leaves upward, the content settles into the space it
+   left. Exiting reverses precisely. */
+.craft [data-tx="fullscreen"][data-state="open"]{animation:txFsIn var(--tx-enter) var(--tx-ease) both;}
+.craft [data-tx="fullscreen"][data-state="closing"]{animation:txFsOut var(--tx) var(--tx-ease) both;}
+@keyframes txFsIn {from{opacity:0;transform:scale(.985);}}
+@keyframes txFsOut{to{opacity:0;transform:scale(.99);}}
+.craft .tx-chrome[data-state="closing"]{animation:txChromeOut var(--tx-fast) var(--tx-ease) both;}
+.craft .tx-chrome[data-state="open"]{animation:txChromeIn var(--tx) var(--tx-ease) both;}
+@keyframes txChromeOut{to{opacity:0;transform:translateY(-8px);}}
+@keyframes txChromeIn {from{opacity:0;transform:translateY(-8px);}}
+
+/* ---- 6. Expanding in place — round card attempts, missed
+   question answers. Height animates where the browser
+   supports it; content always fades up so the reveal
+   reads even without height interpolation. */
+.craft .tx-expand{overflow:hidden;height:0;}
+/* Value-matched, not presence-matched: an empty data-open=""
+   must never read as open. */
+.craft .tx-expand[data-open="true"]{height:auto;}
+@supports (interpolate-size:allow-keywords){
+  .craft .tx-expand{interpolate-size:allow-keywords;transition:height var(--tx) var(--tx-ease);}
+}
+.craft .tx-expand > *{animation:txRevealOut var(--tx-fast) var(--tx-ease) both;}
+.craft .tx-expand[data-open="true"] > *{animation:txRevealIn var(--tx) var(--tx-ease) both;animation-delay:40ms;}
+@keyframes txRevealIn {from{opacity:0;transform:translateY(-6px);}}
+@keyframes txRevealOut{to{opacity:0;transform:translateY(-4px);}}
+/* The disclosure caret turns with it. */
+.craft .tx-caret{transition:transform var(--tx) var(--tx-ease);}
+.craft [data-open="true"] > .tx-caret,.craft .tx-caret[data-open="true"]{transform:rotate(90deg);}
+
+/* ---- 7. Tab switching — Rounds/Missed, Grid/Stacked,
+   MC/Recall, admin sub-nav. The new panel enters from
+   the side you moved toward. */
+.craft .tx-tabpanel[data-nav="forward"]{animation:txTabFwd var(--tx) var(--tx-ease) both;}
+.craft .tx-tabpanel[data-nav="back"]{animation:txTabBack var(--tx) var(--tx-ease) both;}
+@keyframes txTabFwd {from{opacity:0;transform:translateX(12px);}}
+@keyframes txTabBack{from{opacity:0;transform:translateX(-12px);}}
+/* The active underline slides between tabs rather than cutting. */
+.craft .tabs{position:relative;}
+.craft .tabs button.active::after{transition:transform var(--tx) var(--tx-ease),left var(--tx) var(--tx-ease);}
+/* Segmented controls: the thumb travels. */
+.craft .seg{position:relative;}
+.craft .seg button{transition:color var(--tx-fast) var(--tx-ease);}
+.craft .seg button.active{transition:background-color var(--tx-fast) var(--tx-ease),box-shadow var(--tx) var(--tx-ease);}
+
+/* ---- 8. Going deeper and coming back ---------------------
+   One pair of moves for the whole app: forward pushes in from
+   the right, back returns from the left. Because Back is the
+   exact inverse, it reads as return, not as arrival. */
+.craft [data-nav="forward"]{animation:txNavFwd var(--tx-enter) var(--tx-ease) both;}
+.craft [data-nav="back"]{animation:txNavBack var(--tx-enter) var(--tx-ease) both;}
+@keyframes txNavFwd {from{opacity:0;transform:translateX(18px);}}
+@keyframes txNavBack{from{opacity:0;transform:translateX(-18px);}}
+
+/* ---- 9. Reduced motion — the whole layer stands down ------ */
+@media (prefers-reduced-motion:reduce){
+  .craft [data-tx],.craft [data-tx] *,
+  .craft .tx-expand,.craft .tx-expand > *,
+  .craft .tx-tabpanel,.craft .tx-chrome,
+  .craft [data-nav]{animation:none !important;transition:none !important;}
+  .craft [data-tx][data-state="closing"]{display:none !important;}
+}
+
+/* =================================================================
+   APP BRIDGE — hand-maintained. Everything above this point is a
+   verbatim copy of the Claude Design layers, so a future re-sync can
+   overwrite them wholesale. This section is the only part that knows
+   about THIS app's real markup, and it exists because the mockup was
+   authored against invented class names and never ran this code.
+
+   Three genuine defects the mockup could not have caught:
+
+   1. THEME "AUTO" WAS INVISIBLE TO THE MOCKUP. The design only had an
+      explicit Day/Night toggle, so its dark tokens are declared under
+      :root[data-theme="night"] only. This app has THREE states and
+      defaults to `auto`, which sets data-theme="auto" and resolves
+      dark via prefers-color-scheme. Without the block below, a user on
+      auto + dark system gets the LIGHT sheen — a 55%-white gradient
+      washed over every dark panel. Mirrors the app's own pattern at
+      the top of this stylesheet.
+
+   2. --ring-circ DOES NOT EXIST. craft-layer's comment claims the ring
+      circumference is "already needed inline for stroke-dasharray, so
+      no new markup" — true of the mockup, false here: renderProgressRing()
+      emits stroke-dasharray as an SVG ATTRIBUTE, not a custom property.
+      Fixed at the source (a --ring-circ inline style on .ring-wrap)
+      rather than here, so the keyframe resolves to a real number.
+
+   3. stroke:url(#ringGradAccent) WITH NO <defs> REMOVES THE STROKE.
+      An unresolvable paint reference is not ignored — it computes to
+      none, which would have blanked the coloured arc of every mastery
+      ring in the app. Fixed by adding the gradient defs once, globally,
+      just inside <body>.
+   ================================================================= */
+
+/* ---- B1. Dark elevation under the app's `auto` theme state -------
+   Same values as the night block in craft-layer, applied when the user
+   has not chosen explicitly and the system is dark. */
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="day"]):not([data-theme="night"]) .craft,
+  :root:not([data-theme="day"]):not([data-theme="night"]).craft{
+    --elev-1:0 1px 2px rgba(0,0,0,.40), 0 2px 8px -4px rgba(0,0,0,.50);
+    --elev-2:0 1px 2px rgba(0,0,0,.45), 0 10px 24px -12px rgba(0,0,0,.65);
+    --elev-3:0 2px 4px rgba(0,0,0,.5), 0 22px 44px -18px rgba(0,0,0,.75);
+    --sheen:linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,0) 60%);
+  }
+}
+/* The night rule in craft-layer is written as `:root[data-theme="night"] .craft`,
+   which needs .craft to be a DESCENDANT of :root. It is (.craft is on <body>),
+   so that one already matches. This restates it defensively for the case where
+   the class is ever moved onto <html> instead. */
+:root[data-theme="night"].craft{
+  --elev-1:0 1px 2px rgba(0,0,0,.40), 0 2px 8px -4px rgba(0,0,0,.50);
+  --elev-2:0 1px 2px rgba(0,0,0,.45), 0 10px 24px -12px rgba(0,0,0,.65);
+  --elev-3:0 2px 4px rgba(0,0,0,.5), 0 22px 44px -18px rgba(0,0,0,.75);
+  --sheen:linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,0) 60%);
+}
+
+/* ---- B2. Real class names -------------------------------------
+   Left column is what the mockup invented; right is what this app
+   actually ships. Each rule restates the craft-layer intent against
+   the real selector. */
+
+/* .resume-banner -> .flash-hero (the Progress resume button, id
+   #progressResumeBtn — craft-layer already guessed that id correctly). */
+.craft .flash-hero{
+  background-image:var(--sheen);
+  box-shadow:var(--elev-1);
+  transition:box-shadow var(--dur) var(--ease),
+             border-color var(--dur) var(--ease),
+             transform var(--dur) var(--ease);
+}
+.craft .flash-hero:hover{box-shadow:var(--elev-2);}
+.craft #progressResumeBtn .go{background-image:var(--grad-accent);box-shadow:var(--elev-accent);}
+
+/* .empty-state -> .empty-state-block */
+.craft .empty-state-block{
+  background-image:none; /* it is a layout wrapper, not a card — no sheen */
+}
+
+/* .navlink -> the sidebar's rendered nav buttons */
+.craft .sidebar .toplinks.drawer button{
+  transition:background-color var(--dur) var(--ease),
+             color var(--dur) var(--ease),
+             box-shadow var(--dur) var(--ease);
+}
+.craft .sidebar .toplinks.drawer button:hover{background:var(--nav-bg-2);color:#fff;}
+.craft .sidebar .toplinks.drawer button.active{box-shadow:inset 2px 0 0 var(--accent);}
+
+/* .bottom-nav .tab -> .bottom-bar button */
+.craft .bottom-bar button{
+  transition:color var(--dur) var(--ease),transform var(--dur-fast) var(--ease);
+}
+.craft .bottom-bar button:hover{color:#fff;}
+.craft .bottom-bar button .ic{transition:transform var(--dur-fast) var(--ease);}
+.craft .bottom-bar button.active .ic{transform:translateY(-1px);}
+
+/* .searchbox -> .missed-search. It IS the <input>, so :focus not
+   :focus-within. */
+.craft .missed-search{transition:border-color var(--dur) var(--ease),box-shadow var(--dur) var(--ease);}
+.craft .missed-search:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+
+/* .seg button -> the app's three segmented controls */
+.craft .mode-switch button,
+.craft .study-mode-switch button,
+.craft .view-mode-switch button{transition:color var(--dur-fast) var(--ease),
+                                          background-color var(--dur-fast) var(--ease),
+                                          box-shadow var(--dur) var(--ease);}
+.craft .study-mode-switch button:hover,
+.craft .view-mode-switch button:hover{color:var(--ink);}
+
+/* .landing-hero -> .ld-hero */
+.craft .ld-hero h1{animation:craftViewIn var(--dur-enter) var(--ease) both;}
+.craft .ld-hero p{animation:craftViewIn var(--dur-enter) var(--ease) both;animation-delay:60ms;}
+.craft .ld-hero .btn-row{animation:craftViewIn var(--dur-enter) var(--ease) both;animation-delay:110ms;}
+
+/* .dropdown-menu -> .dd-menu */
+.craft .dd-menu{
+  animation:craftMenuIn var(--dur) var(--ease) both;
+  transform-origin:top center;
+  box-shadow:var(--elev-3);
+}
+
+/* ---- B4. The verdict marks must not take layout space ----------
+   MEASURED REGRESSION, not a theoretical one. craft-layer adds the ✓/✕
+   as a flex ITEM inside .opt (margin-left:auto). At 390 that steals
+   horizontal room from the option text, which wraps one line further,
+   which makes every answered option taller than the same option
+   unanswered. On flashcards that lands directly on the known
+   flip-resize bug: .claude/mobile-test/test_flip_size.js measured the
+   card growing 104px before this layer and 134px after it. 1280 was
+   unaffected — there is enough slack that nothing re-wraps.
+
+   Fix: take the mark out of flow and reserve its gutter permanently,
+   so an option is the SAME height answered and unanswered. This makes
+   the pre-existing flip growth no worse rather than fixing it — the
+   real cause of that bug is renderFlashcard() measuring a back face
+   that has no explanation in it yet, which is a separate change. */
+.craft .opt{position:relative;padding-right:26px;}
+.craft .opt.correct::after,.craft .opt.incorrect::after{
+  position:absolute;right:7px;top:13px;margin-left:0;
+}
+
+/* ---- B5. Entrance animations must not leave a stacking context ------
+   MEASURED BUG, found by opening the score hero's own picker: the menu
+   rendered UNDERNEATH the resume banner.
+
+   Cause: craft-layer runs its entrance animations with
+   `animation-fill-mode: both`, and craftViewIn declares only a `from`.
+   The implicit 100% keyframe therefore resolves `transform` to the
+   animated identity matrix rather than to `none` -- so after the animation
+   has finished, every .stat-pill, .round-card, .lib-row and .review-item
+   is left with transform:matrix(1,0,0,1,0,0) forever. Any transform other
+   than `none` creates a stacking context, which traps a descendant's
+   z-index inside the card. .dd-menu's z-index:30 was therefore scoped to
+   the pill, while .flash-hero (position:relative, later in the DOM) paints
+   in the same layer and won.
+
+   Rewriting the keyframes with an explicit `to{transform:none}` does NOT
+   work, and it is worth recording why: an animation that touches `transform`
+   produces a MATRIX at every point on the timeline, endpoints included --
+   `none` interpolates as the identity matrix -- so a retained final value is
+   still matrix(1,0,0,1,0,0), not `none`. That was tried and measured; the
+   computed style did not budge.
+
+   The lever that does work is the fill mode. `backwards` still applies the
+   `from` state before the animation starts, which is what stops the flash of
+   un-animated content, but releases the element afterwards so it returns to
+   its own `transform:none` and stops being a stacking context.
+
+   Scoped to these four container classes deliberately, NOT applied blanket:
+   some animations in this layer genuinely need `forwards` to hold their end
+   state (mastery-halo finishes at opacity 0 and would flash back into view
+   without it). These four all end at the element's natural resting state,
+   so releasing the fill changes nothing visible. */
+.craft .stat-pill,
+.craft .round-card,
+.craft .round-grid > .round-card,   /* craft-layer sets the shorthand on this
+                                       more specific selector, so a plain
+                                       .round-card override loses to it */
+.craft .lib-row,
+.craft .review-item{animation-fill-mode:backwards;}
+
+/* Belt and braces for the specific control that exposed this: while its
+   menu is open the hero is raised explicitly, so it beats the resume
+   banner even if something else later reintroduces a stacking context. */
+.craft .score-hero.is-open{position:relative;z-index:60;}
+
+/* ---- B3. Reduced motion for everything added above -------------
+   craft-layer's own reduced-motion block already covers `.craft *`,
+   which includes all of the selectors above. Restated only for the
+   handful that set an explicit animation, so intent is greppable. */
+@media (prefers-reduced-motion:reduce){
+  .craft .ld-hero h1,.craft .ld-hero p,.craft .ld-hero .btn-row,
+  .craft .dd-menu{animation:none !important;}
+}
+
 </style>
 </head>
-<body>
+<!-- class="craft" is the SINGLE gate for the Site Pass design layer at the
+     bottom of the stylesheet. Remove it and the app renders exactly as it
+     did before that layer existed. All JS touches body via classList
+     add/remove/toggle only, never className =, so this class survives. -->
+<body class="craft">
+<!-- Gradient defs for the mastery rings. Declared once, globally, because
+     craft-layer paints .ring-wrap .fill with stroke:url(#ringGradAccent) and
+     an unresolvable paint reference computes to NONE — without this block
+     every ring would lose its coloured arc entirely. The stop colours come
+     from .craft .ring-grad-* rules, so this inherits the live theme. -->
+<svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute;pointer-events:none">
+  <defs>
+    <linearGradient id="ringGradAccent" x1="0" y1="0" x2="1" y2="1">
+      <stop class="ring-grad-from" offset="0"/>
+      <stop class="ring-grad-to" offset="1"/>
+    </linearGradient>
+    <linearGradient id="ringGradGood" x1="0" y1="0" x2="1" y2="1">
+      <stop class="ring-grad-good-from" offset="0"/>
+      <stop class="ring-grad-good-to" offset="1"/>
+    </linearGradient>
+  </defs>
+</svg>
 
 <div id="bootLoading" role="status"><span class="mark"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><g transform="translate(8.6,12.8) rotate(-16)"><rect x="-6.4" y="-8.1" width="12.8" height="16.2" rx="2.2" fill="#fff" fill-opacity="0.75"/></g><g transform="translate(15.4,11.6) rotate(10)"><rect x="-6.4" y="-8.1" width="12.8" height="16.2" rx="2.2" fill="#fff"/></g></svg></span><span class="sr-only">Loading NHA Exam Prep…</span></div>
 
@@ -1964,7 +2830,7 @@ if('serviceWorker' in navigator){
     </div>
     <div class="sidebar-spacer"></div>
     <div class="settings-wrap">
-      <button class="settings-trigger" id="settingsBtn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="settingsPop" title="Settings"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><circle cx="15" cy="6" r="2"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="9" cy="12" r="2"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="16" cy="18" r="2"/></svg><span class="nav-label">Settings</span></button>
+      <button class="settings-trigger" id="settingsBtn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="settingsPop" title="Settings"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><circle cx="15" cy="6" r="2"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="9" cy="12" r="2"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="16" cy="18" r="2"/></svg><span class="nav-label">Settings</span><span class="fb-unread-dot" hidden></span></button>
       <div class="settings-popover" id="settingsPop" hidden>
         <div class="settings-label">Appearance</div>
         <div class="mode-switch" id="modeSwitch">
@@ -1991,7 +2857,7 @@ if('serviceWorker' in navigator){
     <button data-bb="library" type="button"><span class="ic"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5l6.5 1.5v12L4 17z"/><path d="M20 5l-6.5 1.5v12L20 17z"/></svg></span>Library</button>
     <button data-bb="flash" type="button"><span class="ic"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><g transform="translate(8,14) rotate(-12)"><rect x="-5" y="-6.3" width="10" height="12.6" rx="1.8" fill="currentColor" fill-opacity="0.55" stroke="none"/></g><g transform="translate(14.5,12) rotate(10)"><rect x="-5" y="-6.3" width="10" height="12.6" rx="1.8" fill="currentColor" stroke="none"/></g></svg></span>Cards</button>
     <button data-bb="progress" id="bbProgress" type="button" style="display:none;"><span class="ic"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><line x1="5" y1="19" x2="5" y2="13"/><line x1="12" y1="19" x2="12" y2="8"/><line x1="19" y1="19" x2="19" y2="4"/></svg></span>Progress</button>
-    <button id="bbMoreBtn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="moreSheet"><span class="ic"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg></span>More</button>
+    <button id="bbMoreBtn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="moreSheet"><span class="ic"><svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg></span>More<span class="fb-unread-dot fb-dot-corner" hidden></span></button>
   </div>
   <div class="more-sheet" id="moreSheet" hidden>
     <button id="moreAdminBtn" type="button" style="display:none;">Admin</button>
@@ -2636,20 +3502,54 @@ function renderFbCategoryDropdown(){
    The student can already SELECT their own user_feedback rows (0063), so
    this needs no new read grant -- only somewhere to show them and a way to
    clear the unread mark. */
-let fbReplies = [];          // rows of mine that have an admin_reply
+let fbReplies = [];          // rows of mine that have an admin_reply, not removed
+let fbArchivedReplies = [];  // ...of those, the ones I archived (0072)
 let fbUnreadCount = 0;
+let fbArchiveSupported = true;   // false until 0072 is applied — see below
+let fbArchivedOpen = false;
+
+const FB_COLS_BASE = 'id, category, message, created_at, admin_reply, replied_at, reply_read_at';
+const FB_COLS_0072 = FB_COLS_BASE + ', student_archived_at, student_deleted_at';
 
 async function loadFeedbackReplies(){
-  if(!currentUser) { fbReplies = []; fbUnreadCount = 0; updateFeedbackUnreadDot(); return; }
+  if(!currentUser) { fbReplies = []; fbArchivedReplies = []; fbUnreadCount = 0; updateFeedbackUnreadDot(); return; }
   try{
-    const { data, error } = await supabaseClient.from('user_feedback')
-      .select('id, category, message, created_at, admin_reply, replied_at, reply_read_at')
-      .eq('user_id', currentUser.id)
-      .not('admin_reply', 'is', null)
-      .order('replied_at', { ascending: false })
-      .limit(50);
+    /* Tries the 0072 columns first and falls back to the 0071 shape if they
+       do not exist yet. Without this the client and the migration would have
+       to ship in lockstep: deploying the client first would make the whole
+       select fail, and the catch below would empty the list -- so a student
+       with a waiting reply would see NOTHING rather than an un-archivable
+       reply. Degrading instead means archive/delete simply stay hidden until
+       the migration lands. */
+    let data, error;
+    if(fbArchiveSupported){
+      ({ data, error } = await supabaseClient.from('user_feedback')
+        .select(FB_COLS_0072)
+        .eq('user_id', currentUser.id)
+        .not('admin_reply', 'is', null)
+        .is('student_deleted_at', null)
+        .order('replied_at', { ascending: false })
+        .limit(50));
+      if(error){
+        console.warn('Feedback archive columns unavailable (0072 not applied?), falling back:', error.message);
+        fbArchiveSupported = false;
+      }
+    }
+    if(!fbArchiveSupported){
+      ({ data, error } = await supabaseClient.from('user_feedback')
+        .select(FB_COLS_BASE)
+        .eq('user_id', currentUser.id)
+        .not('admin_reply', 'is', null)
+        .order('replied_at', { ascending: false })
+        .limit(50));
+    }
     if(error) throw error;
-    fbReplies = data || [];
+    const all = data || [];
+    fbArchivedReplies = fbArchiveSupported ? all.filter(r=>r.student_archived_at) : [];
+    fbReplies = fbArchiveSupported ? all.filter(r=>!r.student_archived_at) : all;
+    /* Archived threads are deliberately excluded from the badge: the student
+       already filed them away, and a new reply un-archives the thread
+       server-side (0072) so a genuinely new message still lights up. */
     fbUnreadCount = fbReplies.filter(r=>!r.reply_read_at).length;
   }catch(err){
     /* Non-fatal, and deliberately silent in the UI: a missing reply badge is
@@ -2658,6 +3558,7 @@ async function loadFeedbackReplies(){
        when reply_read_at does not exist yet. */
     console.error('Could not load feedback replies:', err);
     fbReplies = [];
+    fbArchivedReplies = [];
     fbUnreadCount = 0;
   }
   updateFeedbackUnreadDot();
@@ -2671,23 +3572,106 @@ function updateFeedbackUnreadDot(){
   });
 }
 
+/* One reply card. `archived` only changes the styling and which actions are
+   offered -- the content is identical either way, so the two lists can never
+   disagree about what a reply says. */
+function renderFeedbackReplyCard(r, archived){
+  const actions = fbArchiveSupported ? `
+    <div class="fb-reply-actions">
+      ${archived
+        ? `<button type="button" class="link-btn" data-fb-state="active" data-fb-id="${escapeHtml(r.id)}">Restore</button>`
+        : `<button type="button" class="link-btn" data-fb-state="archived" data-fb-id="${escapeHtml(r.id)}">Archive</button>`}
+      <button type="button" class="link-btn admin-attempt-delete" data-fb-state="deleted" data-fb-id="${escapeHtml(r.id)}">Delete</button>
+    </div>` : '';
+  return `
+    <div class="fb-reply ${r.reply_read_at ? '' : 'unread'}${archived ? ' archived' : ''}">
+      <div class="lib-meta">You asked (${escapeHtml(r.category)}) on ${new Date(r.created_at).toLocaleDateString()}:</div>
+      <div class="fb-reply-quote">${escapeHtml(r.message)}</div>
+      <div class="lib-meta" style="margin-top:8px;">Reply${r.replied_at ? ' · ' + new Date(r.replied_at).toLocaleDateString() : ''}${r.reply_read_at ? '' : ' · <strong>new</strong>'}</div>
+      <div class="fb-reply-body">${escapeHtml(r.admin_reply)}</div>
+      ${actions}
+    </div>`;
+}
+
 function renderFeedbackReplies(){
   const wrap = document.getElementById('fbRepliesWrap');
   if(!wrap) return;
-  if(!fbReplies.length){ wrap.innerHTML = ''; return; }
+  if(!fbReplies.length && !fbArchivedReplies.length){ wrap.innerHTML = ''; return; }
+  const archivedBlock = fbArchivedReplies.length ? `
+    <button type="button" class="fb-archived-head" id="fbArchivedToggle" aria-expanded="${fbArchivedOpen}" aria-controls="fbArchivedList">
+      ${icon('chevronDown')}Archived (${fbArchivedReplies.length})
+    </button>
+    <div id="fbArchivedList"${fbArchivedOpen ? '' : ' hidden'}>
+      ${fbArchivedReplies.map(r=>renderFeedbackReplyCard(r, true)).join('')}
+    </div>` : '';
   wrap.innerHTML = `
     <div style="margin-bottom:16px;">
+      ${fbReplies.length ? `
       <div style="font-family:system-ui,sans-serif;font-size:.78rem;font-weight:700;color:var(--muted);margin-bottom:6px;">
         ${fbUnreadCount ? `${fbUnreadCount} new ${fbUnreadCount===1?'reply':'replies'}` : 'Replies'}
       </div>
-      ${fbReplies.map(r=>`
-        <div class="fb-reply ${r.reply_read_at ? '' : 'unread'}">
-          <div class="lib-meta">You asked (${escapeHtml(r.category)}) on ${new Date(r.created_at).toLocaleDateString()}:</div>
-          <div class="fb-reply-quote">${escapeHtml(r.message)}</div>
-          <div class="lib-meta" style="margin-top:8px;">Reply${r.replied_at ? ' · ' + new Date(r.replied_at).toLocaleDateString() : ''}${r.reply_read_at ? '' : ' · <strong>new</strong>'}</div>
-          <div class="fb-reply-body">${escapeHtml(r.admin_reply)}</div>
-        </div>`).join('')}
+      ${fbReplies.map(r=>renderFeedbackReplyCard(r, false)).join('')}` : ''}
+      ${archivedBlock}
     </div>`;
+  wireFeedbackReplyActions();
+}
+
+/* Archive / Restore / Delete. Optimistic: the row is moved locally and the
+   list re-rendered immediately, then the write is sent. On failure the state
+   is reloaded from the server rather than guessed at, so the list can never
+   sit showing a change that did not persist. */
+function wireFeedbackReplyActions(){
+  const toggle = document.getElementById('fbArchivedToggle');
+  if(toggle) toggle.onclick = ()=>{ fbArchivedOpen = !fbArchivedOpen; renderFeedbackReplies(); };
+
+  document.querySelectorAll('#fbRepliesWrap [data-fb-state]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const id = btn.dataset.fbId;
+      const state = btn.dataset.fbState;
+      if(state === 'deleted'){
+        /* showConfirmDialog is callback-style, not a promise, and it already
+           focuses Cancel and wires Escape/Back -- so it is used as-is rather
+           than wrapped. The copy is explicit that this removes the thread
+           from THEIR list rather than erasing it, because 0072 deliberately
+           keeps the admin's copy and the reply's audit trail. */
+        showConfirmDialog(
+          'Remove this reply from your list? It will not come back. The support team keeps their own copy of the conversation.',
+          ()=>{ setFeedbackState(id, 'deleted'); },
+          'Delete',
+          true
+        );
+        return;
+      }
+      setFeedbackState(id, state);
+    };
+  });
+}
+
+async function setFeedbackState(id, state){
+  // Optimistic local move so the list responds immediately.
+  const row = fbReplies.find(r=>r.id===id) || fbArchivedReplies.find(r=>r.id===id);
+  if(!row) return;
+  fbReplies = fbReplies.filter(r=>r.id!==id);
+  fbArchivedReplies = fbArchivedReplies.filter(r=>r.id!==id);
+  if(state === 'archived'){ row.student_archived_at = new Date().toISOString(); fbArchivedReplies.unshift(row); }
+  else if(state === 'active'){ row.student_archived_at = null; fbReplies.unshift(row); }
+  fbUnreadCount = fbReplies.filter(r=>!r.reply_read_at).length;
+  updateFeedbackUnreadDot();
+  renderFeedbackReplies();
+  try{
+    const { error } = await supabaseClient.rpc('set_own_feedback_state', { p_feedback_id: id, p_state: state });
+    if(error) throw error;
+  }catch(err){
+    console.error('Could not update feedback state:', err);
+    await loadFeedbackReplies();   // re-read rather than guess at the real state
+    renderFeedbackReplies();
+    if(typeof fbMsgEl !== 'undefined' && fbMsgEl){
+      fbMsgEl.textContent = 'Could not update that reply. Please try again.';
+      fbMsgEl.className = 'msg err';
+      fbMsgEl.style.display = '';
+    }
+  }
+
 }
 
 /* Marks everything read as soon as the panel has actually shown them. Done
@@ -4293,7 +5277,7 @@ function renderProgressRing(pct, mastered){
   const r = 21, c = 2*Math.PI*r;
   const offset = c * (1 - Math.min(100, Math.max(0, pct))/100);
   return `
-    <div class="ring-wrap">
+    <div class="ring-wrap" style="--ring-circ:${c.toFixed(2)}">
       <svg viewBox="0 0 52 52" aria-hidden="true">
         <circle class="track" cx="26" cy="26" r="${r}"/>
         <circle class="fill${mastered?' mastered':''}" cx="26" cy="26" r="${r}" stroke-dasharray="${c.toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}"/>
@@ -8194,7 +9178,7 @@ function resolveScoreMetric(exams, metric){
   if(metric === 'final'){
     const avg = averageAttemptScore(exams);
     return avg && {
-      pct: avg.pct, count: avg.count,
+      pct: avg.pct, count: avg.count, unit: 'sitting',
       label: `final exam score · ${avg.count} sitting${avg.count===1?'':'s'}`,
       help: `Mean score across ${avg.count} completed full-length attempt${avg.count===1?'':'s'}, scored the way the real exam would be. Missed-only retakes are excluded so a short retake can't inflate it.`
     };
@@ -8202,7 +9186,7 @@ function resolveScoreMetric(exams, metric){
   if(metric === 'cum_all'){
     const avg = averageCumulativeScore(exams, 'all');
     return avg && {
-      pct: avg.pct, count: avg.count,
+      pct: avg.pct, count: avg.count, unit: 'round',
       label: `cumulative · ${avg.count} round${avg.count===1?'':'s'}`,
       help: `How much of each exam you now have right once your retakes are counted, averaged over ${avg.count} round${avg.count===1?'':'s'}.`
     };
@@ -8211,10 +9195,70 @@ function resolveScoreMetric(exams, metric){
   if(!Number.isInteger(n) || n < 1) return null;
   const avg = averageCumulativeScore(exams, n);
   return avg && {
-    pct: avg.pct, count: avg.count,
+    pct: avg.pct, count: avg.count, unit: 'round',
     label: `cumulative after ${n} attempt${n===1?'':'s'} · ${avg.count} round${avg.count===1?'':'s'}`,
     help: `How much of each exam you had right after ${n} attempt${n===1?'':'s'}, averaged over the ${avg.count} round${avg.count===1?'':'s'} that got at least that far. Rounds with fewer attempts are left out rather than counted as no progress.`
   };
+}
+
+/* Why the selected metric has nothing to average. The reason is genuinely
+   different per metric, and using one phrase for all of them is actively
+   misleading: "no rounds go that deep" says nothing true about the final-exam
+   average, which is about completed full-length sittings and has no notion of
+   depth at all. Kept beside resolveScoreMetric() so the two stay in step. */
+function scoreMetricEmptyReason(metric){
+  if(metric === 'final') return 'no completed full sittings';
+  if(metric === 'cum_all') return 'no completed attempts';
+  const n = parseInt(String(metric).replace('cum_', ''), 10);
+  return Number.isInteger(n) ? `no rounds with ${n} attempt${n===1?'':'s'}` : 'nothing to average';
+}
+
+/* A short human description of the active rounds-view filters, or null when
+   none are set. The score hero averages over the FILTERED set, so the number
+   is genuinely ambiguous without this -- "68.2%" means one thing across every
+   exam and quite another across round 2 alone, and nothing on screen would
+   otherwise distinguish them. Deliberately phrased to slot into a sentence
+   fragment ("· round 2", "Filtered to round 2."). */
+function describeFilterSelection(mastery, exam, round){
+  const parts = [];
+  if(exam !== 'all') parts.push(exam);
+  if(round !== 'all') parts.push(`round ${round}`);
+  if(mastery === 'mastered') parts.push('mastered only');
+  else if(mastery === 'not_mastered') parts.push('not yet mastered');
+  return parts.length ? parts.join(' · ') : null;
+}
+function describeProgressFilter(){
+  return describeFilterSelection(progressFilterMastery, progressFilterExam, progressFilterRound);
+}
+function describeAdminProgressFilter(){
+  return describeFilterSelection(adminProgressFilterMastery, adminProgressFilterExam, adminProgressFilterRound);
+}
+
+/* The score hero: a stat pill that carries its own metric picker INSIDE it,
+   directly under the figure, so the trigger doubles as the number's label.
+   Shared by the student's Progress header and the admin drilldown for the
+   same reason resolveScoreMetric() is -- an admin and a student looking at
+   the same account must never see the figure presented two different ways.
+   `metricKey` is the raw selection (needed for the empty-state wording);
+   `filterDesc` is null when nothing is filtered. */
+function renderScoreHero(metric, metricKey, filterDesc, pickerHtml, pickerId){
+  const basis = metric
+    ? `${metric.count} ${metric.unit}${metric.count===1?'':'s'}${filterDesc ? ` · ${escapeHtml(filterDesc)}` : ''}`
+    : `${escapeHtml(scoreMetricEmptyReason(metricKey))}${filterDesc ? ` in ${escapeHtml(filterDesc)}` : ''}`;
+  const help = metric ? `${metric.help}${filterDesc ? ` Filtered to ${filterDesc}.` : ''}` : '';
+  /* Raised only while its own menu is open, so the pill isn't permanently
+     sitting above the rest of the toolbar. See B5 in the stylesheet for why
+     a menu inside this pill needs its ANCESTOR raised rather than itself. */
+  const openClass = (pickerId && openDropdownId === pickerId) ? ' is-open' : '';
+  return `
+    <div class="stat-pill score-hero${filterDesc ? ' is-filtered' : ''}${openClass}"${help ? ` title="${escapeHtml(help)}"` : ''}>
+      ${icon('progress')}
+      <div class="score-hero-body">
+        <strong class="score-hero-num">${metric ? metric.pct.toFixed(1) + '%' : '—'}</strong>
+        ${pickerHtml}
+        <span class="score-hero-basis">${basis}</span>
+      </div>
+    </div>`;
 }
 
 /* Builds the metric options for a given data set. */
@@ -8742,18 +9786,38 @@ function renderProgressPanel(){
       <button type="button" data-progress-tab="missed" class="${progressTab==='missed'?'active':''}">${isMobileViewport ? 'Missed' : 'Missed questions'}</button>
     </div>
   ` : '';
+  /* Computed HERE rather than further down, because the score hero now
+     averages over the FILTERED set and so needs this before the toolbar is
+     built. Everything below reuses these two rather than re-filtering. */
+  const filteredExams = filterProgressExams(d.exams);
+  const filtersActive = progressFilterMastery !== 'all' || progressFilterExam !== 'all' || progressFilterRound !== 'all';
+  const filterDesc = describeProgressFilter();
+  /* The average follows the filters: with "round 2" selected, the number is
+     round 2's average, matching the cards underneath it. Anything else makes
+     the headline figure disagree with the list it sits above.
+     The OPTIONS still come from the unfiltered set on purpose -- deriving
+     them from filteredExams would make entries appear and vanish as filters
+     change, and the currently-picked one could disappear from under you. A
+     depth no filtered round reaches simply resolves to null, which renders
+     as the explicit "no rounds" state below rather than a blank pill. */
+  const heroMetric = resolveScoreMetric(filteredExams, progressScoreMetric);
+  const heroPickerHtml = renderDropdown({
+    id:'progressScoreMetric',
+    ariaLabel:'Which score average to show',
+    selected: progressScoreMetric,
+    options: scoreMetricOptions(d.exams)
+  });
   let html = `
     <h1>Progress</h1>
     <div class="progress-toolbar">
       <div class="stat-row">
         <div class="stat-pill">${icon('library')}<strong>${d.exams.length}</strong><span class="stat-label">exam${d.exams.length===1?'':'s'} started</span></div>
         <div class="stat-pill">${icon('check')}<strong>${d.masteredRounds} of ${d.totalRounds}</strong><span class="stat-label">round${d.totalRounds===1?'':'s'} mastered</span></div>
-        ${(()=>{ const m = resolveScoreMetric(d.exams, progressScoreMetric); return m
-          ? `<div class="stat-pill" title="${escapeHtml(m.help)}">${icon('progress')}<strong>${m.pct.toFixed(1)}%</strong><span class="stat-label">avg ${escapeHtml(m.label)}</span></div>`
-          : ''; })()}
+        ${(d.exams.length && progressTab !== 'missed')
+          ? renderScoreHero(heroMetric, progressScoreMetric, filterDesc, heroPickerHtml, 'progressScoreMetric')
+          : ''}
       </div>
       ${(isMobileViewport || progressTab==='missed') ? '' : `<div class="progress-toolbar-controls">${controlsRowHtml}</div>`}
-      ${(d.exams.length && progressTab !== 'missed') ? `<div class="score-metric-row">${renderDropdown({ id:'progressScoreMetric', ariaLabel:'Which score average to show', selected: progressScoreMetric, options: scoreMetricOptions(d.exams) })}</div>` : ''}
     </div>
     <div class="msg" id="progressMsg"></div>
   `;
@@ -8826,8 +9890,9 @@ function renderProgressPanel(){
      group under anymore); Stacked mode keeps the per-exam headers/grouping
      as before, unaffected -- it doesn't have this problem since a thin row
      doesn't look empty/isolated the way a padded card does. */
-  const filteredExams = filterProgressExams(d.exams);
-  const filtersActive = progressFilterMastery !== 'all' || progressFilterExam !== 'all' || progressFilterRound !== 'all';
+  /* filteredExams / filtersActive are computed once near the top of this
+     function now -- the score hero needs them before the toolbar is built.
+     Re-declaring them here would shadow nothing but would filter twice. */
   /* One row holding the view switch and the filters together. Both answer
      "which rows am I looking at", and pairing them means neither is ever
      alone on a line: the row always spans the full column width. */
@@ -9320,6 +10385,17 @@ let adminProgressSubjectLabel = '';   // the viewed account's email, for AI-feed
 let adminProgressTab = 'rounds';   // 'rounds' | 'missed'
 let adminScoreMetric = 'final';    // same options as progressScoreMetric
 let adminProgressSortMode = 'name_asc';  // same four modes as progressSortMode
+/* Grid vs Stacked for the drilldown, mirroring the student's own toggle.
+   Deliberately NOT persisted to localStorage, unlike progressViewMode: that
+   key is the admin's preference for THEIR OWN Progress tab, and letting the
+   drilldown write to it would mean looking at a student silently changed the
+   admin's own screen.
+   Also deliberately NOT reset when the admin opens a different account, which
+   the filters and sort DO do. The reason those reset is that a filter can
+   quietly hide another student's rounds; a layout choice hides nothing, so
+   resetting it would just undo the admin's preference every time they moved
+   between accounts. */
+let adminProgressViewMode = 'grid';      // 'grid' | 'stacked'
 let adminMissedRows = null;        // null = not loaded for this account yet
 let adminMissedLoading = false;
 let adminMissedError = null;
@@ -12303,18 +13379,43 @@ function renderAdminExamsSection(examsMap){
   const shownRounds = filtered.reduce((n,e)=>n+e.rounds.length, 0);
   const filtersActive = adminProgressFilterMastery !== 'all' || adminProgressFilterExam !== 'all' || adminProgressFilterRound !== 'all';
 
-  /* Same helper the student's own Progress header uses, so an admin and a
-     student looking at the same account read identical numbers. */
-  const metric = resolveScoreMetric(allExams, adminScoreMetric);
+  /* Same helpers the student's own Progress header uses, so an admin and a
+     student looking at the same account read identical numbers presented the
+     same way. The average follows the FILTERED set here exactly as it does
+     for the student -- with "round 2" selected this is round 2's average,
+     matching the cards below it. Options still come from the unfiltered set
+     so the current selection can't vanish from under the admin. */
+  const adminMetric = resolveScoreMetric(filtered, adminScoreMetric);
+  const adminFilterDesc = describeAdminProgressFilter();
+  const adminPickerHtml = renderDropdown({ id:'adminScoreMetric', ariaLabel:'Which score average to show', selected: adminScoreMetric, options: scoreMetricOptions(allExams) });
+
+  /* Sort + Grid/Stacked, mirroring the student's own toolbar controls. On
+     mobile these move down next to the list they act on, same as the student
+     view -- see the second .progress-toolbar-controls render below. */
+  const adminIsMobileViewport = window.innerWidth <= 900;
+  const adminControlsRowHtml = allExams.length ? `
+    ${renderDropdown({ id:'adminProgressSort', ariaLabel:'Sort progress list', selected: adminProgressSortMode, options:[
+      {value:'name_asc',  label:'Sort: Name (A–Z)'},
+      {value:'name_desc', label:'Sort: Name (Z–A)'},
+      {value:'last',      label:'Sort: Last Attempt'},
+      {value:'first',     label:'Sort: First Attempt'}
+    ]})}
+    ${!adminIsMobileViewport ? `
+      <div class="study-mode-switch view-mode-switch" role="group" aria-label="Progress view">
+        <button type="button" data-admin-progress-view="grid" class="${adminProgressViewMode==='grid'?'active':''}">Grid</button>
+        <button type="button" data-admin-progress-view="stacked" class="${adminProgressViewMode==='stacked'?'active':''}">Stacked</button>
+      </div>
+    ` : ''}
+  ` : '';
 
   let html = `
     <div class="progress-toolbar">
       <div class="stat-row">
         <div class="stat-pill">${icon('library')}<strong>${allExams.length}</strong><span class="stat-label">exam${allExams.length===1?'':'s'} started</span></div>
         <div class="stat-pill">${icon('check')}<strong>${masteredRounds} of ${totalRounds}</strong><span class="stat-label">round${totalRounds===1?'':'s'} mastered</span></div>
-        ${metric ? `<div class="stat-pill" title="${escapeHtml(metric.help)}">${icon('progress')}<strong>${metric.pct.toFixed(1)}%</strong><span class="stat-label">avg ${escapeHtml(metric.label)}</span></div>` : ''}
+        ${allExams.length ? renderScoreHero(adminMetric, adminScoreMetric, adminFilterDesc, adminPickerHtml, 'adminScoreMetric') : ''}
       </div>
-      ${allExams.length ? `<div class="score-metric-row">${renderDropdown({ id:'adminScoreMetric', ariaLabel:'Which score average to show', selected: adminScoreMetric, options: scoreMetricOptions(allExams) })}</div>` : ''}
+      ${(adminIsMobileViewport || adminProgressTab === 'missed') ? '' : `<div class="progress-toolbar-controls">${adminControlsRowHtml}</div>`}
     </div>
   `;
   /* AI feedback about this account, when the site-wide flag allows it.
@@ -12351,13 +13452,10 @@ function renderAdminExamsSection(examsMap){
     return;
   }
   if(allExams.length){
+    /* Sort has moved UP into the toolbar controls, alongside Grid/Stacked,
+       to match where the student's own sort lives. This row is now filters
+       only, exactly as it is on the student side. */
     html += `<div class="progress-filters-row">
-      ${renderDropdown({ id:'adminProgressSort', ariaLabel:'Sort progress list', selected: adminProgressSortMode, options:[
-        {value:'name_asc',  label:'Sort: Name (A–Z)'},
-        {value:'name_desc', label:'Sort: Name (Z–A)'},
-        {value:'last',      label:'Sort: Last Attempt'},
-        {value:'first',     label:'Sort: First Attempt'}
-      ]})}
       ${renderDropdown({ id:'adminProgressFilterMastery', ariaLabel:'Filter by mastery', selected: adminProgressFilterMastery, options:[
         {value:'all', label:'Any status'},
         {value:'mastered', label:'Mastered only'},
@@ -12373,17 +13471,34 @@ function renderAdminExamsSection(examsMap){
       ]}) : ''}
     </div>`;
   }
+  /* Mobile: the controls follow the filters, next to the list they act on,
+     rather than staying up in the toolbar -- the same move, for the same
+     reason, as the student view makes at its own second render of this row. */
+  if(adminIsMobileViewport && adminProgressTab !== 'missed' && adminControlsRowHtml.trim()){
+    html += `<div class="progress-toolbar-controls" style="margin-bottom:14px;">${adminControlsRowHtml}</div>`;
+  }
   if(filtersActive && allExams.length){
     html += shownRounds
       ? `<div class="format-help" style="margin-bottom:10px;">Showing ${shownRounds} of ${totalRounds} round${totalRounds===1?'':'s'}. <button type="button" class="link-btn" id="adminClearProgressFilters">Clear filters</button></div>`
       : `<div class="format-help" style="margin-bottom:10px;">No rounds match these filters. <button type="button" class="link-btn" id="adminClearProgressFilters">Clear filters</button></div>`;
   }
 
+  /* Mobile always gets the grid regardless of the toggle, for the same
+     reason the student view does: Stacked's narrow layout is the thing that
+     was broken, so the toggle is a desktop choice only. */
+  const adminEffectiveViewMode = adminIsMobileViewport ? 'grid' : adminProgressViewMode;
   let gridHtml = '';
   filtered.forEach(ex=>{
+    /* Stacked groups rounds under a per-exam heading, exactly as the student
+       view does. Grid has no heading for the badge to sit beside. */
+    if(adminEffectiveViewMode !== 'grid'){
+      const examMastered = ex.rounds.some(r=>r.status==='mastered');
+      html += `<div class="subsection"><h2>${escapeHtml(ex.examTitle)}${examMastered ? ` <span class="mastery-badge" title="Mastered — reached 98%+ cumulative on at least one round">${icon('check')}Mastered</span>` : ''}</h2>`;
+    }
     ex.rounds.forEach(r=>{
       const masteredSoFar = r.original_total - r.funnel_missed_count;
       const pctNum = r.original_total ? (masteredSoFar / r.original_total) * 100 : 0;
+      const masteredPct = pctNum.toFixed(0);
       const expanded = adminExpandedRoundId === r.id;
       let attemptsHtml = '';
       if(expanded){
@@ -12402,26 +13517,58 @@ function renderAdminExamsSection(examsMap){
         }).join('');
         if(!r.attempts.length) attemptsHtml = `<div class="lib-meta" style="margin-top:4px;">No attempts recorded.</div>`;
       }
-      gridHtml += `
-        <div class="round-card ${r.status==='mastered'?'mastered':''} ${r.status==='abandoned'?'abandoned':''}">
-          <div class="round-card-top" data-admin-round-toggle="${escapeHtml(r.id)}">
-            <div>
-              <div class="round-card-name">${escapeHtml(ex.examTitle)} — Round ${r.round_number}</div>
-              <div class="round-card-tag">${r.status==='mastered'?'Mastered':r.status==='abandoned'?'Abandoned':'In progress'}</div>
+      /* Both layouts carry the SAME two destructive controls and nothing
+         else -- Delete attempt (inside attemptsHtml) and Delete round, the
+         latter only on a round with zero attempts. Continue is deliberately
+         absent from both: it acts on currentUser.id and would start the
+         ADMIN taking the student's exam. See this function's header. */
+      const deleteRoundBtn = r.attempts.length === 0
+        ? `<button class="link-btn admin-attempt-delete" data-delete-empty-round="${escapeHtml(r.id)}" data-round-label="${escapeHtml(ex.examTitle + ' — Round ' + r.round_number)}">Delete round</button>`
+        : '';
+      if(adminEffectiveViewMode === 'grid'){
+        gridHtml += `
+          <div class="round-card ${r.status==='mastered'?'mastered':''} ${r.status==='abandoned'?'abandoned':''}">
+            <div class="round-card-top" data-admin-round-toggle="${escapeHtml(r.id)}">
+              <div>
+                <div class="round-card-name">${escapeHtml(ex.examTitle)} — Round ${r.round_number}</div>
+                <div class="round-card-tag">${r.status==='mastered'?'Mastered':r.status==='abandoned'?'Abandoned':'In progress'}</div>
+              </div>
+              ${renderProgressRing(pctNum, r.status==='mastered')}
             </div>
-            ${renderProgressRing(pctNum, r.status==='mastered')}
+            <div class="round-card-meta">${masteredSoFar} of ${r.original_total} mastered${r.status!=='mastered' ? ` · ${r.original_total - masteredSoFar} left` : ''} · ${r.attempts.length} attempt(s)</div>
+            <div class="round-card-actions">
+              <button class="link-btn" data-admin-round-toggle="${escapeHtml(r.id)}">${expanded ? 'Hide' : 'Show'} attempts</button>
+              ${deleteRoundBtn}
+            </div>
+            ${attemptsHtml}
           </div>
-          <div class="round-card-meta">${masteredSoFar} of ${r.original_total} mastered${r.status!=='mastered' ? ` · ${r.original_total - masteredSoFar} left` : ''} · ${r.attempts.length} attempt(s)</div>
-          <div class="round-card-actions">
-            <button class="link-btn" data-admin-round-toggle="${escapeHtml(r.id)}">${expanded ? 'Hide' : 'Show'} attempts</button>
-            ${r.attempts.length === 0 ? `<button class="link-btn admin-attempt-delete" data-delete-empty-round="${escapeHtml(r.id)}" data-round-label="${escapeHtml(ex.examTitle + ' — Round ' + r.round_number)}">Delete round</button>` : ''}
+        `;
+      } else {
+        const masteryBadge = r.status==='mastered' ? '<span class="lib-badge verified" style="margin-left:8px;">Mastered</span>' : '';
+        html += `
+          <div class="lib-row" style="flex-direction:column;align-items:stretch;">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;width:100%;cursor:pointer;" data-admin-round-toggle="${escapeHtml(r.id)}">
+              <div class="lib-info" style="flex:1;min-width:220px;">
+                <div class="lib-title">Round ${r.round_number}${masteryBadge}${r.status==='abandoned' ? ' <span class="lib-badge" style="margin-left:8px;">Abandoned</span>' : ''}</div>
+                <div class="funnel-bar"><div class="funnel-bar-fill" style="width:${masteredPct}%;"></div></div>
+                <div class="lib-meta">${masteredPct}% — ${masteredSoFar} of ${r.original_total} mastered so far${r.status!=='mastered' ? ` · ${r.original_total - masteredSoFar} left` : ''} · ${r.attempts.length} attempt(s)</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                ${deleteRoundBtn}
+                <span class="link-btn">${expanded ? 'Hide' : 'Show'} attempts</span>
+              </div>
+            </div>
           </div>
-          ${attemptsHtml}
-        </div>
-      `;
+        `;
+        if(expanded) html += attemptsHtml;
+      }
     });
+    if(adminEffectiveViewMode !== 'grid') html += `</div>`;
   });
-  html += gridHtml ? `<div class="round-grid">${gridHtml}</div>` : (allExams.length ? '' : `<div class="format-help">No online attempts for this account.</div>`);
+  /* Stacked has already appended its rows straight to `html` above, grouped
+     under their per-exam headings; only grid has a collected buffer to wrap. */
+  if(adminEffectiveViewMode === 'grid' && gridHtml) html += `<div class="round-grid">${gridHtml}</div>`;
+  if(!allExams.length) html += `<div class="format-help">No online attempts for this account.</div>`;
   section.innerHTML = html;
 
   // The Rounds/Missed switch is rendered on BOTH paths, so it has to be
@@ -12435,6 +13582,15 @@ function renderAdminExamsSection(examsMap){
      expanded round would otherwise stay open while everything reorders
      around it, which reads as the wrong round having opened. */
   wireDropdown('adminProgressSort', (v)=>{ adminProgressSortMode = v; adminExpandedRoundId = null; renderAdminExamsSection(examsMap); }, ()=>renderAdminExamsSection(examsMap));
+  /* Grid/Stacked. Writes adminProgressViewMode only -- never progressViewMode
+     or its localStorage key, which belong to the admin's OWN Progress tab. */
+  section.querySelectorAll('[data-admin-progress-view]').forEach(btn=>{
+    btn.onclick = ()=>{
+      adminProgressViewMode = btn.dataset.adminProgressView;
+      adminExpandedRoundId = null;
+      renderAdminExamsSection(examsMap);
+    };
+  });
   wireDropdown('adminProgressFilterMastery', (v)=>{ adminProgressFilterMastery = v; adminExpandedRoundId = null; renderAdminExamsSection(examsMap); }, ()=>renderAdminExamsSection(examsMap));
   wireDropdown('adminProgressFilterExam',    (v)=>{ adminProgressFilterExam = v;    adminExpandedRoundId = null; renderAdminExamsSection(examsMap); }, ()=>renderAdminExamsSection(examsMap));
   wireDropdown('adminProgressFilterRound',   (v)=>{ adminProgressFilterRound = v;   adminExpandedRoundId = null; renderAdminExamsSection(examsMap); }, ()=>renderAdminExamsSection(examsMap));
