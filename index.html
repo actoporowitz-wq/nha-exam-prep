@@ -3608,30 +3608,13 @@ function setPanelHtml(el, html){
   const y = sc.scrollTop;
   el.innerHTML = html;
   if(!y) return;
-  /* Restoring once is not enough, and neither is once-plus-a-frame.
-
-     The admin shell rebuilds with an EMPTY #adminSubPanel and fills it
-     afterwards -- sometimes a frame later, sometimes several, depending on
-     the sub-view. Until that fill lands the document is only a few hundred
-     pixels tall, so the height guard (correctly) refuses to restore, and by
-     the time the page is tall again there is nothing left retrying. Measured
-     live on Admin: captured 400, one-frame retry still saw a short page, and
-     the position was gone.
-
-     So retry over a short window, and stop as soon as it takes. The guards
-     are what keep this from fighting the user: it only acts while the page
-     is still sitting at the top (the reset we are correcting), and only once
-     the height genuinely allows the old position. A deliberate scroll during
-     the window moves scrollTop away from 0 and ends it. */
-  let tries = 0;
-  const restore = ()=>{
-    if(sc.scrollTop === y) return;                       // already right
-    if(sc.scrollTop > 4) return;                         // user moved: leave them alone
-    if(sc.scrollHeight - sc.clientHeight >= y){ sc.scrollTop = y; return; }
-    if(++tries < 12) requestAnimationFrame(restore);     // ~200ms at 60fps
-  };
-  restore();
-  requestAnimationFrame(restore);
+  /* Synchronous only, on purpose. An earlier version deferred a retry to
+     requestAnimationFrame to cope with panels that fill late -- that is
+     unreliable, because rAF does not fire at all in a hidden or backgrounded
+     tab, so the restore would silently never happen. Callers whose content
+     arrives after this returns preserve scroll around their OWN call instead
+     (see renderAdminPanel), where the page is measurably complete. */
+  if(sc.scrollTop !== y && sc.scrollHeight - sc.clientHeight >= y) sc.scrollTop = y;
 }
 
 /* Instant hide that still resets the transition state. Used where the app
@@ -10998,7 +10981,22 @@ async function renderAdminView(){
    security-events timeline), then the three sub-nav views -- kept as
    separate pills instead of one long scrolling page per the "don't
    clutter, use menus" steer on this tab. */
+/* Scroll preservation for the admin shell wraps the WHOLE render, not the
+   inner innerHTML assignment. The shell writes an empty #adminSubPanel and
+   the sub-view fills it synchronously afterwards, so the document is only
+   its real height once this function has fully returned -- measured live:
+   0 immediately after the shell swap, 467 by the time the call returns.
+   Restoring inside setPanelHtml therefore always saw a short page and
+   correctly refused, which is why Admin kept jumping to the top while
+   Progress did not. */
 function renderAdminPanel(){
+  const sc = document.scrollingElement || document.documentElement;
+  const y = sc.scrollTop;
+  renderAdminPanelInner();
+  if(y && sc.scrollTop !== y && sc.scrollHeight - sc.clientHeight >= y) sc.scrollTop = y;
+}
+
+function renderAdminPanelInner(){
   if(adminReviewAttempt){ renderAdminAttemptReview(adminReviewAttempt); return; }
   if(adminDrilldownUserId){ renderAdminUserProgress(adminDrilldownUserId); return; }
   if(adminSecurityEventsUserId){ renderAdminSecurityEvents(adminSecurityEventsUserId); return; }
@@ -14062,14 +14060,6 @@ async function renderAdminUserProgress(targetUserId){
        the captured position is 0, so restoring it is a no-op and the admin
        still lands at the top of a freshly opened account. */
     setPanelHtml(adminPanel, html);
-    /* Restored after the section below fills, on the next frame, so the
-       measurement happens against the finished page rather than the empty
-       shell. No-op on a first visit, where keepAdminY is 0. */
-    if(keepAdminY){
-      requestAnimationFrame(()=>{
-        if(adminScroller.scrollHeight - adminScroller.clientHeight >= keepAdminY) adminScroller.scrollTop = keepAdminY;
-      });
-    }
     document.getElementById('backToAdminBtn').onclick = ()=>{ adminDrilldownUserId = null; renderAdminPanel(); };
     // Fresh per account visit -- an admin switching between accounts
     // shouldn't land with exams already expanded just because the last
@@ -14102,6 +14092,14 @@ async function renderAdminUserProgress(targetUserId){
       resetAdminMissedState();
     }
     renderAdminExamsSection(examsMap);
+    /* Restored HERE, synchronously, right after the section that makes the
+       page tall again -- measuring any earlier sees the empty shell. An
+       earlier version deferred this to requestAnimationFrame, which is
+       unreliable: rAF does not fire in a hidden tab, so the restore would
+       silently never happen. No-op on a first visit, where keepAdminY is 0. */
+    if(keepAdminY && adminScroller.scrollHeight - adminScroller.clientHeight >= keepAdminY){
+      adminScroller.scrollTop = keepAdminY;
+    }
   } catch(err){
     if(myToken !== adminUserProgressRequestToken) return; // superseded -- don't clobber newer data with a stale error either
     adminPanel.innerHTML = `
