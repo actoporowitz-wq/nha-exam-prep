@@ -35,7 +35,24 @@
   }catch(e){ /* localStorage unavailable -- falls through to the CSS's own default, no worse than before this fix existed */ }
 })();
 </script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<!-- Pinned to an EXACT version with an SRI hash, deliberately, not floating on @2.
+     This script gets full access to the page including the auth token in
+     localStorage, so an upstream package hijack or a CDN compromise would hand
+     over every user's session. integrity= makes the browser refuse to run it if
+     the bytes ever change; pinning means they can only change when we choose to
+     bump it. Verified at pin time that @2 and @2.112.4 were byte-identical, so
+     this changed nothing about what actually runs.
+     To upgrade: fetch the new file, recompute with
+       openssl dgst -sha384 -binary <file> | openssl base64 -A
+     and change BOTH the version and the hash together -- a mismatch blocks the
+     script outright and the app will not boot.
+     crossorigin="anonymous" is required for integrity= to be checked at all, and
+     separately it is what lets real error messages from this script reach
+     window.onerror instead of the opaque "Script error." (jsdelivr sends
+     access-control-allow-origin: *, verified). -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.4/dist/umd/supabase.js"
+        integrity="sha384-ysv13JVP3fufiEXfjML9OdCa/rRbMJvUBOWyor82wfuK8INNZAvmbxHgKIHi+oqz"
+        crossorigin="anonymous"></script>
 <!-- No integrity="" here on purpose: Cloudflare updates this script
      frequently and explicitly advises against Subresource Integrity
      pinning for it -- a stale hash would silently break the CAPTCHA widget
@@ -48,7 +65,14 @@
      or missing type for parameter sitekey") on every page load. This flag
      disables the auto-scan entirely, leaving only the app's own explicit
      render in control. -->
-<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+<!-- crossorigin="anonymous" but deliberately NO integrity=: Cloudflare updates
+     this endpoint in place (it also 302s), so a pinned hash would break sign-in
+     the moment they ship a change -- Cloudflare's own guidance is not to use SRI
+     here. The attribute is still worth having on its own: without it every error
+     this script raises reaches window.onerror as a bare "Script error." with no
+     message, file or line, which is what made 92% of the client error log
+     useless. Cloudflare sends access-control-allow-origin: *, verified. -->
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer crossorigin="anonymous"></script>
 <script>
 /* App-shell caching only -- see sw.js for the same-origin allowlist that
    keeps every Supabase request (auth, RPCs, exam content) out of it. */
@@ -3270,42 +3294,6 @@ function setupNavDrawer(triggerId, drawerId, backdropId){
   trigger.onclick = () => isOpen() ? close() : open();
   backdrop.onclick = close;
   drawer.querySelectorAll('button').forEach(btn => btn.addEventListener('click', close));
-}
-
-function setupPopoverMenu(triggerId, popoverId){
-  const trigger = document.getElementById(triggerId);
-  const popover = document.getElementById(popoverId);
-  function isOpen(){ return !popover.hidden; }
-  function open(){
-    popover.hidden = false;
-    trigger.setAttribute('aria-expanded', 'true');
-    const first = popover.querySelector('button');
-    if(first) first.focus();
-    document.addEventListener('keydown', onKeydown);
-    document.addEventListener('click', onOutsideClick, true);
-  }
-  function close(){
-    popover.hidden = true;
-    trigger.setAttribute('aria-expanded', 'false');
-    trigger.focus();
-    document.removeEventListener('keydown', onKeydown);
-    document.removeEventListener('click', onOutsideClick, true);
-  }
-  function onKeydown(e){
-    if(e.key === 'Escape'){ close(); return; }
-    if(e.key === 'Tab'){
-      const items = popover.querySelectorAll('button');
-      if(!items.length) return;
-      const first = items[0], last = items[items.length - 1];
-      if(e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
-      else if(!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
-    }
-  }
-  function onOutsideClick(e){
-    if(!popover.contains(e.target) && e.target !== trigger) close();
-  }
-  trigger.onclick = () => isOpen() ? close() : open();
-  popover.querySelectorAll('button').forEach(btn => btn.addEventListener('click', close));
 }
 
 tabQuiz.onclick = () => showView('quiz');
