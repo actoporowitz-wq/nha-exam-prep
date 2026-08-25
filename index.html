@@ -3695,6 +3695,21 @@ function txNoteEntranceRender(el){
   txEnterTimer = setTimeout(txClearEntering, TX_ENTER_HOLD_MS);
 }
 
+/* Arms the per-element entrances for ONE upcoming render, WITHOUT replaying
+   the view-level fade. This is the "the user changed what the list shows"
+   case -- a sort, a filter, a grid/stacked switch -- where the content
+   genuinely rearranges and seeing it arrive is useful feedback.
+
+   Deliberately NOT called when a menu merely opens: that changes nothing on
+   the page, and animating it is what made every click feel like a reload. */
+function txArmContentChange(el){
+  if(!el || !txMotionOn()) return;
+  txClearEntering();
+  txEnterEl = el;
+  el.classList.add('tx-entering');
+  txEnterTimer = setTimeout(txClearEntering, TX_ENTER_MAX_MS);
+}
+
 function txEnterView(el){
   if(!el || !txMotionOn()) return;
   txClearEntering();
@@ -5523,19 +5538,49 @@ function icon(name, opts){
    both on selection and on close. */
 let openDropdownId = null;
 let openDropdownRerender = null;
-document.addEventListener('click', (e)=>{
-  if(openDropdownId && !e.target.closest('.dd')){
-    openDropdownId = null;
-    const rerender = openDropdownRerender; openDropdownRerender = null;
-    if(rerender) rerender();
+
+/* Opening or closing a menu is pure UI state and must NOT rebuild the panel.
+
+   It used to: every open, every close, every outside-click and every Escape
+   called the owning panel's render function, which rebuilt the whole thing --
+   43 round cards and every other control -- just to show a list of four
+   options. That is what made the screen appear to reload on any click, and it
+   is why entrance animations had to be suppressed wholesale to stop the
+   blink. Toggling the existing DOM instead costs nothing, cannot disturb
+   scroll position, and leaves the menu node alive long enough to animate
+   CLOSED as well as open -- which the old destroy-on-close path made
+   impossible. */
+function ddSetOpen(id, open){
+  const trigger = document.getElementById(id+'-trigger');
+  const menu = document.getElementById(id+'-menu');
+  if(!trigger || !menu) return;
+  trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+  /* The score hero has to be raised while its own menu is open, or the menu
+     is trapped behind the resume banner. renderScoreHero() does this at
+     render time; since opening no longer re-renders, it has to happen here
+     too. */
+  const hero = menu.closest('.score-hero');
+  if(hero) hero.classList.toggle('is-open', open);
+  if(open){
+    menu.hidden = false;
+    txOpen(menu, 'menu');
+  } else {
+    txClose(menu, ()=>{ menu.hidden = true; });
   }
+}
+
+function ddCloseOpen(){
+  if(!openDropdownId) return;
+  ddSetOpen(openDropdownId, false);
+  openDropdownId = null;
+  openDropdownRerender = null;
+}
+
+document.addEventListener('click', (e)=>{
+  if(openDropdownId && !e.target.closest('.dd')) ddCloseOpen();
 });
 document.addEventListener('keydown', (e)=>{
-  if(e.key==='Escape' && openDropdownId){
-    openDropdownId = null;
-    const rerender = openDropdownRerender; openDropdownRerender = null;
-    if(rerender) rerender();
-  }
+  if(e.key==='Escape' && openDropdownId) ddCloseOpen();
 });
 
 /* opts: { id, ariaLabel, options:[{value,label}], selected } */
@@ -5554,13 +5599,10 @@ function renderDropdown(opts){
         <span aria-hidden="true" title="${escapeHtml(visibleText)}">${escapeHtml(visibleText)}</span>
         ${icon('chevronDown')}
       </button>
-      <!-- Entrance only, deliberately. wireDropdown closes by setting
-           openDropdownId=null and RE-RENDERING, so the menu node is destroyed
-           rather than dismissed -- there is nothing left to animate out. This
-           is the degradation transitions-layer.css documents: the exit falls
-           back to instant, the entrance still plays. Giving these an exit
-           would mean restructuring every dropdown call site to keep the node
-           alive through the animation, which is not worth it for a menu. -->
+      <!-- Entrance AND exit. wireDropdown used to close by re-rendering the
+           whole panel, which destroyed this node before it could animate out;
+           it now toggles the existing element in place, so the exit works and
+           the panel is not rebuilt just to close a menu. -->
       <div class="dd-menu" id="${opts.id}-menu" role="listbox" aria-label="${escapeHtml(opts.ariaLabel||'')}" data-tx="menu"${isOpen?' data-state="open"':''} ${isOpen?'':'hidden'}>
         ${opts.options.map(o=>`<button type="button" role="option" aria-selected="${o.value===opts.selected}" data-dd-value="${escapeHtml(o.value)}" title="${escapeHtml(o.label)}">${escapeHtml(o.label)}</button>`).join('')}
       </div>
@@ -5576,19 +5618,28 @@ function wireDropdown(id, onSelect, rerender){
   const trigger = document.getElementById(id+'-trigger');
   const menu = document.getElementById(id+'-menu');
   if(!trigger || !menu) return;
+  /* Opening/closing: DOM only, no rerender. See ddSetOpen. */
   trigger.onclick = (e)=>{
     e.stopPropagation();
-    if(openDropdownId === id){
-      openDropdownId = null; openDropdownRerender = null;
+    const wasOpen = openDropdownId === id;
+    if(openDropdownId && openDropdownId !== id) ddCloseOpen();   // only one at a time
+    if(wasOpen){
+      ddCloseOpen();
     } else {
-      openDropdownId = id; openDropdownRerender = rerender;
+      openDropdownId = id;
+      openDropdownRerender = rerender;
+      ddSetOpen(id, true);
     }
-    rerender();
   };
   menu.querySelectorAll('[data-dd-value]').forEach(btn=>{
     btn.onclick = (e)=>{
       e.stopPropagation();
-      openDropdownId = null; openDropdownRerender = null;
+      ddCloseOpen();
+      /* Picking an option DOES change what is on screen -- the list gets
+         re-sorted, re-filtered or re-grouped -- so the content arriving is
+         worth showing. This is the one case where a rebuild is justified and
+         the entrance should play. Merely opening the menu above is not. */
+      txArmContentChange(trigger.closest('#progressView, #adminView, #libraryView, #flashView, #quizView'));
       onSelect(btn.dataset.ddValue);
     };
   });
@@ -9320,6 +9371,7 @@ function wireProgressTabs(){
   progressPanel.querySelectorAll('[data-progress-tab]').forEach(btn=>{
     btn.onclick = ()=>{
       progressTab = btn.dataset.progressTab;
+      txArmContentChange(document.getElementById('progressView'));
       renderProgressPanel();
     };
   });
@@ -10397,6 +10449,7 @@ function renderProgressPanel(){
     btn.onclick = ()=>{
       progressViewMode = btn.dataset.progressView;
       localStorage.setItem('nha_progress_view_mode', progressViewMode);
+      txArmContentChange(document.getElementById('progressView'));
       renderProgressPanel();
     };
   });
@@ -13666,6 +13719,7 @@ function wireAdminProgressTabs(section){
     btn.onclick = (ev)=>{
       ev.stopPropagation();
       adminProgressTab = btn.dataset.adminProgressTab;
+      txArmContentChange(document.getElementById('adminView'));
       renderAdminPanel();
     };
   });
@@ -13948,6 +14002,7 @@ function renderAdminExamsSection(examsMap){
     btn.onclick = ()=>{
       adminProgressViewMode = btn.dataset.adminProgressView;
       adminExpandedRoundId = null;
+      txArmContentChange(document.getElementById('adminView'));
       renderAdminExamsSection(examsMap);
     };
   });
