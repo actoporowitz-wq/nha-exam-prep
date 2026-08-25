@@ -4297,8 +4297,11 @@ function renderLibraryResults(){
   });
 }
 
-/* attemptNumber: the attempt this exam load represents. Defaults to 1 (fresh test).
-   Only set explicitly when the exam was reconstructed from an uploaded answer-sheet PDF. */
+/* attemptNumber: the attempt this exam load represents. Defaults to 1 (fresh
+   test); passed explicitly when starting a missed-only retake, which is
+   attempt N of an existing round rather than a fresh sitting. (This used to
+   say the only caller was the PDF importer -- that was already stale before
+   the importer was removed; the retake paths pass it.) */
 function loadExam(examData, attemptNumber){
   exam = examData;
   answers = {}; flags = {}; recallRevealedSet = new Set(); current = 0; submitted = false;
@@ -5001,7 +5004,7 @@ function renderQuestion(){
     };
   }
   quizPanel.querySelectorAll('.opt').forEach(el=>{
-    el.onclick = ()=>{ answers[current] = parseInt(el.dataset.i); syncOnlineAnswer(current); renderQuestion(); renderDots(); };
+    el.onclick = ()=>{ toggleQuizAnswer(parseInt(el.dataset.i)); };
   });
   const prevBtn = document.getElementById('prevBtn');
   if(prevBtn) prevBtn.onclick = ()=>{ current=Math.max(0,current-1); renderQuestion(); renderDots(); scrollQuestionIntoView(); };
@@ -5023,6 +5026,30 @@ function renderQuestion(){
 
   if(restoreId){ document.getElementById(restoreId)?.focus(); }
   else if(restoreOptI !== null){ quizPanel.querySelector(`.opt[data-i="${restoreOptI}"]`)?.focus(); }
+}
+
+/* Picking the option that is ALREADY selected clears it, instead of being a
+   no-op -- this is the only way to un-answer a question. It is deliberately
+   the only mechanism: the alternative considered was "click blank space to
+   deselect", rejected because it binds a silent, destructive, un-undoable
+   action to a stray tap (the most common accidental gesture on mobile) with
+   no on-screen affordance, and because there are already four document-level
+   click listeners here -- one in the capture phase -- and outside-click races
+   between them have caused real bugs before.
+
+   `delete` rather than assigning null/undefined: `answers` is a plain object
+   that starts as {}, and "unanswered" is represented everywhere else in this
+   file by the key simply being ABSENT. Leaving an explicit `undefined` behind
+   would still register as present to an `in`/hasOwnProperty-style check.
+
+   No server-side change was needed: onlineStore.saveAnswer already maps both
+   undefined and null onto a null selected_option. */
+function toggleQuizAnswer(i){
+  if(answers[current] === i) delete answers[current];
+  else answers[current] = i;
+  syncOnlineAnswer(current);
+  renderQuestion();
+  renderDots();
 }
 
 function renderDots(){
@@ -5087,7 +5114,7 @@ document.addEventListener('keydown', (e)=>{
     const i = parseInt(e.key, 10) - 1;
     if(i < exam.questions[current].options.length){
       e.preventDefault();
-      answers[current] = i; syncOnlineAnswer(current); renderQuestion(); renderDots();
+      toggleQuizAnswer(i);
     }
   }
   if(e.key === 'ArrowRight' && current < total-1){
@@ -5688,8 +5715,8 @@ function renderProgressSkeleton(rows){
 /* ================= online flashcards: generate from stored progress =================
    Pulls every missed question (selected_option !== correct_option) from any
    completed attempt straight from Supabase, so a user can build a flashcard
-   set covering any stage of failure across one or more tests without a
-   downloaded PDF answer sheet. Attempts are loaded once per Flashcards-tab
+   set covering any stage of failure across one or more tests. Attempts are
+   loaded once per Flashcards-tab
    visit and grouped by exam in the picker below — checking an exam's group
    header selects every attempt under it, or individual attempts can be
    combined freely across different exams. */
@@ -5739,11 +5766,37 @@ async function loadFlashOnlineAttempts(){
    attempt_id lookup can silently truncate once a user's total answer-row
    count crosses that (hit in testing at 1252 rows for one real account, so
    this isn't a hypothetical edge case). Page through with .range() instead
-   of trusting a single request to return everything. */
-async function fetchAllByIn(table, column, values, select){
+   of trusting a single request to return everything.
+
+   The .order() is NOT cosmetic and must never be dropped -- it is the whole
+   reason this function is correct. LIMIT/OFFSET over a result set with no
+   ORDER BY has no defined row order in Postgres, and each page here is a
+   SEPARATE round-trip, so nothing forces two pages to share one ordering.
+   Proven against the live DB: the same `limit 1000 offset 0` returns a
+   DIFFERENT set of rows depending only on which plan the planner picks
+   (bitmap/index vs sequential), and this project's Postgres runs with
+   synchronize_seqscans=on plus parallel workers -- both of which make scan
+   order vary with nothing but concurrent load. When the plan changes
+   between page N and page N+1 mid-loop, rows are skipped outright and
+   others come back twice.
+
+   The user-visible symptom that traced back to here: a completed attempt
+   whose answer rows all landed in a skipped region counted as zero answers,
+   so Progress rendered it as "from an uploaded PDF -- no detailed review
+   available" and hid its Review button -- intermittently, and cleared by a
+   reload, because it depended on nothing but the plan of the moment. The
+   same truncation also silently shrank flashcard decks built from misses.
+
+   Ordering by the PRIMARY KEY specifically: it is unique and NOT NULL, so
+   it is a total order and page boundaries can never be ambiguous. Ordering
+   by a non-unique column (created_at, attempt_id) is not enough -- ties can
+   still be re-ordered across two requests and straddle a boundary. The key
+   need not appear in `select`; ORDER BY works on unselected columns. */
+async function fetchAllByIn(table, column, values, select, orderColumn='id'){
   let rows = [];
   for(let from=0; ; from+=1000){
-    const { data: page, error } = await supabaseClient.from(table).select(select).in(column, values).range(from, from+999);
+    const { data: page, error } = await supabaseClient.from(table).select(select).in(column, values)
+      .order(orderColumn).range(from, from+999);
     if(error) throw error;
     rows = rows.concat(page);
     if(page.length < 1000) break;
@@ -7156,8 +7209,9 @@ function slugify(s){
    been taken and snapshotted (see createAttemptWithQuestions/recordAnswers).
    Rather than re-snapshotting, past-attempt review looks the current
    explanation up live by exam key + exact question text, falling back to
-   whatever was frozen at attempt time if the question isn't found (custom/
-   uploaded exams aren't in EXAM_LIBRARY at all, so this just no-ops there). */
+   whatever was frozen at attempt time if the question isn't found (an exam
+   that is no longer in EXAM_LIBRARY at all, e.g. one since removed, just
+   no-ops here rather than erroring). */
 function libraryExplanationLookup(examKey){
   const entry = (typeof EXAM_LIBRARY !== 'undefined' ? EXAM_LIBRARY : []).find(e=>'lib:'+slugify(e.title)===examKey);
   if(!entry) return null;
@@ -8942,22 +8996,15 @@ const onlineStore = {
     const { error } = await supabaseClient.from('exam_rounds').delete().eq('id', roundId);
     if(error) throw error;
   },
-  /* Round lookup/creation by an EXACT round number (as opposed to
-     findLatestRound/createRound's "next after latest" logic) -- used when
-     reconstructing round history from an uploaded PDF, which names the
-     specific round it belongs to rather than always meaning "start a new
-     one." */
+  /* Round lookup by an EXACT round number, as opposed to findLatestRound/
+     createRound's "next after latest" logic. Originally written for the
+     retired PDF importer; it outlived it because Progress needs to look up
+     the round BEFORE a given one (round_number - 1) to decide what
+     continuing actually means. Kept for that -- it is no longer import
+     machinery. */
   async findRoundByNumber(examKey, roundNumber){
     const { data, error } = await supabaseClient.from('exam_rounds')
       .select('*').eq('user_id', currentUser.id).eq('exam_key', examKey).eq('round_number', roundNumber).maybeSingle();
-    if(error) throw error;
-    return data;
-  },
-  async createRoundWithNumber(examKey, examTitle, originalTotal, roundNumber){
-    const { data, error } = await supabaseClient.from('exam_rounds').insert({
-      user_id: currentUser.id, exam_key: examKey, exam_title: examTitle,
-      round_number: roundNumber, original_total: originalTotal, funnel_missed_count: originalTotal
-    }).select().single();
     if(error) throw error;
     return data;
   },
@@ -9791,22 +9838,18 @@ function renderRoundAttemptsHtml(r){
     html += `<div class="format-help" style="margin:0;">No attempts yet for this round.</div></div>`;
     return html;
   }
-  /* Fill in any gap before an uploaded PDF's attempt number (e.g. round
-     reconstructed starting at attempt 2 with no record of attempt 1)
-     with an explicit placeholder, rather than silently starting the
-     list at whatever attempt happened to be uploaded first. */
-  const maxAttempt = Math.max(...r.attempts.map(a=>a.attempt_number));
-  const byNumber = new Map(r.attempts.map(a=>[a.attempt_number, a]));
-  for(let n=1; n<=maxAttempt; n++){
-    const a = byNumber.get(n);
-    if(!a){
-      html += `
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-family:system-ui,sans-serif;font-size:.85rem;color:var(--muted);">
-          <span>Attempt ${n} — not uploaded</span>
-        </div>
-      `;
-      continue;
-    }
+  /* Iterate the attempts that actually exist, in order, rather than counting
+     1..max and rendering a placeholder for every number with no row behind
+     it. That placeholder existed only for the retired PDF importer, which
+     could reconstruct a round starting at attempt 2 with no record of
+     attempt 1; with the importer gone, nothing creates numbering gaps --
+     attempts are only ever appended, and admin_delete_exam_attempt() removes
+     an attempt together with every later one in the same round, so a delete
+     can shorten the run but never punch a hole in it. One historical gap
+     does still exist on one account, and it now renders as plain "Attempt 2"
+     instead of inventing a missing upload above it. */
+  const ordered = r.attempts.slice().sort((x,y)=>x.attempt_number - y.attempt_number);
+  for(const a of ordered){
     /* The parenthetical %, when shown, is cumulative mastery as of
        THIS attempt (toward the round's overall goal), not this
        attempt's own raw subset score -- a missed-only retake's
@@ -9818,12 +9861,14 @@ function renderRoundAttemptsHtml(r){
        how many were still missed after that attempt. */
     const stillMissedAfter = a.total_questions - a.correct_count;
     const cumulativePct = ((r.original_total - stillMissedAfter) / r.original_total * 100).toFixed(1);
-    /* Review only needs SOME row data. An attempt from the retired PDF
-       importer that predates per-question backfill has none at all --
-       worth saying explicitly rather than leaving blank space where a
-       Review link would otherwise be. */
+    /* Review needs per-question rows to show anything. A handful of very old
+       attempts predate per-question storage and have none, so they get a note
+       instead of a Review link that would open an empty screen. Verified
+       against live data: exactly one such attempt exists today. Keep this
+       gate -- it is about legacy rows with no answer data, NOT about where
+       an attempt came from, which is why it no longer claims a PDF origin. */
     const noReviewNote = (a.status==='completed' && !a.hasAnswers)
-      ? `<span class="lib-meta" style="font-size:.78rem;">from an uploaded PDF — no detailed review available</span>` : '';
+      ? `<span class="lib-meta" style="font-size:.78rem;">no detailed review available</span>` : '';
     html += `
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;padding:6px 0;font-family:system-ui,sans-serif;font-size:.85rem;">
         <span>Attempt ${a.attempt_number} (${a.attempt_scope==='full'?'full exam':'missed-only retake'}) — ${a.status==='completed' ? `${a.correct_count}/${a.total_questions} (${cumulativePct}% cumulative)` : `${Math.min(a.answeredCount, a.total_questions)} of ${a.total_questions} answered · paused`}</span>
@@ -10341,9 +10386,9 @@ function renderProgressPanel(){
          doesn't touch exam_attempt_answers at all, so it works fine even
          with zero answers so far. hasAnswers is only actually required for
          the OTHER branch, building a missed-only retake off a completed
-         attempt's answer rows -- a totals-only historical row (from the
-         retired PDF importer; existing accounts may still have these) has
-         none of those, so that path stays gated. Previously hasAnswers was
+         attempt's answer rows -- a totals-only historical row predating
+         per-question storage has none of those, so that path stays gated.
+         Verified against live data: exactly one such attempt still exists. Previously hasAnswers was
          required unconditionally, which meant a round you'd started but not
          yet answered a single question on showed no Continue button at all,
          even though resuming it was fully supported underneath. Abandoned
@@ -10634,9 +10679,9 @@ function deleteAttemptFromProgress(attemptId, attemptNumber, round){
    1. Latest attempt is COMPLETED with row data (played natively) -- build
       the next missed-only attempt from it, same as the results-screen
       "Retake Missed Only" button (mirrors its online branch).
-   2. Latest attempt is already IN-PROGRESS with row data -- it was staged
-      (not yet played) either by an interrupted live session or by the
-      batch PDF importer reconstructing a round's history -- just resume it. */
+   2. Latest attempt is already IN-PROGRESS with row data -- it was staged by
+      an interrupted live session (Pause & Save, or a closed tab) and never
+      played to the end -- just resume it. */
 async function continueRoundFromProgress(round){
   const msg = document.getElementById('progressMsg');
   try{
@@ -11700,6 +11745,11 @@ async function renderAdminAuditLogView(){
     const from = adminAuditPage * ADMIN_LOG_PAGE_SIZE;
     const { data: rows, error, count } = await q
       .order('created_at', { ascending: adminAuditSort === 'asc' })
+      /* created_at alone is not a total order -- rows sharing a timestamp can
+         come back in either order per request, so one could straddle a page
+         boundary and be shown twice or skipped as you page. The PK breaks
+         every tie. Same reasoning as fetchAllByIn; see its comment. */
+      .order('id', { ascending: adminAuditSort === 'asc' })
       .range(from, from + ADMIN_LOG_PAGE_SIZE - 1);
     if(error) throw error;
     const actionLabels = {
@@ -11899,6 +11949,9 @@ async function renderAdminErrorsView(){
     const from = adminErrorsPage * ADMIN_LOG_PAGE_SIZE;
     const { data: rows, error, count } = await q
       .order('created_at', { ascending: adminErrorsSort === 'asc' })
+      /* PK tiebreaker -- client_errors genuinely has rows sharing a created_at
+         (a burst of errors from one page load), so this is not theoretical. */
+      .order('id', { ascending: adminErrorsSort === 'asc' })
       .range(from, from + ADMIN_LOG_PAGE_SIZE - 1);
     if(error) throw error;
     const userIds = [...new Set((rows||[]).filter(r=>r.user_id).map(r=>r.user_id))];
