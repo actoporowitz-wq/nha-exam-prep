@@ -7464,6 +7464,12 @@ let authError = '';
 let authErrorIsPasskeyNudge = false;
 let authMessage = '';
 let turnstileWidgetId = null;
+/* Set when the security check could not be shown at all -- the script was
+   blocked, never loaded, or render()/Cloudflare reported an error. Kept
+   separate from "rendered but not yet solved", because the two need
+   opposite advice: one is "wait a moment", the other is "it is not coming,
+   here is how to recover". */
+let turnstileUnavailable = false;
 /* Set right before a real signInWithPassword() call, consumed (and
    cleared) by maybeShowPasskeyEnrollmentPrompt() once SIGNED_IN actually
    fires -- onAuthStateChange's SIGNED_IN event doesn't say which method
@@ -7515,7 +7521,46 @@ if(pendingPasswordRecovery) setTimeout(()=>{ pendingPasswordRecovery = false; },
 /* Turnstile's script only auto-renders .cf-turnstile elements present at
    script-load time — since the sign-up form is injected later via
    innerHTML, the widget must be rendered explicitly. */
-function renderTurnstileWidget(){
+/* Shown in place of the widget when it cannot be rendered. Without this the
+   only feedback was the submit-time "Please complete the CAPTCHA challenge",
+   which is actively misleading when there is no CAPTCHA on screen to
+   complete -- a dead end with no way out. 63 Turnstile errors were logged
+   across 4 accounts before this existed (mostly 300030/300010, i.e. the
+   script failing to execute -- typically a blocker or a flaky network). */
+function showTurnstileFallback(){
+  const container = document.getElementById('turnstileWidget');
+  if(!container) return;
+  turnstileUnavailable = true;
+  container.innerHTML = `<div class="msg err" style="margin:0;font-size:.84rem;line-height:1.45;">`
+    + `Couldn't load the security check. An ad or script blocker is the usual cause. `
+    + `<button type="button" class="link-btn" id="turnstileRetryBtn" style="padding:0;">Try again</button>`
+    + `</div>`;
+  const retry = document.getElementById('turnstileRetryBtn');
+  if(retry) retry.onclick = ()=>{
+    container.innerHTML = '';
+    turnstileUnavailable = false;
+    turnstileWidgetId = null;
+    renderTurnstileWidget();
+  };
+}
+
+/* Every caller that needs a token goes through here, so the "didn't load"
+   and "didn't solve it yet" cases can't drift apart across the four call
+   sites again. Throws; callers surface err.message as-is. */
+function requireTurnstileToken(){
+  const token = (window.turnstile && turnstileWidgetId!==null) ? window.turnstile.getResponse(turnstileWidgetId) : null;
+  if(token) return token;
+  if(turnstileUnavailable || turnstileWidgetId === null){
+    throw new Error("The security check couldn't load, so signing in isn't possible right now. Turn off any ad or script blocker for this site, then use “Try again” above or reload the page.");
+  }
+  throw new Error('Please complete the security check above, then try again.');
+}
+
+/* attempt counts the 200ms polls waiting for Turnstile's own script. It is
+   bounded on purpose: this used to retry forever, so a blocked script left
+   the page waiting silently and permanently instead of ever saying so. */
+function renderTurnstileWidget(attempt){
+  attempt = attempt || 0;
   const container = document.getElementById('turnstileWidget');
   if(!container) return;
   if(window.turnstile){
@@ -7534,9 +7579,25 @@ function renderTurnstileWidget(){
        already flex-direction:column with default align-items:stretch, so
        #turnstileWidget already stretches to the column's full width the
        same way the input fields do. */
-    turnstileWidgetId = window.turnstile.render(container, { sitekey: TURNSTILE_SITE_KEY, size: 'flexible' });
+    try{
+      turnstileWidgetId = window.turnstile.render(container, {
+        sitekey: TURNSTILE_SITE_KEY,
+        size: 'flexible',
+        /* Cloudflare reports its own failures through these rather than by
+           throwing -- without them a 300030-class error left the widget
+           mounted but permanently unsolvable, and nothing on screen said so. */
+        'error-callback': ()=>{ showTurnstileFallback(); },
+        'timeout-callback': ()=>{ showTurnstileFallback(); },
+      });
+    }catch(err){
+      /* render() itself can throw (bad/blocked sitekey, container detached). */
+      console.error('Turnstile render failed:', err);
+      showTurnstileFallback();
+    }
+  } else if(attempt < 50){
+    setTimeout(()=>renderTurnstileWidget(attempt + 1), 200);   // ~10s total
   } else {
-    setTimeout(renderTurnstileWidget, 200);
+    showTurnstileFallback();
   }
 }
 
@@ -7673,6 +7734,7 @@ function renderAuthView(){
   }
   authPanel.innerHTML = html;
   turnstileWidgetId = null;
+  turnstileUnavailable = false;
   /* Supabase's CAPTCHA setting is project-wide across sign-up/sign-in/password-reset — it
      can't be scoped to sign-up alone, so all three screens carry the widget. 'unlock' needs
      it for the exact same reason signInWithPasskey() does everywhere else (see
@@ -7769,8 +7831,7 @@ async function handleAuthSubmit(){
     if(authScreen === 'signin'){
       const email = document.getElementById('authEmail').value.trim();
       const password = document.getElementById('authPassword').value;
-      const turnstileToken = (window.turnstile && turnstileWidgetId!==null) ? window.turnstile.getResponse(turnstileWidgetId) : null;
-      if(!turnstileToken){ throw new Error('Please complete the CAPTCHA challenge.'); }
+      const turnstileToken = requireTurnstileToken();
       const { error } = await supabaseClient.auth.signInWithPassword({ email, password, options: { captchaToken: turnstileToken } });
       if(error) throw error;
       pendingPasswordSignInPrompt = true;
@@ -7778,8 +7839,7 @@ async function handleAuthSubmit(){
     } else if(authScreen === 'signup'){
       const email = document.getElementById('authEmail').value.trim();
       const password = document.getElementById('authPassword').value;
-      const turnstileToken = (window.turnstile && turnstileWidgetId!==null) ? window.turnstile.getResponse(turnstileWidgetId) : null;
-      if(!turnstileToken){ throw new Error('Please complete the CAPTCHA challenge.'); }
+      const turnstileToken = requireTurnstileToken();
       const { data, error } = await supabaseClient.auth.signUp({ email, password, options: { captchaToken: turnstileToken } });
       if(error) throw error;
       /* Supabase never returns an error for a duplicate signup (anti-enumeration:
@@ -7798,8 +7858,7 @@ async function handleAuthSubmit(){
       return;
     } else if(authScreen === 'forgot'){
       const email = document.getElementById('authEmail').value.trim();
-      const turnstileToken = (window.turnstile && turnstileWidgetId!==null) ? window.turnstile.getResponse(turnstileWidgetId) : null;
-      if(!turnstileToken){ throw new Error('Please complete the CAPTCHA challenge.'); }
+      const turnstileToken = requireTurnstileToken();
       const { error } = await supabaseClient.auth.resetPasswordForEmail(email, { captchaToken: turnstileToken, redirectTo: window.location.href.split('#')[0] });
       if(error) throw error;
       authMessage = 'Reset link sent — check your email.';
@@ -7871,7 +7930,15 @@ function waitForTurnstileToken(maxMs){
    path -- nothing else to do in this function once it resolves. */
 async function attemptPasskeySignIn(){
   const turnstileToken = await waitForTurnstileToken(4000);
-  if(!turnstileToken){ throw new Error('Please complete the CAPTCHA challenge.'); }
+  /* Same two failure modes, same wording as requireTurnstileToken -- kept
+     inline because this path waits for the token rather than demanding one
+     that should already be there. */
+  if(!turnstileToken){
+    if(turnstileUnavailable || turnstileWidgetId === null){
+      throw new Error("The security check couldn't load, so signing in isn't possible right now. Turn off any ad or script blocker for this site, then reload the page.");
+    }
+    throw new Error('The security check is still running — give it a second and try again.');
+  }
   const { error } = await supabaseClient.auth.signInWithPasskey({ options: { captchaToken: turnstileToken } });
   if(error) throw error;
 }
