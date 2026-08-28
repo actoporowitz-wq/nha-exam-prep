@@ -2858,10 +2858,11 @@ if('serviceWorker' in navigator){
      bottom of the stylesheet. Remove it and the app renders exactly as it
      did before that layer existed. All JS touches body via classList
      add/remove/toggle only, never className =, so this class survives.
-     TURNED OFF 2026-08-28 at the owner's request: the Site Pass design
-     layer (live since 2026-08-23) was disliked on mobile. Put the class
-     back to re-enable the whole layer -- nothing else was removed. -->
-<body>
+     Turned OFF on 2026-08-28 and back ON on 2026-08-28 at the owner's
+     request -- the layer's CSS was never removed either time, so the gate
+     is the whole switch. If it ever needs disabling again, drop the class
+     rather than deleting rules. -->
+<body class="craft">
 <!-- Gradient defs for the mastery rings. Declared once, globally, because
      craft-layer paints .ring-wrap .fill with stroke:url(#ringGradAccent) and
      an unresolvable paint reference computes to NONE — without this block
@@ -3148,6 +3149,7 @@ let flashRecallSourceRef = null; // last `flashcards` array reference the queue 
 let flashRecallProgress = new Map(); // question_key -> 'knew'|'missed', persisted ratings loaded for the current deck
 let flashRecallProgressFor = null; // last `flashcards` ref flashRecallProgress was fetched for -- guards against refetching on every render
 let flashRecallMasteredCount = 0; // cards in the current deck already rated 'knew' in a past session, excluded from the initial queue
+let flashRecallJustRated = new Set(); // question_keys rated during THIS page load -- an in-flight loadRecallProgressIfNeeded must not overwrite them with the older server value
 let flashGeneratorOpen = false; // once a set exists, the generator panel is collapsed by default -- this reopens it
 let flashSetupMenuOpen = false; // collapses the "Add questions/Add specific attempts/Update/Save/Start different set" action row behind one trigger -- those went from quiet underlined links to real bordered buttons (site-wide link->button pass) and left this row competing with the actual card for attention every time a set is loaded; collapsed by default, same "one thing to look at" shape as everywhere else in this redesign
 let reviewFilter = 'missed'; // 'missed' | 'all' — which questions renderReviewPanel shows
@@ -6577,7 +6579,17 @@ function recallKey(card){ return computeQuestionKey(card.text); }
    the very first time recall mode is opened. Starts from the full deck
    synchronously (so there's something to render immediately) then kicks
    off loadRecallProgressIfNeeded() to fetch persisted ratings and filter
-   out already-mastered cards once that resolves. */
+   out already-mastered cards once that resolves.
+
+   loadRecallProgressIfNeeded() is called on EVERY pass, not only in the
+   rebuild branch. It used to sit inside the branch, so a deck got exactly
+   ONE attempt at fetching its mastery -- and that attempt is abandoned
+   when currentUser is still null, which happens on any render that beats
+   auth (onAuthStateChange also nulls currentUser again mid-session on a
+   token refresh). One badly-timed render and mastery hiding was off for
+   the rest of that deck's life, with nothing shown to say so. The
+   function is self-guarding via flashRecallProgressFor, so calling it on
+   every render costs one comparison once it has succeeded. */
 function ensureRecallQueue(){
   if(flashRecallSourceRef !== flashcards){
     flashRecallQueue = [...flashcards];
@@ -6588,8 +6600,8 @@ function ensureRecallQueue(){
     flashRecallRevealed = false;
     flashRecallSourceRef = flashcards;
     flashRecallMasteredCount = 0;
-    loadRecallProgressIfNeeded();
   }
+  loadRecallProgressIfNeeded();
 }
 
 /* Fetches persisted recall ratings for the current deck's cards, once per
@@ -6598,31 +6610,73 @@ function ensureRecallQueue(){
    server, same tolerance as the rest of this app's background fetches. */
 async function loadRecallProgressIfNeeded(){
   if(!currentUser || flashRecallProgressFor === flashcards) return;
-  flashRecallProgressFor = flashcards;
-  const keys = flashcards.map(recallKey);
+  const deck = flashcards;
+  flashRecallProgressFor = deck;
+  const keys = deck.map(recallKey);
   if(!keys.length) return;
   try{
-    const { data, error } = await supabaseClient.from('flashcard_recall_progress')
-      .select('question_key,status').eq('user_id', currentUser.id).in('question_key', keys);
-    if(error) throw error;
-    flashRecallProgress = new Map((data||[]).map(r=>[r.question_key, r.status]));
+    /* Chunked because .in() goes out as a query STRING and the edge caps a
+       URL at 64 KB (measured against this project: 443 keys of average
+       length go through, 446 come back 414). A deck built from all-time
+       misses can pass that, and the whole point of this function is that
+       its failure is invisible -- so it must not have a cliff. */
+    const rows = [];
+    for(let i=0;i<keys.length;i+=200){
+      const { data, error } = await supabaseClient.from('flashcard_recall_progress')
+        .select('question_key,status').eq('user_id', currentUser.id).in('question_key', keys.slice(i, i+200));
+      if(error) throw error;
+      rows.push(...(data||[]));
+    }
+    if(flashcards !== deck) return; // deck swapped mid-flight; that load owns the state now
+    const fetched = new Map(rows.map(r=>[r.question_key, r.status]));
+    /* Anything rated during the flight wins over what the server said
+       before it. saveRecallRating's own comment already promised this;
+       the wholesale `new Map(...)` assignment that used to be here broke
+       the promise, so a card rated in the first second of a session could
+       be silently reverted to its previous status locally. */
+    for(const k of flashRecallJustRated){
+      if(flashRecallProgress.has(k)) fetched.set(k, flashRecallProgress.get(k));
+    }
+    flashRecallProgress = fetched;
     applyMasteredFilter();
     renderFlashcard();
   }catch(err){
+    /* Release the claim so the next render retries. Leaving it set meant a
+       single transient failure disabled mastery hiding until the deck was
+       rebuilt -- silently, since this path is deliberately non-fatal. */
+    if(flashRecallProgressFor === deck) flashRecallProgressFor = null;
     console.error('Could not load recall progress:', err.message);
   }
 }
 
-/* Only filters the *initial* queue -- guarded so it never yanks a card out
-   from under a session that's already in progress (once flashRecallPos has
-   moved or a round has advanced, persisted state is left alone until the
-   next fresh deck load). */
+/* Hides already-mastered cards, without ever yanking one out from under a
+   card the user is looking at or has already rated this session.
+
+   This used to bail out entirely -- `if(flashRecallPos !== 0 || ...) return`
+   -- which was the bug behind "I press Knew it and the card is still in the
+   deck next time". The fetch that leads here is fire-and-forget from
+   ensureRecallQueue(), so on a slow connection it can land AFTER the first
+   rating. When it did, this returned without filtering anything, and since
+   nothing ever calls it again for that deck, mastery hiding was off for the
+   whole session -- intermittently, depending purely on whether the network
+   beat the user's first tap. That is why it looked like ratings had stopped
+   being saved when they were being saved correctly the whole time.
+
+   The protected prefix is everything already rated plus the card currently
+   on screen; only the tail the user has not reached yet is filtered. In the
+   ordinary case (fetch lands before any interaction) the prefix is empty and
+   the behaviour is exactly what it always was. */
 function applyMasteredFilter(){
-  if(flashRecallPos !== 0 || flashRecallRound !== 1 || flashRecallMissed.length) return;
+  if(flashRecallRound !== 1) return;
   const masteredKeys = new Set([...flashRecallProgress].filter(([,v])=>v==='knew').map(([k])=>k));
   if(!masteredKeys.size) return;
-  flashRecallMasteredCount = flashcards.filter(c=>masteredKeys.has(recallKey(c))).length;
-  if(flashRecallMasteredCount) flashRecallQueue = flashRecallQueue.filter(c=>!masteredKeys.has(recallKey(c)));
+  const untouched = flashRecallPos === 0 && !flashRecallRevealed
+    && !flashRecallMissed.length && !flashRecallKnownTotal;
+  const keep = untouched ? 0 : flashRecallPos + 1;
+  const head = flashRecallQueue.slice(0, keep);
+  const tail = flashRecallQueue.slice(keep).filter(c=>!masteredKeys.has(recallKey(c)));
+  flashRecallMasteredCount = flashRecallQueue.length - head.length - tail.length;
+  if(flashRecallMasteredCount) flashRecallQueue = head.concat(tail);
 }
 
 /* "Study them too" link -- adds this deck's already-mastered cards back
@@ -6645,6 +6699,7 @@ function saveRecallRating(card, knewIt){
   const key = recallKey(card);
   const status = knewIt ? 'knew' : 'missed';
   flashRecallProgress.set(key, status);
+  flashRecallJustRated.add(key);
   supabaseClient.from('flashcard_recall_progress')
     .upsert({ user_id: currentUser.id, question_key: key, status, updated_at: new Date().toISOString() }, { onConflict: 'user_id,question_key' })
     .then(({error})=>{ if(error) console.error('Could not save recall progress:', error.message); });
