@@ -2857,8 +2857,11 @@ if('serviceWorker' in navigator){
 <!-- class="craft" is the SINGLE gate for the Site Pass design layer at the
      bottom of the stylesheet. Remove it and the app renders exactly as it
      did before that layer existed. All JS touches body via classList
-     add/remove/toggle only, never className =, so this class survives. -->
-<body class="craft">
+     add/remove/toggle only, never className =, so this class survives.
+     TURNED OFF 2026-08-28 at the owner's request: the Site Pass design
+     layer (live since 2026-08-23) was disliked on mobile. Put the class
+     back to re-enable the whole layer -- nothing else was removed. -->
+<body>
 <!-- Gradient defs for the mastery rings. Declared once, globally, because
      craft-layer paints .ring-wrap .fill with stroke:url(#ringGradAccent) and
      an unresolvable paint reference computes to NONE — without this block
@@ -6292,14 +6295,25 @@ async function updateSavedFlashcardSet(){
 }
 
 function loadSavedSetIntoStudy(set){
-  flashcards = set.cards;
+  /* Copy, don't alias. This used to hand the study deck the saved set's
+     own array object, so any in-place edit (remove, shuffle) rewrote the
+     cached set without going anywhere near the server -- the list on
+     screen and the stored one quietly diverged. "Update set" remains the
+     only thing that persists a change. */
+  flashcards = [...set.cards];
   flashIndex = 0;
   flashSelectedOption = null;
   flashGeneratorOpen = false;
   flashSavedSetsOpen = false;
   currentSetId = set.id;
   currentSetName = set.name;
-  flashProgressMsg = { text: `Loaded "${set.name}" (${set.cards.length} card(s)).`, ok:true };
+  /* No "Loaded ..." confirmation -- the deck showing up IS the
+     confirmation, and this one sat on the flashcards home restating what
+     you had just clicked. Cleared rather than merely not set: otherwise a
+     message left over from a previous action ("Built N flashcard(s)", or
+     an error) stays on screen under the newly loaded set and reads as
+     though it describes it. */
+  flashProgressMsg = null;
   renderFlashcard();
 }
 
@@ -6322,6 +6336,33 @@ function deleteSavedFlashcardSet(set){
   );
 }
 
+/* Both Remove buttons REPLACE the deck array rather than splicing it in
+   place, and this helper is what keeps a running recall session honest
+   afterwards. Two separate things broke while remove mutated in place:
+     - ensureRecallQueue() decides whether to rebuild by comparing the
+       `flashcards` REFERENCE (see its comment), and splice never changes
+       one -- so the queue went on serving a card the deck no longer had.
+     - loadSavedSetIntoStudy() handed over savedFlashcardSets[..].cards
+       itself, so splicing silently edited the cached saved set with
+       nothing sent to the server. That share is a copy now, but
+       replacing rather than mutating is what makes it safe either way.
+   Syncing the session instead of rebuilding it is deliberate: a rebuild
+   would reset round/position/progress just because one card was thrown
+   away. Only touches a session actually built from the deck we just
+   changed -- otherwise ensureRecallQueue() is left to build a fresh one
+   on the next switch into recall mode, and marking it built here would
+   hand it an empty queue and an instant "session complete". */
+function syncRecallSessionToDeck(prevDeckRef){
+  if(flashRecallProgressFor === prevDeckRef) flashRecallProgressFor = flashcards;
+  if(flashRecallSourceRef !== prevDeckRef) return;
+  const present = new Set(flashcards);
+  const droppedBeforePos = flashRecallQueue.slice(0, flashRecallPos).filter(c=>!present.has(c)).length;
+  flashRecallQueue = flashRecallQueue.filter(c=>present.has(c));
+  flashRecallMissed = flashRecallMissed.filter(c=>present.has(c));
+  flashRecallPos = Math.min(Math.max(0, flashRecallPos - droppedBeforePos), flashRecallQueue.length);
+  flashRecallSourceRef = flashcards;
+}
+
 /* Edits the in-progress deck without touching the saved row until "Update"
    is clicked -- mirrors shuffleFlashcards below in scope (deck-local state
    only). Deliberately no confirm dialog: unlike deleteSavedFlashcardSet this
@@ -6329,9 +6370,41 @@ function deleteSavedFlashcardSet(set){
    undoes it. */
 function removeCurrentFlashcard(){
   if(!flashcards.length) return;
-  flashcards.splice(flashIndex, 1);
+  const prevDeck = flashcards;
+  flashcards = flashcards.filter((c,i)=> i !== flashIndex);
   if(flashIndex >= flashcards.length) flashIndex = Math.max(0, flashcards.length - 1);
   flashSelectedOption = null;
+  syncRecallSessionToDeck(prevDeck);
+  renderFlashcard();
+}
+
+/* Recall mode's Remove used to splice flashRecallQueue and nothing else,
+   so the card stayed in `flashcards` and came straight back on "Study
+   again", on a switch to Multiple Choice, and in the next session. It
+   also stayed in flashRecallMissed, so removing a card already rated
+   "didn't know it" put it back in the very next round.
+   recall_session.dart carried the same queue-only scoping and a comment
+   calling it deliberate ("matches the web app"); both are changed
+   together, because "Remove this card" means remove it from the deck.
+   Shuffle stays queue-scoped -- shuffling only the unseen remainder is
+   genuinely what it should do, and is unaffected by this. */
+function removeCurrentRecallCard(){
+  const card = flashRecallQueue[flashRecallPos];
+  if(!card) return;
+  const prevDeck = flashcards;
+  flashcards = flashcards.filter(c=> c !== card);
+  if(flashIndex >= flashcards.length) flashIndex = Math.max(0, flashcards.length - 1);
+  syncRecallSessionToDeck(prevDeck);
+  /* Queue exhausted but misses still outstanding -- open the next
+     narrowing round now, exactly as rateRecallCard does, rather than
+     falling through to the "session complete" screen with work left. */
+  if(flashRecallPos >= flashRecallQueue.length && flashRecallMissed.length){
+    flashRecallQueue = flashRecallMissed;
+    flashRecallMissed = [];
+    flashRecallPos = 0;
+    flashRecallRound++;
+  }
+  flashRecallRevealed = false;
   renderFlashcard();
 }
 
@@ -6479,9 +6552,19 @@ function shuffleArrayInPlace(arr){
 }
 
 function shuffleFlashcards(){
-  shuffleArrayInPlace(flashcards);
+  /* Same replace-don't-mutate rule as removeCurrentFlashcard: shuffling
+     in place reordered savedFlashcardSets[..].cards itself whenever the
+     deck came from a saved set. Membership is unchanged here, so the
+     recall queue's contents stay valid -- syncRecallSessionToDeck only
+     re-points the reference, so ensureRecallQueue() can't mistake a
+     shuffle for a new deck and wipe a running session. */
+  const prevDeck = flashcards;
+  const next = [...flashcards];
+  shuffleArrayInPlace(next);
+  flashcards = next;
   flashIndex = 0;
   flashSelectedOption = null;
+  syncRecallSessionToDeck(prevDeck);
   renderFlashcard();
 }
 
@@ -7074,17 +7157,7 @@ function renderFlashcard(){
       renderFlashcard();
     };
     const removeCardBtn = document.getElementById('flashRemoveCardBtn');
-    if(removeCardBtn) removeCardBtn.onclick = ()=>{
-      flashRecallQueue.splice(flashRecallPos, 1);
-      flashRecallRevealed = false;
-      if(flashRecallPos >= flashRecallQueue.length && flashRecallMissed.length){
-        flashRecallQueue = flashRecallMissed;
-        flashRecallMissed = [];
-        flashRecallPos = 0;
-        flashRecallRound++;
-      }
-      renderFlashcard();
-    };
+    if(removeCardBtn) removeCardBtn.onclick = removeCurrentRecallCard;
   }
   const updateSetBtn = document.getElementById('flashUpdateSetBtn');
   if(updateSetBtn) updateSetBtn.onclick = updateSavedFlashcardSet;
