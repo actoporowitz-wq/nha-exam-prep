@@ -6304,7 +6304,13 @@ function loadSavedSetIntoStudy(set){
   flashSavedSetsOpen = false;
   currentSetId = set.id;
   currentSetName = set.name;
-  flashProgressMsg = { text: `Loaded "${set.name}" (${set.cards.length} card(s)).`, ok:true };
+  /* No "Loaded ..." confirmation -- the deck showing up IS the
+     confirmation, and this one sat on the flashcards home restating what
+     you had just clicked. Cleared rather than merely not set: otherwise a
+     message left over from a previous action ("Built N flashcard(s)", or
+     an error) stays on screen under the newly loaded set and reads as
+     though it describes it. */
+  flashProgressMsg = null;
   renderFlashcard();
 }
 
