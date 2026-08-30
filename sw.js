@@ -15,10 +15,20 @@
    listener existing at all (the page never reloaded itself even once a new
    SW DID activate), this is the real reason "reload twice" repeatedly
    failed to show a genuinely new deploy across multiple rounds of testing. */
-const CACHE_NAME = 'nha-exam-prep-shell-v67';
+const CACHE_NAME = 'nha-exam-prep-shell-v68';
+/* '/index.html' is deliberately NOT in this list. Cloudflare Pages answers
+   it with a 308 redirect to '/', so cache.addAll() followed the redirect
+   and stored the result under the '/index.html' key with redirected:true --
+   and a browser refuses to use a redirected response to satisfy a
+   NAVIGATION request. The effect was that once this service worker was
+   installed, going straight to /index.html (a bookmark, an old link, URL
+   autocomplete) died with net::ERR_FAILED, while the same URL worked fine
+   with the service worker disabled. Measured both ways before removing it.
+   Dropping it from the list means the fetch handler below no longer matches
+   that path at all, so it falls through to the network and the 308 does its
+   job. '/' is the canonical entry point and is still precached. */
 const SHELL_URLS = [
   '/',
-  '/index.html',
   '/manifest.json',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
