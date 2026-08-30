@@ -3125,6 +3125,7 @@ let flashFullScreen = false; // true = card covers the whole viewport (header/ta
 let flashAiExplainOn = false;
 let flashAiExplainLoading = false;
 let flashAiExplainText = null;
+let flashAiExplainError = null; // why the last AI explanation request was refused, shown in place of the explanation
 let flashAiExplainKey = null;
 
 /* ---- True recall mode: study by producing the answer from memory (no
@@ -4521,6 +4522,18 @@ function aiExplanationCacheKey(q){
     (q.explanation || '').trim(),
   ]);
 }
+/* ai-explain's refusals are all things the student can act on -- the admin
+   kill switch, the site spend ceiling, and the per-account cap from 0078 --
+   so they are worth showing instead of one generic line for every cause
+   alike. Falls back to the generic wording for a genuine network failure,
+   where err.message is a fetch-level string that would mean nothing here. */
+function aiExplainErrorText(err){
+  const msg = err && err.message ? String(err.message) : '';
+  const generic = "Couldn't load an explanation right now.";
+  if(!msg) return generic;
+  if(/non-2xx|Failed to fetch|NetworkError|Load failed/i.test(msg)) return generic;
+  return msg;
+}
 function fetchAiExplanation(q){
   const key = aiExplanationCacheKey(q);
   if(!aiExplanationCache.has(key)){
@@ -4531,8 +4544,20 @@ function fetchAiExplanation(q){
         correct_option: q.correct,
         existing_explanation: q.explanation || undefined,
       },
-    }).then(({data, error})=>{
-      if(error) throw error;
+    }).then(async ({data, error})=>{
+      /* Same unwrap askAiFollowUp() and the admin reply path already do:
+         supabase-js turns any non-2xx into a FunctionsHttpError whose
+         .message is the generic "Edge Function returned a non-2xx status
+         code", and the function's own { error: "..." } body is reachable
+         only through .context. Without this, ai-explain's real refusals --
+         the admin kill switch, "not in the exam library", the site spend
+         ceiling, and the per-account cap added in 0078 -- all showed the
+         student the same meaningless failure. */
+      if(error){
+        let errBody = null;
+        try{ errBody = error.context ? await error.context.json() : null; }catch(e){}
+        throw new Error((errBody && errBody.error) ? errBody.error : error.message);
+      }
       if(data && data.error) throw new Error(data.error);
       return data.explanation;
     });
@@ -4967,10 +4992,10 @@ function renderQuestion(){
       if(current !== myCurrent) return;
       const el = document.getElementById('aiExplainBlock');
       if(el) el.innerHTML = aiExplanationHtml(explanation);
-    }).catch(()=>{
+    }).catch((err)=>{
       if(current !== myCurrent) return;
       const el = document.getElementById('aiExplainBlock');
-      if(el) el.textContent = "Couldn't load an explanation right now.";
+      if(el) el.textContent = aiExplainErrorText(err);
     });
   }
 
@@ -5365,8 +5390,8 @@ function wireReviewList(container, questions){
         btn.disabled = false;
         btn.innerHTML = `${icon('close')}Hide AI Explanation`;
         if(chatBtn) chatBtn.hidden = false;
-      }).catch(()=>{
-        textEl.innerHTML = "Couldn't load an explanation right now.";
+      }).catch((err)=>{
+        textEl.textContent = aiExplainErrorText(err);
         btn.disabled = false;
         btn.setAttribute('aria-pressed','false');
         btn.innerHTML = `${icon('info')}AI Explanation`;
@@ -6684,9 +6709,29 @@ function applyMasteredFilter(){
    persisted status (only re-rating a card changes that). */
 function includeMasteredCards(){
   const masteredKeys = new Set([...flashRecallProgress].filter(([,v])=>v==='knew').map(([k])=>k));
-  const toAdd = flashcards.filter(c=>masteredKeys.has(recallKey(c)));
+  /* Only cards that are not ALREADY in the queue. This used to append every
+     mastered card in the deck unconditionally, on the assumption that
+     applyMasteredFilter() had removed all of them first -- true only while
+     that filter ran on an untouched queue. It can now also run mid-session
+     (it protects the card on screen and anything already rated, rather than
+     giving up entirely the way it used to), so a mastered card can legally
+     still be sitting in the queue when this is clicked -- and appending it
+     again put the SAME card in the queue twice, which is exactly what
+     "the same card keeps coming back" looks like from the outside.
+     Keyed on recallKey, the same identity mastery itself is keyed on. */
+  const present = new Set(flashRecallQueue.map(recallKey));
+  const toAdd = flashcards.filter(c=>masteredKeys.has(recallKey(c)) && !present.has(recallKey(c)));
   flashRecallQueue = flashRecallQueue.concat(toAdd);
   flashRecallMasteredCount = 0;
+  /* Reached from the session-complete screen too, where the queue had been
+     emptied by the filter -- without this the cards go in but the cursor is
+     still parked past the end, so it would sit on "complete" with a full
+     queue behind it. Only rewinds when there is genuinely nothing left to
+     show at the current position; a mid-session click must not move it. */
+  if(flashRecallPos >= flashRecallQueue.length - toAdd.length && toAdd.length){
+    flashRecallPos = Math.min(flashRecallPos, flashRecallQueue.length - toAdd.length);
+  }
+  flashRecallRevealed = false;
   renderFlashcard();
 }
 
@@ -6805,7 +6850,9 @@ function renderFlashExplainRow(card){
   if(showAi){
     html += loading
       ? `<div class="review-explanation" data-role="explain-text">${aiThinkingHtml('Writing an explanation', 3)}</div>`
-      : `<div class="review-explanation" data-role="explain-text">${aiExplanationHtml(flashAiExplainText || '')}</div>`;
+      : flashAiExplainError
+        ? `<div class="review-explanation" data-role="explain-text">${escapeHtml(flashAiExplainError)}</div>`
+        : `<div class="review-explanation" data-role="explain-text">${aiExplanationHtml(flashAiExplainText || '')}</div>`;
   } else if(card.explanation){
     html += `<div class="review-explanation" data-role="explain-text"><strong>Explanation:</strong> ${escapeHtml(card.explanation)}</div>`;
   } else {
@@ -6839,6 +6886,7 @@ function wireFlashAiExplainBtn(){
     flashAiExplainKey = key;
     flashAiExplainLoading = true;
     flashAiExplainText = null;
+    flashAiExplainError = null;
     renderFlashcard();
     fetchAiExplanation(card).then(explanation=>{
       // Guard against the user navigating to a different card while this
@@ -6848,10 +6896,13 @@ function wireFlashAiExplainBtn(){
       flashAiExplainLoading = false;
       flashAiExplainText = explanation;
       renderFlashcard();
-    }).catch(()=>{
+    }).catch((err)=>{
       if(flashAiExplainKey !== key) return;
-      flashAiExplainOn = false;
       flashAiExplainLoading = false;
+      /* Stays ON and shows why. Reverting the toggle silently (what this
+         used to do) is indistinguishable from a dead button, and a refusal
+         here is usually something the student can act on. */
+      flashAiExplainError = aiExplainErrorText(err);
       renderFlashcard();
     });
   };
@@ -7029,14 +7080,41 @@ function renderFlashcard(){
     const total = flashRecallQueue.length;
     const sessionDone = flashRecallPos >= total && !flashRecallMissed.length;
     if(sessionDone){
+      /* Two very different situations reach this branch and they used to
+         render identically, which is the bug behind "True Recall just shows
+         session complete and does nothing".
+
+         If every card in the deck was already rated "Knew it" in an earlier
+         session, applyMasteredFilter() empties the queue outright -- so
+         flashRecallPos (0) >= total (0) and sessionDone is true the instant
+         the deck opens, before the student has seen a single card. The old
+         copy then claimed "Knew all N cards" using flashcards.length, i.e.
+         it congratulated them on a session that never ran, offered only
+         "Study again", and -- because the mastered banner and its "Study
+         them too" link live only in the else-branch below -- gave no hint
+         that anything had been hidden or why the deck looked empty.
+
+         studiedCount is the deck minus what was hidden, so it can never
+         claim credit for cards that were never shown. */
+      const studiedCount = Math.max(0, flashcards.length - flashRecallMasteredCount);
+      const nothingWasShown = studiedCount === 0 && flashRecallMasteredCount > 0;
+      const masteredNote = flashRecallMasteredCount === 1
+        ? '1 card' : `${flashRecallMasteredCount} cards`;
       html = `
         ${topRowHtml}
-        <div class="progress-row"><span>Recall session complete</span><span></span></div>
+        <div class="progress-row"><span>${nothingWasShown ? 'Nothing new to study' : 'Recall session complete'}</span><span></span></div>
         <div class="flash-flip-outer recall-flip-outer">
           <div class="flash-face" style="text-align:center;">
-            <div style="font-size:1.05rem;font-weight:700;margin-bottom:8px;color:var(--good);">${icon('check')} Knew all ${flashcards.length} card${flashcards.length===1?'':'s'}</div>
-            <div class="format-help" style="margin-bottom:16px;">Study this deck again, or switch back to Multiple Choice above.</div>
-            <button class="btn btn-primary" id="flashRecallRestartBtn" type="button">Study again</button>
+            ${nothingWasShown
+              ? `<div style="font-size:1.05rem;font-weight:700;margin-bottom:8px;color:var(--good);">${icon('check')} ${masteredNote} already mastered</div>
+                 <div class="format-help" style="margin-bottom:16px;">You rated every card in this deck <strong>Knew it</strong> in an earlier session, so True Recall had nothing new to show you. Study them again below, or switch back to Multiple Choice above.</div>`
+              : `<div style="font-size:1.05rem;font-weight:700;margin-bottom:8px;color:var(--good);">${icon('check')} Knew all ${studiedCount} card${studiedCount===1?'':'s'}</div>
+                 ${flashRecallMasteredCount>0 ? `<div class="format-help" style="margin-bottom:6px;">${masteredNote} stayed hidden as already mastered.</div>` : ''}
+                 <div class="format-help" style="margin-bottom:16px;">Study this deck again, or switch back to Multiple Choice above.</div>`}
+            <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+              ${flashRecallMasteredCount>0 ? `<button class="btn btn-primary" id="flashIncludeMasteredBtn" type="button">Study the mastered ${flashRecallMasteredCount===1?'card':'cards'}</button>` : ''}
+              <button class="btn ${flashRecallMasteredCount>0?'btn-ghost':'btn-primary'}" id="flashRecallRestartBtn" type="button">Study again</button>
+            </div>
           </div>
         </div>
       `;
@@ -7055,7 +7133,7 @@ function renderFlashcard(){
       `;
       html = `
         ${topRowHtml}
-        ${flashRecallMasteredCount>0 ? `<div class="format-help" style="margin-bottom:8px;">${flashRecallMasteredCount} card${flashRecallMasteredCount===1?'':'s'} already mastered from before — hidden. <button class="link-btn" id="flashIncludeMasteredBtn" type="button">Study them too</button></div>` : ''}
+        ${flashRecallMasteredCount>0 && flashRecallRound===1 ? `<div class="format-help" style="margin-bottom:8px;">${flashRecallMasteredCount} card${flashRecallMasteredCount===1?'':'s'} already mastered from before — hidden. <button class="link-btn" id="flashIncludeMasteredBtn" type="button">Study them too</button></div>` : ''}
         <div class="progress-row" id="flashProgressAnchor">
           <span>Card ${flashRecallPos+1} of ${total}${getFlashcardLocationLabel(card) ? ` · ${getFlashcardLocationLabel(card)}` : ''}</span>
           <span>${flashRecallRound>1 ? `Round ${flashRecallRound} — reviewing what you missed` : ''}</span>
@@ -7206,9 +7284,20 @@ function renderFlashcard(){
     if(includeMasteredBtn) includeMasteredBtn.onclick = includeMasteredCards;
     const shuffleBtn = document.getElementById('flashShuffleBtn');
     if(shuffleBtn) shuffleBtn.onclick = ()=>{
-      shuffleArrayInPlace(flashRecallQueue);
-      flashRecallPos = 0;
-      flashRecallRevealed = false;
+      /* "Shuffle remaining" means REMAINING. This used to shuffle the whole
+         queue and reset flashRecallPos to 0, so every card already rated in
+         this round came back around and the counter jumped to "Card 1 of N"
+         -- from the student's side that is indistinguishable from the
+         session having restarted itself, which is exactly what it got
+         reported as. recall_session.dart's shuffleRemaining() already
+         scoped this correctly; only the web was wrong.
+         Shuffles strictly AFTER the current card, so whatever is on screen
+         (revealed or not) stays put and only what's coming is reordered. */
+      if(flashRecallQueue.length - flashRecallPos < 3) return;
+      const head = flashRecallQueue.slice(0, flashRecallPos + 1);
+      const tail = flashRecallQueue.slice(flashRecallPos + 1);
+      shuffleArrayInPlace(tail);
+      flashRecallQueue = head.concat(tail);
       renderFlashcard();
     };
     const removeCardBtn = document.getElementById('flashRemoveCardBtn');
@@ -12536,7 +12625,16 @@ async function renderAiFeatureConfigSection(){
   try{
     const { data, error } = await supabaseClient.rpc('admin_get_ai_feature_config');
     if(error) throw error;
-    const cfg = (data && data[0]) || { explain_enabled: true, chat_enabled: true, chat_turn_limit: 5, chat_period_limit: 40, chat_period_days: 30, progress_feedback_enabled: true, flashcard_explain_enabled: false };
+    const cfg = (data && data[0]) || { explain_enabled: true, chat_enabled: true, chat_turn_limit: 5, chat_period_limit: 40, chat_period_days: 30, progress_feedback_enabled: true, flashcard_explain_enabled: false, explain_period_limit: 1500 };
+    /* Whether migration 0078 has actually been applied, asked of the server
+       rather than assumed. The client and the migration ship separately, so
+       there is always a window where one is ahead -- and sending
+       new_explain_period_limit to the pre-0078 nine-argument function does
+       not degrade, it makes PostgREST fail to resolve the function at all,
+       which would break saving EVERY AI setting until the migration landed.
+       Read from the row itself, not from cfg: the fallback object above
+       carries the key regardless. */
+    const hasExplainLimit = !!(data && data[0] && 'explain_period_limit' in data[0]);
     /* Budget comes from the admin-only RPC, NOT get_ai_feature_flags --
        that one is granted to every authenticated user, and site-wide
        spend is business data. It also tells an abuser how close the site
@@ -12579,6 +12677,17 @@ async function renderAiFeatureConfigSection(){
           Total follow-ups allowed within that period, across all questions
           <input type="number" id="aiChatPeriodLimitInput" min="1" max="2000" value="${cfg.chat_period_limit ?? 40}" style="width:80px;">
         </label>
+        ${hasExplainLimit ? `<label style="display:flex;align-items:center;gap:10px;">
+          NEW AI explanations allowed per account, within that same period
+          <input type="number" id="aiExplainPeriodLimitInput" min="1" max="20000" value="${cfg.explain_period_limit ?? 1500}" style="width:90px;">
+        </label>` : ''}
+        <div class="format-help">
+          Counts only explanations this account causes to be <em>generated</em>. An explanation
+          already in the cache is free and is always served, capped or not — so this bounds
+          spend, not study. Set well above real use: the heaviest genuine student to date
+          generated 1,246 in eight days, which is why this is a separate number from the
+          follow-up limit above rather than sharing it.
+        </div>
         <hr style="border:none;border-top:1px solid var(--line);margin:4px 0;">
         <div class="format-help">
           <strong>Site-wide spend ceiling.</strong> Every other limit above is per-account,
@@ -12615,6 +12724,8 @@ async function renderAiFeatureConfigSection(){
       const turnLimit = parseInt(document.getElementById('aiChatTurnLimitInput').value, 10);
       const periodDays = parseInt(document.getElementById('aiChatPeriodDaysInput').value, 10);
       const periodLimit = parseInt(document.getElementById('aiChatPeriodLimitInput').value, 10);
+      const explainLimitEl = document.getElementById('aiExplainPeriodLimitInput');
+      const explainPeriodLimit = explainLimitEl ? parseInt(explainLimitEl.value, 10) : null;
       const budgetEnabled = document.getElementById('aiGlobalBudgetEnabledInput').checked;
       const budgetUsd = parseFloat(document.getElementById('aiGlobalBudgetInput').value);
       if(!Number.isFinite(budgetUsd) || budgetUsd < 0){
@@ -12632,6 +12743,11 @@ async function renderAiFeatureConfigSection(){
         resultEl.textContent = 'Rolling period and its message limit must be positive whole numbers.';
         return;
       }
+      if(hasExplainLimit && (!Number.isInteger(explainPeriodLimit) || explainPeriodLimit <= 0)){
+        resultEl.className = 'msg err';
+        resultEl.textContent = 'AI explanation limit must be a positive whole number.';
+        return;
+      }
       try{
         const { error: saveErr } = await supabaseClient.rpc('admin_update_ai_feature_config', {
           new_explain_enabled: explainEnabled,
@@ -12643,6 +12759,7 @@ async function renderAiFeatureConfigSection(){
           new_flashcard_explain_enabled: flashcardExplainEnabled,
           new_global_budget_usd: budgetUsd,
           new_global_budget_enabled: budgetEnabled,
+          ...(hasExplainLimit ? { new_explain_period_limit: explainPeriodLimit } : {}),
         });
         if(saveErr) throw saveErr;
         // Updates this admin's own session immediately -- their review
