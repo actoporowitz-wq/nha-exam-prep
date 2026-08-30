@@ -5974,9 +5974,7 @@ async function addSelectedAttemptsToFlashcards(attemptIds){
     if(!picked.length){
       flashProgressMsg = { text: 'No new missed questions to add — everything from those attempts is already in this deck.', ok:false };
     } else {
-      flashcards = flashcards.concat(picked);
-      shuffleArrayInPlace(flashcards);
-      flashIndex = 0;
+      appendCardsToDeck(picked);
       flashSelectedOption = null;
       flashGeneratorOpen = false; // see the matching comment in buildFlashcardsFromAttemptIds
       flashProgressMsg = { text: `Added ${picked.length} card(s) — ${flashcards.length} total.`, ok:true };
@@ -6238,9 +6236,7 @@ function addSelectedLibraryQuestionsToFlashcards(){
     renderFlashcard();
     return;
   }
-  flashcards = flashcards.concat(picked);
-  shuffleArrayInPlace(flashcards);
-  flashIndex = 0;
+  appendCardsToDeck(picked);
   flashSelectedOption = null;
   flashGeneratorOpen = false; // see the matching comment in buildFlashcardsFromAttemptIds
   flashProgressMsg = { text: `Added ${picked.length} card(s) — ${flashcards.length} total.`, ok:true };
@@ -6313,7 +6309,14 @@ async function updateSavedFlashcardSet(){
     flashSaveMsg = { text: `Updated "${currentSetName}".`, ok:true };
     if(savedFlashcardSets){
       const row = savedFlashcardSets.find(s=>s.id===currentSetId);
-      if(row) row.cards = flashcards;
+      /* Copy, don't alias -- the same rule loadSavedSetIntoStudy() carries,
+         broken here on the other side of the same relationship. Handing the
+         cached row the live deck object makes any future in-place edit of
+         `flashcards` rewrite the cached set with nothing sent to the server,
+         which is exactly the divergence that rule exists to prevent. Nothing
+         mutates the deck in place today; this keeps that from being load
+         bearing. */
+      if(row) row.cards = [...flashcards];
     }
   } catch(err){
     flashSaveMsg = { text: 'Could not update: ' + err.message, ok:false };
@@ -6388,6 +6391,37 @@ function syncRecallSessionToDeck(prevDeckRef){
   flashRecallMissed = flashRecallMissed.filter(c=>present.has(c));
   flashRecallPos = Math.min(Math.max(0, flashRecallPos - droppedBeforePos), flashRecallQueue.length);
   flashRecallSourceRef = flashcards;
+}
+
+/* The counterpart to syncRecallSessionToDeck for cards ARRIVING rather than
+   leaving, used by both "+ Add questions" (library picker) and "+ Add
+   specific attempts".
+
+   Both of those used to do `flashcards = flashcards.concat(picked)` followed
+   by shuffleArrayInPlace(flashcards) and flashIndex = 0. Three things fell
+   out of that, none of them intended: the whole deck was reordered, the MC
+   position was thrown away, and -- because the deck reference changed --
+   ensureRecallQueue() saw a "new deck" and wiped a running True Recall
+   session back to round 1, card 1, nothing known. Adding three cards to a
+   deck you are thirty cards into should not cost you the thirty.
+
+   Only the new cards are shuffled, among themselves, and they go on the end
+   of both the deck and (if one is running) the recall queue. Mastery is
+   deliberately NOT re-fetched for them: that would re-run applyMasteredFilter
+   over the whole unseen tail and could pull cards the student had already
+   been shown the count for. They pick up their mastered status the next time
+   the deck is opened fresh, same as any other card. */
+function appendCardsToDeck(picked){
+  const prevDeck = flashcards;
+  const added = [...picked];
+  shuffleArrayInPlace(added);
+  flashcards = flashcards.concat(added);
+  if(flashRecallSourceRef === prevDeck){
+    flashRecallQueue = flashRecallQueue.concat(added);
+    flashRecallSourceRef = flashcards;
+    if(flashRecallProgressFor === prevDeck) flashRecallProgressFor = flashcards;
+  }
+  return added.length;
 }
 
 /* Edits the in-progress deck without touching the saved row until "Update"
