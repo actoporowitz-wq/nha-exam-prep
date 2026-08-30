@@ -752,7 +752,14 @@ if('serviceWorker' in navigator){
        -- see scrollElementIntoView). Stays mobile-only -- non-fullscreen
        desktop was never reported broken and isn't part of this request. */
     #quizView:not(.quiz-fullscreen) .quiz-question-block{
-      min-height:calc(100vh - 280px);
+      /* The -72px is the fixed bottom bar. 100vh does not know the bar is
+         painted over it, so reserving only 280px left the row BELOW this
+         block sitting inside the bar's band: measured at 390x844, "Question
+         list" and "Pause & Save" ended at 801 against a bar starting at 781.
+         frontend.md is explicit that hiding those behind the nav is correct
+         in FULL-screen and wrong here -- that treatment "was tried once and
+         had to be explicitly reverted". */
+      min-height:calc(100vh - 280px - 72px);
     }
     /* Same "not enough scroll slack" bug, same fix, on flashcards'
        non-fullscreen mobile view -- scrollFlashcardIntoView() uses the
@@ -766,7 +773,12 @@ if('serviceWorker' in navigator){
        otherwise. */
     #flashPanel:not(.flash-fullscreen) .flash-layout,
     #flashPanel:not(.flash-fullscreen) .recall-flip-outer{
-      min-height:calc(100vh - 280px);
+      /* Same -72px for the bottom bar, same reason. True Recall was the
+         worse of the two: "Remove this card" ended at 824 against a bar
+         starting at 781, so 43px of a 44px button was covered -- the button
+         was effectively unreachable without scrolling. Multiple Choice
+         cleared it by 11px only because its card is shorter. */
+      min-height:calc(100vh - 280px - 72px);
     }
   }
 
