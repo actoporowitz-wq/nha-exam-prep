@@ -3207,22 +3207,37 @@ let flashSaveMsg = null; // { text, ok } | null -- transient status line under t
 let currentSetId = null; // id of the saved flashcard_sets row the in-progress deck was loaded from, if any -- lets "Update" overwrite that row instead of always inserting a new one
 let currentSetName = null; // paired with currentSetId, for the "Update "<name>"" button label
 
-/* ---- flashcard session persistence across a reload -- unlike quiz answers
-   (synced to Supabase per-question via syncOnlineAnswer), the loaded deck
-   itself lived only in JS memory: refreshing the tab silently dropped back
-   to the flashcards homescreen mid-study. sessionStorage (not localStorage)
-   deliberately -- survives a reload, clears on tab close, matches "reload"
-   specifically without indefinitely hoarding a potentially large card array.
-   Only the deck/index/mode/set-identity are persisted; True Recall's own
-   queue/round state is NOT -- ensureRecallQueue already rebuilds it from
-   scratch whenever flashRecallSourceRef!==flashcards (a reference check),
-   which a JSON round-trip always trips, so it self-heals (and re-fetches
-   server-side mastered progress) for free instead of risking stale round
-   state surviving a hard reload. */
+/* ---- flashcard session persistence.
+   localStorage, NOT sessionStorage. This was sessionStorage deliberately,
+   to "match reload specifically" -- and that choice is what produced the
+   worst bug in this feature.
+
+   sessionStorage dies when the tab closes, so "pause mid-set and come back
+   later" always came back to NO saved session. The deck reloads from the
+   saved set, ensureRecallQueue() rebuilds from scratch, mastery is
+   re-fetched, and every card rated "Knew it" minutes earlier is now hidden
+   as "already mastered from before". Reproduced exactly: open a 40-card
+   set, rate 36, close the tab, reopen -> "36 cards already mastered from
+   before -- hidden", 90% of the set gone, 4 cards left. The user's report
+   was "90 percent of my set is already mastered when that never happened",
+   and the number matched to the point.
+
+   The ratings were real and the filter was working as written. The mistake
+   was the storage lifetime: a study session is paused across tab closes and
+   days, not across reloads. localStorage matches that. The old comment's
+   worry -- indefinitely hoarding a large card array -- is handled by the
+   expiry below rather than by throwing the session away every time.
+
+   Two tabs on the same deck now share one record and the last render wins,
+   which is acceptable: renderFlashcard() writes on every render, so the tab
+   being used is the one that persists. */
 const FLASH_SESSION_KEY = 'nha_flash_session';
+/* Long enough that "come back later" means days, short enough that an
+   abandoned deck does not sit in storage forever. */
+const FLASH_SESSION_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 function saveFlashSessionState(){
   try{
-    if(!flashcards.length){ sessionStorage.removeItem(FLASH_SESSION_KEY); return; }
+    if(!flashcards.length){ localStorage.removeItem(FLASH_SESSION_KEY); return; }
     /* The recall session is stored as INDEXES into the deck, not as copies
        of the cards. Two reasons: it keeps the blob small (the deck itself is
        already the bulk of it), and on restore, mapping indexes back through
@@ -3234,7 +3249,8 @@ function saveFlashSessionState(){
     const pos = new Map(flashcards.map((c, i) => [c, i]));
     const toIdx = (arr) => arr.map(c => pos.get(c)).filter(i => i !== undefined);
     const sessionLive = flashRecallSourceRef === flashcards;
-    sessionStorage.setItem(FLASH_SESSION_KEY, JSON.stringify({
+    localStorage.setItem(FLASH_SESSION_KEY, JSON.stringify({
+      savedAt: Date.now(),
       flashcards, flashIndex, flashMode, currentSetId, currentSetName,
       flashRecallIgnoreMastery, flashGeneratorOpen,
       recall: sessionLive ? {
@@ -3257,10 +3273,17 @@ function saveFlashSessionState(){
 }
 (function restoreFlashSessionState(){
   try{
-    const raw = sessionStorage.getItem(FLASH_SESSION_KEY);
+    const raw = localStorage.getItem(FLASH_SESSION_KEY);
     if(!raw) return;
     const s = JSON.parse(raw);
     if(!Array.isArray(s.flashcards) || !s.flashcards.length) return;
+    /* Drop a stale record rather than resuming a deck from weeks ago. Missing
+       savedAt means it was written before this field existed -- treat that as
+       current rather than discarding a session someone is mid-way through. */
+    if(typeof s.savedAt === 'number' && Date.now() - s.savedAt > FLASH_SESSION_MAX_AGE_MS){
+      localStorage.removeItem(FLASH_SESSION_KEY);
+      return;
+    }
     flashcards = s.flashcards;
     flashIndex = Number.isInteger(s.flashIndex) && s.flashIndex < flashcards.length ? s.flashIndex : 0;
     if(s.flashMode === 'mc' || s.flashMode === 'recall') flashMode = s.flashMode;
