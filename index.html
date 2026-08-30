@@ -6923,6 +6923,52 @@ function includeMasteredCards(){
   renderFlashcard();
 }
 
+/* Clears the persisted "mastered" status for every card in the CURRENT deck.
+   Until this existed there was no way back: a rating is permanent and
+   cross-deck, so once a deck read as mostly mastered the only options were
+   "Study them too" (this session only) or living with it. If ratings ever go
+   wrong -- a mis-tap, a shared device, or simply changing your mind about
+   what you actually know -- this is the recovery.
+
+   Deck-scoped on purpose, not account-wide: it fixes the deck in front of
+   you without silently discarding honest ratings on every other exam.
+   Deletes are chunked at 200 for the same reason the read is -- the edge
+   caps a URL at 64 KB.
+
+   Touches nothing else: exam attempts, scores and funnel state live in
+   different tables entirely. */
+function resetRecallMasteryForDeck(){
+  if(!currentUser || !flashcards.length) return;
+  const keys = flashcards.map(recallKey);
+  const n = keys.length;
+  showConfirmDialog(
+    `Clear the "already mastered" status for all ${n} card${n===1?'':'s'} in this deck? Every card comes back into the rotation. Your exam scores and progress are not affected.`,
+    async ()=>{
+      try{
+        for(let i=0;i<keys.length;i+=200){
+          const { error } = await supabaseClient.from('flashcard_recall_progress')
+            .delete().eq('user_id', currentUser.id).in('question_key', keys.slice(i, i+200));
+          if(error) throw error;
+        }
+        /* Drop every cached trace, then force a clean rebuild -- a stale
+           progress map or source ref would put the banner straight back. */
+        flashRecallProgress = new Map();
+        flashRecallJustRated = new Set();
+        flashRecallMasteredCount = 0;
+        flashRecallProgressFor = null;
+        flashRecallSourceRef = null;
+        flashRecallIgnoreMastery = false;
+        flashProgressMsg = { text: `Mastery cleared for ${n} card${n===1?'':'s'}.`, ok:true };
+      }catch(err){
+        flashProgressMsg = { text: 'Could not clear mastery: ' + err.message, ok:false };
+      }
+      renderFlashcard();
+    },
+    'Clear mastery',
+    true
+  );
+}
+
 /* Fire-and-forget upsert -- studying shouldn't stall on network latency.
    Updates the local cache immediately so a re-render (e.g. from a
    still-in-flight loadRecallProgressIfNeeded on this same deck) can't
@@ -6984,6 +7030,20 @@ function revealRecallCard(){
 
 function rateRecallCard(knewIt){
   const card = flashRecallQueue[flashRecallPos];
+  /* You can only rate a card you have actually revealed. Every rating is a
+     permanent, cross-deck mastery write, so a stray one silently hides that
+     question from every future deck -- reported as "it was labeling
+     unanswered questions as I knew it".
+     No real-input path was found that reaches here unrevealed (real
+     double-click, fast repeat clicks, double-tap, key auto-repeat and the
+     Space/Enter-after-click focus path were all measured and are safe), but
+     two things make the guard worth having anyway: clicking a captured
+     button node twice DOES reach here with the next, unrevealed card, and
+     focus is restored by id after every render, so the element focused right
+     after a rating is the NEXT card's "Knew it" button. Today that is held
+     back only by a preventDefault in the keydown handler. This makes the
+     invariant explicit instead of emergent. */
+  if(!card || !flashRecallRevealed) return;
   if(knewIt) flashRecallKnownTotal++;
   else flashRecallMissed.push(card);
   saveRecallRating(card, knewIt);
@@ -7319,6 +7379,7 @@ function renderFlashcard(){
                    <button class="btn btn-ghost" id="flashRecallRestartBtn" type="button">Study all ${flashcards.length} again</button>`
                 : `<button class="btn btn-primary" id="flashRecallRestartBtn" type="button">${nothingWasShown ? `Study ${flashcards.length === 1 ? 'it' : `all ${flashcards.length}`} anyway` : 'Study again'}</button>`}
             </div>
+            ${flashRecallMasteredCount>0 ? `<div style="margin-top:12px;"><button class="link-btn" id="flashResetMasteryBtn" type="button">Reset mastery for this deck</button></div>` : ''}
           </div>
         </div>
       `;
@@ -7337,7 +7398,7 @@ function renderFlashcard(){
       `;
       html = `
         ${topRowHtml}
-        ${flashRecallMasteredCount>0 && flashRecallRound===1 ? `<div class="format-help" style="margin-bottom:8px;">${flashRecallMasteredCount} card${flashRecallMasteredCount===1?'':'s'} already mastered from before — hidden. <button class="link-btn" id="flashIncludeMasteredBtn" type="button">Study them too</button></div>` : ''}
+        ${flashRecallMasteredCount>0 && flashRecallRound===1 ? `<div class="format-help" style="margin-bottom:8px;">${flashRecallMasteredCount} card${flashRecallMasteredCount===1?'':'s'} already mastered from before — hidden. <button class="link-btn" id="flashIncludeMasteredBtn" type="button">Study them too</button> <button class="link-btn" id="flashResetMasteryBtn" type="button">Reset mastery</button></div>` : ''}
         <div class="progress-row" id="flashProgressAnchor">
           <span>Card ${flashRecallPos+1} of ${total}${getFlashcardLocationLabel(card) ? ` · ${getFlashcardLocationLabel(card)}` : ''}</span>
           <span>${flashRecallRound>1 ? `Round ${flashRecallRound} — reviewing what you missed` : ''}</span>
@@ -7486,6 +7547,8 @@ function renderFlashcard(){
     if(restartBtn) restartBtn.onclick = restartRecallSession;
     const includeMasteredBtn = document.getElementById('flashIncludeMasteredBtn');
     if(includeMasteredBtn) includeMasteredBtn.onclick = includeMasteredCards;
+    const resetMasteryBtn = document.getElementById('flashResetMasteryBtn');
+    if(resetMasteryBtn) resetMasteryBtn.onclick = resetRecallMasteryForDeck;
     const shuffleBtn = document.getElementById('flashShuffleBtn');
     if(shuffleBtn) shuffleBtn.onclick = ()=>{
       /* "Shuffle remaining" means REMAINING. This used to shuffle the whole
