@@ -3214,7 +3214,7 @@ function saveFlashSessionState(){
     const sessionLive = flashRecallSourceRef === flashcards;
     sessionStorage.setItem(FLASH_SESSION_KEY, JSON.stringify({
       flashcards, flashIndex, flashMode, currentSetId, currentSetName,
-      flashRecallIgnoreMastery,
+      flashRecallIgnoreMastery, flashGeneratorOpen,
       recall: sessionLive ? {
         queue: toIdx(flashRecallQueue),
         missed: toIdx(flashRecallMissed),
@@ -3245,7 +3245,13 @@ function saveFlashSessionState(){
     currentSetId = s.currentSetId ?? null;
     currentSetName = s.currentSetName ?? null;
     flashRecallIgnoreMastery = s.flashRecallIgnoreMastery === true;
-    flashGeneratorOpen = false;
+    /* Whether the flashcards HOME screen was showing. This was hardcoded to
+       false, so a reload always dropped you back into the loaded deck --
+       reported as "when I'm in flashcard home and I reload it reverts to the
+       most recent open set". The deck is still loaded and "Back to your
+       deck" still gets you there in one click; the difference is that the
+       reload no longer overrides where you had navigated to. */
+    flashGeneratorOpen = s.flashGeneratorOpen === true;
     /* Restore a True Recall session in progress. This used to be dropped on
        purpose, on the reasoning that ensureRecallQueue() would rebuild it
        and so could never carry stale round state across a hard reload. The
@@ -7417,9 +7423,16 @@ function renderFlashcard(){
          scoped this correctly; only the web was wrong.
          Shuffles strictly AFTER the current card, so whatever is on screen
          (revealed or not) stays put and only what's coming is reordered. */
-      if(flashRecallQueue.length - flashRecallPos < 3) return;
-      const head = flashRecallQueue.slice(0, flashRecallPos + 1);
-      const tail = flashRecallQueue.slice(flashRecallPos + 1);
+      /* Whether the card on screen takes part depends on whether it has
+         been revealed. Unrevealed, it is just "the next card" and shuffling
+         it is exactly what the button promises -- excluding it made Shuffle
+         look completely dead on card 1, since the only visible thing on
+         screen never changed. Revealed, the student is mid-answer and
+         swapping it out underneath them is not a shuffle, it is a jump. */
+      const keep = flashRecallRevealed ? flashRecallPos + 1 : flashRecallPos;
+      if(flashRecallQueue.length - keep < 2) return;
+      const head = flashRecallQueue.slice(0, keep);
+      const tail = flashRecallQueue.slice(keep);
       shuffleArrayInPlace(tail);
       flashRecallQueue = head.concat(tail);
       renderFlashcard();
