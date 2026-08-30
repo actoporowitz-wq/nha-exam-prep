@@ -341,6 +341,19 @@ if('serviceWorker' in navigator){
      MC mode still uses (MC needs the question pinned beside the options,
      recall doesn't have a second element to sit beside). */
   .recall-flip-outer{margin:0 auto;max-width:520px;}
+  /* The finished/nothing-to-study state is a STATUS PANEL, not a card. It
+     used to reuse .recall-flip-outer, which carries the tall study-time
+     min-height, so the content sat stranded at the top of a ~490px box with
+     240px of dead grey under it, the copy boxed inside a second grey panel,
+     and the alignment mixed (face is flex-start, the inline style said
+     centre). Reported as cramped and ugly, correctly. Its own class now:
+     sized to its content, centred, one comfortable column. */
+  .recall-done{margin:24px auto 0;max-width:420px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px;padding:28px 22px;background:var(--surface);border:1px solid var(--line);border-radius:14px;}
+  .recall-done-icon{width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--good-bg,rgba(34,160,90,.12));color:var(--good);}
+  .recall-done-icon .icon{width:24px;height:24px;}
+  .recall-done-title{margin:0;font-family:var(--font-display,inherit);font-size:1.15rem;font-weight:700;color:var(--ink);}
+  .recall-done-copy{margin:0;font-family:system-ui,sans-serif;font-size:.86rem;line-height:1.5;color:var(--muted);max-width:34ch;}
+  .recall-done-btn{margin-top:6px;min-width:190px;}
   /* Both faces now fill the flip container identically (position:absolute;
      inset:0, same treatment .flash-face-back already had) instead of just
      the back face -- previously the front face sat in normal flow, sized to
@@ -6938,6 +6951,52 @@ function includeMasteredCards(){
 
    Touches nothing else: exam attempts, scores and funnel state live in
    different tables entirely. */
+/* The actual work, with no dialog. Split out because two callers want it for
+   opposite reasons: the Options menu is a deliberate, destructive-feeling
+   action and asks first, while "Study all N again" on the completion screen
+   IS this operation -- the user has already said what they want and a
+   confirm there would be a speed bump in front of the thing they clicked.
+
+   Why that button clears mastery rather than just setting a session flag:
+   the flag is per-session, and every deck loader resets it (a different deck
+   must start from its own mastered state). So re-opening the saved set threw
+   the choice away and the deck came back fully mastered -- reported as "i
+   hit study all again, when i come back they all show as mastered". A
+   session flag cannot survive re-opening a set; clearing the mastery can.
+   Without that, the button has no lasting effect and no point. */
+async function clearRecallMasteryForDeck(){
+  if(!currentUser || !flashcards.length) return false;
+  const keys = flashcards.map(recallKey);
+  const n = keys.length;
+  try{
+    for(let i=0;i<keys.length;i+=200){
+      const { error } = await supabaseClient.from('flashcard_recall_progress')
+        .delete().eq('user_id', currentUser.id).in('question_key', keys.slice(i, i+200));
+      if(error) throw error;
+    }
+    /* Drop every cached trace, then force a clean rebuild -- a stale progress
+       map or source ref would put the banner straight back. */
+    flashRecallProgress = new Map();
+    flashRecallJustRated = new Set();
+    flashRecallMasteredCount = 0;
+    flashRecallProgressFor = null;
+    flashRecallSourceRef = null;
+    flashRecallIgnoreMastery = false;
+    return true;
+  }catch(err){
+    flashProgressMsg = { text: 'Could not clear mastery: ' + err.message, ok:false };
+    return false;
+  }
+}
+
+/* Restart from the completion screen. Clears the deck's mastery so the
+   restart actually lasts, then rebuilds. */
+async function restartRecallFromScratch(){
+  const ok = await clearRecallMasteryForDeck();
+  if(ok) flashProgressMsg = null;
+  restartRecallSession();
+}
+
 function resetRecallMasteryForDeck(){
   if(!currentUser || !flashcards.length) return;
   const keys = flashcards.map(recallKey);
@@ -6945,24 +7004,8 @@ function resetRecallMasteryForDeck(){
   showConfirmDialog(
     `Clear the "already mastered" status for all ${n} card${n===1?'':'s'} in this deck? Every card comes back into the rotation. Your exam scores and progress are not affected.`,
     async ()=>{
-      try{
-        for(let i=0;i<keys.length;i+=200){
-          const { error } = await supabaseClient.from('flashcard_recall_progress')
-            .delete().eq('user_id', currentUser.id).in('question_key', keys.slice(i, i+200));
-          if(error) throw error;
-        }
-        /* Drop every cached trace, then force a clean rebuild -- a stale
-           progress map or source ref would put the banner straight back. */
-        flashRecallProgress = new Map();
-        flashRecallJustRated = new Set();
-        flashRecallMasteredCount = 0;
-        flashRecallProgressFor = null;
-        flashRecallSourceRef = null;
-        flashRecallIgnoreMastery = false;
-        flashProgressMsg = { text: `Mastery cleared for ${n} card${n===1?'':'s'}.`, ok:true };
-      }catch(err){
-        flashProgressMsg = { text: 'Could not clear mastery: ' + err.message, ok:false };
-      }
+      const ok = await clearRecallMasteryForDeck();
+      if(ok) flashProgressMsg = { text: `Mastery cleared for ${n} card${n===1?'':'s'}.`, ok:true };
       renderFlashcard();
     },
     'Clear mastery',
@@ -7362,19 +7405,15 @@ function renderFlashcard(){
          remains on the banner mid-session for exactly that shortcut. */
       html = `
         ${topRowHtml}
-        <div class="progress-row"><span>${nothingWasShown ? 'Nothing new to study' : 'Recall session complete'}</span><span></span></div>
-        <div class="flash-flip-outer recall-flip-outer">
-          <div class="flash-face" style="text-align:center;">
-            ${nothingWasShown
-              ? `<div style="font-size:1.05rem;font-weight:700;margin-bottom:8px;color:var(--good);">${icon('check')} ${masteredNote} already mastered</div>
-                 <div class="format-help" style="margin-bottom:16px;">You rated every card in this deck <strong>Knew it</strong> in an earlier session, so True Recall had nothing new to show you. Study them again below, or switch back to Multiple Choice above.</div>`
-              : `<div style="font-size:1.05rem;font-weight:700;margin-bottom:8px;color:var(--good);">${icon('check')} Knew all ${studiedCount} card${studiedCount===1?'':'s'}</div>
-                 ${flashRecallMasteredCount>0 ? `<div class="format-help" style="margin-bottom:6px;">${masteredNote} stayed hidden as already mastered.</div>` : ''}
-                 <div class="format-help" style="margin-bottom:16px;">Study this deck again, or switch back to Multiple Choice above.</div>`}
-            <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
-              <button class="btn btn-primary" id="flashRecallRestartBtn" type="button">Study ${flashcards.length === 1 ? 'it' : `all ${flashcards.length}`} again</button>
-            </div>
-          </div>
+        <div class="recall-done">
+          <div class="recall-done-icon">${icon('check')}</div>
+          <h3 class="recall-done-title">${nothingWasShown
+            ? `${masteredNote} already mastered`
+            : `Knew all ${studiedCount} card${studiedCount===1?'':'s'}`}</h3>
+          <p class="recall-done-copy">${nothingWasShown
+            ? `You rated every card in this deck <strong>Knew it</strong> before, so there was nothing new to show. Starting again clears those marks so the whole deck comes back.`
+            : `${flashRecallMasteredCount>0 ? `${masteredNote} stayed hidden as already mastered. ` : ''}Starting again clears every mastered mark on this deck.`}</p>
+          <button class="btn btn-primary recall-done-btn" id="flashRecallRestartBtn" type="button">Study ${flashcards.length === 1 ? 'it' : `all ${flashcards.length}`} again</button>
         </div>
       `;
     } else {
@@ -7538,7 +7577,9 @@ function renderFlashcard(){
     const didntBtn = document.getElementById('recallDidntBtn');
     if(didntBtn) didntBtn.onclick = ()=> rateRecallCard(false);
     const restartBtn = document.getElementById('flashRecallRestartBtn');
-    if(restartBtn) restartBtn.onclick = restartRecallSession;
+    /* Clears the deck's mastery, not just a session flag -- see
+       clearRecallMasteryForDeck's comment for why a flag could not work. */
+    if(restartBtn) restartBtn.onclick = restartRecallFromScratch;
     const includeMasteredBtn = document.getElementById('flashIncludeMasteredBtn');
     if(includeMasteredBtn) includeMasteredBtn.onclick = includeMasteredCards;
     const resetMasteryBtn = document.getElementById('flashResetMasteryBtn');
