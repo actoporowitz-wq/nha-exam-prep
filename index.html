@@ -764,34 +764,83 @@ if('serviceWorker' in navigator){
        just without a fixed toggle button to clear (topOffset stays 12 here
        -- see scrollElementIntoView). Stays mobile-only -- non-fullscreen
        desktop was never reported broken and isn't part of this request. */
-    #quizView:not(.quiz-fullscreen) .quiz-question-block{
-      /* The -72px is the fixed bottom bar. 100vh does not know the bar is
-         painted over it, so reserving only 280px left the row BELOW this
-         block sitting inside the bar's band: measured at 390x844, "Question
-         list" and "Pause & Save" ended at 801 against a bar starting at 781.
-         frontend.md is explicit that hiding those behind the nav is correct
-         in FULL-screen and wrong here -- that treatment "was tried once and
-         had to be explicitly reverted". */
-      min-height:calc(100vh - 280px - 72px);
+    /* The reservation used to live on .quiz-question-block itself, and it
+       had two problems that only a short question exposes. Measured at
+       390x844 on an ordinary one-line NHA item ("Which agency enforces the
+       federal nursing home survey process?" / CMS OSHA FDA HUD): the block
+       reserved 492px for 327px of content, so 155px of blank sat between
+       the last option and the "Question list / Pause & Save" row -- the
+       same cramping the flashcard completion panel had, from the same
+       cause, because the reservation inflates a container that sits ABOVE
+       that row instead of lengthening the page. And it did not even fully
+       buy what it was added for: #qnumAnchor still clamped at 81px from
+       the top against its 12px target on that question.
+
+       Both go away by putting the slack BELOW everything instead. The
+       document is exactly as scrollable (outside full screen
+       scrollElementIntoView scrolls the window, not a container), the
+       block ends where its content ends, and the empty space lands after
+       the last control where it reads as the end of the page. A long
+       question was always fine either way, which is why this survived --
+       it fills the reservation naturally. */
+    body:not(.fullscreen-active) #quizView.quiz-studying{
+      /* 260px is above the most the old rule ever added (165px on the short
+         question, 0 on a long one), so no scroll target that could be
+         reached before can fail now -- and it is enough for the anchor
+         target the old rule missed. The -72px bottom bar is included: 100vh
+         does not know the bar is painted over it, so reserving only 280px
+         left the row BELOW the block sitting inside the bar's band --
+         measured at 390x844, "Question list" and "Pause & Save" ended at
+         801 against a bar starting at 781. frontend.md is explicit that
+         hiding those behind the nav is correct in FULL-screen and wrong
+         here -- that treatment "was tried once and had to be explicitly
+         reverted". */
+      padding-bottom:260px;
     }
-    /* Same "not enough scroll slack" bug, same fix, on flashcards'
-       non-fullscreen mobile view -- scrollFlashcardIntoView() uses the
-       identical scrollElementIntoView() mechanism as quiz at this same
-       breakpoint, but only quiz ever got this min-height reservation.
-       Covers both MC (.flash-layout) and True Recall (.recall-flip-outer),
-       flashcards' two variable-height content containers. Reuses quiz's
-       own tuned value rather than guessing a different one -- both share
-       the same app shell/header chrome height, so there's no reason to
-       expect a different number here without a real measurement showing
-       otherwise. */
-    #flashPanel:not(.flash-fullscreen) .flash-layout,
-    #flashPanel:not(.flash-fullscreen) .recall-flip-outer{
-      /* Same -72px for the bottom bar, same reason. True Recall was the
-         worse of the two: "Remove this card" ended at 824 against a bar
-         starting at 781, so 43px of a 44px button was covered -- the button
-         was effectively unreachable without scrolling. Multiple Choice
-         cleared it by 11px only because its card is shorter. */
-      min-height:calc(100vh - 280px - 72px);
+    /* Flashcards need the same "not enough scroll slack" fix as quiz above
+       -- scrollFlashcardIntoView() uses the identical scrollElementIntoView()
+       mechanism at this same breakpoint. The original fix put quiz's exact
+       min-height on .flash-layout / .recall-flip-outer, flashcards' two
+       variable-height content containers, and that WORKED but put the slack
+       in the wrong place: those two containers sit ABOVE .extra-actions, so
+       inflating them opens a visible void between the card and the
+       Shuffle/Remove row rather than lengthening the page. Measured at
+       390x844 on the short-question True Recall card: a 260px card inside a
+       492px box -- 232px of blank white with the buttons stranded under it.
+       Same shape as the completion-panel cramping the owner reported, and
+       the same lesson: the container was reused for its height, not for
+       what it means.
+
+       Slack now lives on #flashView's own padding-bottom, BELOW everything.
+       The document is just as scrollable (which is all scrollElementIntoView
+       ever needed -- outside full screen it scrolls the window, not a
+       container), the card ends where its content ends, and the empty space
+       lands after the last control where it reads as the end of the page.
+       260px is above the most the old rule ever added (it inflated a 260px
+       True Recall card to 492px, so 232px; 180px on a long card), which is
+       what makes this a strict non-regression: every scroll target that
+       could be reached before can still be reached. 200px was tried first
+       and measured SHORT -- #flashProgressAnchor clamped at 32px from the
+       top instead of its 12px target in True Recall, because removing the
+       min-height took away 232px while the padding only gave back 200. Deliberately NOT on #flashPanel: that is
+       the white .panel card, and padding there would just move the void
+       inside it. */
+    /* Scoped to the study states only (.flash-studying is set by
+       renderFlashcard from the same showGenerator it already computes).
+       Unscoped, the flashcards HOMESCREEN also grew the padding and became
+       scrollable into ~98px of nothing: measured doc=942 against a 844
+       viewport with the panel ending at 496. The homescreen has no
+       .extra-actions row and never needed any slack. Full screen is
+       excluded for the same reason -- it scrolls #flashPanel itself, not
+       the window, and has its own reservation above. */
+    body:not(.fullscreen-active) #flashView.flash-studying{
+      /* The -72px equivalent is included: the fixed bottom bar paints over
+         100vh without the layout knowing. True Recall was the worse of the
+         two containers -- "Remove this card" ended at 824 against a bar
+         starting at 781, so 43px of a 44px button was covered and the button
+         was effectively unreachable. Multiple Choice cleared it by 11px only
+         because its card is shorter. */
+      padding-bottom:260px;
     }
   }
 
@@ -4976,6 +5025,12 @@ async function sendAiChatMessage(){
 
 /* ================= quiz rendering ================= */
 function renderQuestion(){
+  /* Mobile scroll slack (see #quizView.quiz-studying) is only wanted while a
+     question is on screen. Results/review render into the same view and have
+     no .extra-actions row to lift clear of the bottom bar, so they would just
+     gain a scrollable strip of nothing. renderResults() clears this. */
+  const quizViewEl = document.getElementById('quizView');
+  if(quizViewEl) quizViewEl.classList.add('quiz-studying');
   /* quizPanel.innerHTML gets fully rebuilt below on every answer/nav
      click, which destroys and recreates the DOM -- silently dropping
      keyboard focus to <body> even though the buttons themselves are now
@@ -5337,6 +5392,9 @@ function getMissedIndices(){
 }
 
 function renderResults(){
+  /* See renderQuestion -- the study-time slack does not apply here. */
+  const quizViewEl = document.getElementById('quizView');
+  if(quizViewEl) quizViewEl.classList.remove('quiz-studying');
   const total = exam.questions.length;
   const missed = getMissedIndices();
   const correctCount = total - missed.length;
@@ -7253,6 +7311,12 @@ function renderFlashcard(){
      studying -- collapse it behind a small toggle instead, and skip it
      entirely in full-screen mode (exit full-screen first to change sets). */
   const showGenerator = currentUser && (!flashcards.length || (flashGeneratorOpen && !flashFullScreen));
+  /* Mobile scroll slack (see #flashView.flash-studying) is only wanted while
+     a card is actually on screen -- on the homescreen it just makes the page
+     scrollable into empty space. Driven off showGenerator rather than a
+     second condition so the two can never disagree. */
+  const flashViewEl = document.getElementById('flashView');
+  if(flashViewEl) flashViewEl.classList.toggle('flash-studying', !showGenerator);
   const topHtml = showGenerator ? renderOnlineFlashGeneratorHtml() : '';
   /* "Start a different set" is a real return-to-homescreen action, not an
      overlay -- render ONLY the generator/picker here (same as the

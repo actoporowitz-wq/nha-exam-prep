@@ -15,7 +15,7 @@
    listener existing at all (the page never reloaded itself even once a new
    SW DID activate), this is the real reason "reload twice" repeatedly
    failed to show a genuinely new deploy across multiple rounds of testing. */
-const CACHE_NAME = 'nha-exam-prep-shell-v74';
+const CACHE_NAME = 'nha-exam-prep-shell-v75';
 /* '/index.html' is deliberately NOT in this list. Cloudflare Pages answers
    it with a 308 redirect to '/', so cache.addAll() followed the redirect
    and stored the result under the '/index.html' key with redirected:true --
