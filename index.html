@@ -487,7 +487,17 @@ if('serviceWorker' in navigator){
      mobile instead of clipping. max-width caps the popover itself
      (min(320px,90vw) so it never exceeds a narrow phone screen either);
      each option still gets its full text as a title tooltip. */
-  .dd-menu{position:absolute;top:calc(100% + 6px);left:0;min-width:100%;max-width:min(320px,90vw);background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);z-index:30;overflow:hidden;white-space:nowrap;}
+  /* max-height + overflow-y is what stops a long menu running off the
+     screen. These menus carry one option per exam, so the exam filters are
+     ~28 items = 975px tall, and `overflow:hidden` alone only clipped the
+     rounded corners -- it never constrained the height. Measured at 390x844
+     before this: the menu ended 760px below the fold with 23 of 28 options
+     past the top edge of the fixed bottom bar (which paints above it at
+     z-index 40). Even a 1400px-tall phone window was 204px short; only a
+     2000px desktop window fitted it.
+     overscroll-behavior:contain keeps a flick inside the menu from chaining
+     into the page scroll once the list hits its end. */
+  .dd-menu{position:absolute;top:calc(100% + 6px);left:0;min-width:100%;max-width:min(320px,90vw);background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);z-index:30;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;max-height:min(50vh,360px);white-space:nowrap;}
   .dd-menu[hidden]{display:none;}
   .dd-menu button{display:block;width:100%;text-align:left;background:none;border:none;border-bottom:1px solid var(--line);color:var(--ink);font-family:system-ui,sans-serif;font-size:.85rem;padding:9px 14px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;}
   .dd-menu button:last-child{border-bottom:none;}
@@ -5683,6 +5693,20 @@ function ddSetOpen(id, open){
   if(hero) hero.classList.toggle('is-open', open);
   if(open){
     menu.hidden = false;
+    /* Cap the menu to the room ACTUALLY below the trigger. The CSS max-height
+       is a static backstop; it cannot know where the trigger sits, nor that a
+       fixed bottom bar (z-index 40) paints over this menu (z-index 30) on
+       mobile. Without this the exam filters -- one option per exam, ~28 --
+       still ended 83px past the viewport bottom at 390x844 even after the
+       CSS cap, so the last visible option was cut in half.
+       Floor of 140px: if a trigger is ever so low that less than that is
+       free, a squashed menu is worse than one that overflows slightly. */
+    const trigRect = trigger.getBoundingClientRect();
+    const barEl = document.getElementById('bottomBar');
+    const barH = (barEl && getComputedStyle(barEl).display !== 'none')
+      ? barEl.getBoundingClientRect().height : 0;
+    const room = window.innerHeight - barH - trigRect.bottom - 14;
+    menu.style.maxHeight = Math.max(140, Math.min(360, Math.round(room))) + 'px';
     txOpen(menu, 'menu');
   } else {
     txClose(menu, ()=>{ menu.hidden = true; });
