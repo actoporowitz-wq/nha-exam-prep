@@ -7230,6 +7230,19 @@ function renderFlashcard(){
       const nothingWasShown = studiedCount === 0 && flashRecallMasteredCount > 0;
       const masteredNote = flashRecallMasteredCount === 1
         ? '1 card' : `${flashRecallMasteredCount} cards`;
+      /* Only offer both when they actually DO different things. When every
+         card in the deck was already mastered, "Study the mastered cards"
+         and "Study again" are the same action producing the same result --
+         the whole deck from card 1 -- because includeMasteredCards() has an
+         empty queue to add all of them back into and rewinds the cursor to
+         0, which is exactly what restartRecallSession() does. Two buttons
+         for one outcome, reported as redundant, and it was.
+
+         When only SOME cards were hidden they genuinely differ: one appends
+         just those and carries on from there, the other restarts the whole
+         deck. The labels say which is which rather than leaving it to be
+         guessed. */
+      const offerBoth = flashRecallMasteredCount > 0 && !nothingWasShown;
       html = `
         ${topRowHtml}
         <div class="progress-row"><span>${nothingWasShown ? 'Nothing new to study' : 'Recall session complete'}</span><span></span></div>
@@ -7242,8 +7255,10 @@ function renderFlashcard(){
                  ${flashRecallMasteredCount>0 ? `<div class="format-help" style="margin-bottom:6px;">${masteredNote} stayed hidden as already mastered.</div>` : ''}
                  <div class="format-help" style="margin-bottom:16px;">Study this deck again, or switch back to Multiple Choice above.</div>`}
             <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
-              ${flashRecallMasteredCount>0 ? `<button class="btn btn-primary" id="flashIncludeMasteredBtn" type="button">Study the mastered ${flashRecallMasteredCount===1?'card':'cards'}</button>` : ''}
-              <button class="btn ${flashRecallMasteredCount>0?'btn-ghost':'btn-primary'}" id="flashRecallRestartBtn" type="button">Study again</button>
+              ${offerBoth
+                ? `<button class="btn btn-primary" id="flashIncludeMasteredBtn" type="button">Study ${flashRecallMasteredCount===1?'that 1 card':`those ${flashRecallMasteredCount}`}</button>
+                   <button class="btn btn-ghost" id="flashRecallRestartBtn" type="button">Study all ${flashcards.length} again</button>`
+                : `<button class="btn btn-primary" id="flashRecallRestartBtn" type="button">${nothingWasShown ? `Study ${flashcards.length === 1 ? 'it' : `all ${flashcards.length}`} anyway` : 'Study again'}</button>`}
             </div>
           </div>
         </div>
