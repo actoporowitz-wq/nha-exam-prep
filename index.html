@@ -3150,6 +3150,15 @@ let flashRecallSourceRef = null; // last `flashcards` array reference the queue 
 let flashRecallProgress = new Map(); // question_key -> 'knew'|'missed', persisted ratings loaded for the current deck
 let flashRecallProgressFor = null; // last `flashcards` ref flashRecallProgress was fetched for -- guards against refetching on every render
 let flashRecallMasteredCount = 0; // cards in the current deck already rated 'knew' in a past session, excluded from the initial queue
+/* Set when the student has explicitly asked to study this deck INCLUDING
+   its already-mastered cards ("Study again" / "Study the mastered cards").
+   Persisted with the flash session, because without it that choice lived
+   only in memory: a reload re-ran applyMasteredFilter() and put the deck
+   straight back to "nothing new to study", so there was no way at all to
+   re-study a deck you had mastered. Cleared only when a genuinely
+   different deck is built -- NOT on reload, which is the whole point, and
+   not when cards are appended to the same deck. */
+let flashRecallIgnoreMastery = false;
 let flashRecallJustRated = new Set(); // question_keys rated during THIS page load -- an in-flight loadRecallProgressIfNeeded must not overwrite them with the older server value
 let flashGeneratorOpen = false; // once a set exists, the generator panel is collapsed by default -- this reopens it
 let flashSetupMenuOpen = false; // collapses the "Add questions/Add specific attempts/Update/Save/Start different set" action row behind one trigger -- those went from quiet underlined links to real bordered buttons (site-wide link->button pass) and left this row competing with the actual card for attention every time a set is loaded; collapsed by default, same "one thing to look at" shape as everywhere else in this redesign
@@ -3192,10 +3201,37 @@ const FLASH_SESSION_KEY = 'nha_flash_session';
 function saveFlashSessionState(){
   try{
     if(!flashcards.length){ sessionStorage.removeItem(FLASH_SESSION_KEY); return; }
+    /* The recall session is stored as INDEXES into the deck, not as copies
+       of the cards. Two reasons: it keeps the blob small (the deck itself is
+       already the bulk of it), and on restore, mapping indexes back through
+       `flashcards` hands the queue the SAME object references the deck holds
+       -- which everything else here depends on (syncRecallSessionToDeck and
+       includeMasteredCards both compare cards by identity). Storing copies
+       would restore a queue of look-alike objects that fail every one of
+       those checks. */
+    const pos = new Map(flashcards.map((c, i) => [c, i]));
+    const toIdx = (arr) => arr.map(c => pos.get(c)).filter(i => i !== undefined);
+    const sessionLive = flashRecallSourceRef === flashcards;
     sessionStorage.setItem(FLASH_SESSION_KEY, JSON.stringify({
-      flashcards, flashIndex, flashMode, currentSetId, currentSetName
+      flashcards, flashIndex, flashMode, currentSetId, currentSetName,
+      flashRecallIgnoreMastery,
+      recall: sessionLive ? {
+        queue: toIdx(flashRecallQueue),
+        missed: toIdx(flashRecallMissed),
+        pos: flashRecallPos,
+        round: flashRecallRound,
+        known: flashRecallKnownTotal,
+        mastered: flashRecallMasteredCount,
+      } : null,
     }));
-  }catch(e){ /* storage full/unavailable -- session just won't survive a reload, not fatal */ }
+  }catch(e){
+    /* Quota exhaustion is the expected, benign case and stays non-fatal --
+       the session just won't survive a reload. But this used to swallow
+       EVERYTHING silently, including a plain ReferenceError from a typo in
+       this function, which would stop flashcards persisting at all with no
+       signal anywhere. Report it; the client error log picks it up. */
+    console.error('Could not persist the flashcard session:', e && e.message);
+  }
 }
 (function restoreFlashSessionState(){
   try{
@@ -3208,8 +3244,41 @@ function saveFlashSessionState(){
     if(s.flashMode === 'mc' || s.flashMode === 'recall') flashMode = s.flashMode;
     currentSetId = s.currentSetId ?? null;
     currentSetName = s.currentSetName ?? null;
+    flashRecallIgnoreMastery = s.flashRecallIgnoreMastery === true;
     flashGeneratorOpen = false;
-  }catch(e){ /* corrupted/incompatible saved state -- ignore, falls back to the empty-deck homescreen */ }
+    /* Restore a True Recall session in progress. This used to be dropped on
+       purpose, on the reasoning that ensureRecallQueue() would rebuild it
+       and so could never carry stale round state across a hard reload. The
+       cost of that was much larger than the risk it avoided: refreshing six
+       cards into a session put you back at card 1 with nothing recorded --
+       position, known count and the missed list all gone. Measured exactly
+       that way (6 -> 0, 4 -> 0, 2 -> 0) before this was written. Multiple
+       Choice never had the problem, because flashIndex was always persisted.
+
+       Every index is validated against the restored deck and the cursor is
+       clamped, so a truncated or edited blob degrades to a shorter session
+       rather than an out-of-range one. flashRecallSourceRef is pointed at
+       the restored deck so ensureRecallQueue() treats the session as
+       already built; flashRecallRevealed is deliberately NOT restored, so a
+       reload never lands mid-answer. */
+    const rec = s.recall;
+    if(rec && Array.isArray(rec.queue) && rec.queue.length){
+      const pick = (a) => (Array.isArray(a) ? a : []).map(i => flashcards[i]).filter(Boolean);
+      flashRecallQueue = pick(rec.queue);
+      flashRecallMissed = pick(rec.missed);
+      flashRecallPos = Math.min(Math.max(0, Number(rec.pos) || 0), flashRecallQueue.length);
+      flashRecallRound = Math.max(1, Number(rec.round) || 1);
+      flashRecallKnownTotal = Math.max(0, Number(rec.known) || 0);
+      flashRecallMasteredCount = Math.max(0, Number(rec.mastered) || 0);
+      flashRecallRevealed = false;
+      flashRecallSourceRef = flashcards;
+    }
+  }catch(e){
+    /* Corrupted or incompatible saved state falls back to the empty-deck
+       homescreen, as before -- but say so rather than vanishing, since this
+       also catches real bugs in the restore path above. */
+    console.error('Could not restore the flashcard session:', e && e.message);
+  }
 })();
 /* Purely a rendering overlay on the live quiz screen -- toggling it never
    touches answers/scoring/navigation, only whether renderQuestion() paints
@@ -5839,6 +5908,8 @@ async function buildFlashcardsFromAttemptIds(attemptIds, scopeMsg){
   flashcards = Array.from(tally.values());
   shuffleArrayInPlace(flashcards); // shuffled by default rather than sorted by miss-count -- see shuffleArrayInPlace
   flashIndex = 0;
+  flashRecallIgnoreMastery = false; // a different deck starts from its own mastered state
+
   flashSelectedOption = null;
   currentSetId = null; // a fresh build from attempt history replaces whatever saved set was loaded, rather than editing it
   currentSetName = null;
@@ -5905,6 +5976,8 @@ async function buildFlashcardsFromFlaggedAnswers(attemptIds){
   flashcards = Array.from(tally.values());
   shuffleArrayInPlace(flashcards);
   flashIndex = 0;
+  flashRecallIgnoreMastery = false; // a different deck starts from its own mastered state
+
   flashSelectedOption = null;
   currentSetId = null;
   currentSetName = null;
@@ -6332,6 +6405,8 @@ function loadSavedSetIntoStudy(set){
      only thing that persists a change. */
   flashcards = [...set.cards];
   flashIndex = 0;
+  flashRecallIgnoreMastery = false; // a different deck starts from its own mastered state
+
   flashSelectedOption = null;
   flashGeneratorOpen = false;
   flashSavedSetsOpen = false;
@@ -6502,6 +6577,7 @@ function startNewCustomFlashcardSet(){
   confirmReplaceDeck('Start a new custom set?', ()=>{
     flashcards = [];
     flashIndex = 0;
+    flashRecallIgnoreMastery = false; // a different deck starts from its own mastered state
     flashSelectedOption = null;
     currentSetId = null;
     currentSetName = null;
@@ -6727,6 +6803,10 @@ async function loadRecallProgressIfNeeded(){
    the behaviour is exactly what it always was. */
 function applyMasteredFilter(){
   if(flashRecallRound !== 1) return;
+  /* The student asked for the mastered cards, and that request outlives a
+     reload now. Without this the filter simply undid "Study again" on the
+     next page load. */
+  if(flashRecallIgnoreMastery) return;
   const masteredKeys = new Set([...flashRecallProgress].filter(([,v])=>v==='knew').map(([k])=>k));
   if(!masteredKeys.size) return;
   const untouched = flashRecallPos === 0 && !flashRecallRevealed
@@ -6734,14 +6814,23 @@ function applyMasteredFilter(){
   const keep = untouched ? 0 : flashRecallPos + 1;
   const head = flashRecallQueue.slice(0, keep);
   const tail = flashRecallQueue.slice(keep).filter(c=>!masteredKeys.has(recallKey(c)));
-  flashRecallMasteredCount = flashRecallQueue.length - head.length - tail.length;
-  if(flashRecallMasteredCount) flashRecallQueue = head.concat(tail);
+  /* Accumulate rather than assign. On a RESTORED session the filter has
+     already run once (before the reload), so re-running it removes nothing
+     -- and assigning the result would zero a banner count that is still
+     true, making the hidden cards silently unreachable. Runs at most once
+     per deck either way, guarded by flashRecallProgressFor. */
+  const removed = flashRecallQueue.length - head.length - tail.length;
+  if(removed){
+    flashRecallQueue = head.concat(tail);
+    flashRecallMasteredCount += removed;
+  }
 }
 
 /* "Study them too" link -- adds this deck's already-mastered cards back
    into the current running session's queue without touching their
    persisted status (only re-rating a card changes that). */
 function includeMasteredCards(){
+  flashRecallIgnoreMastery = true; // survives a reload -- see the flag's own comment
   const masteredKeys = new Set([...flashRecallProgress].filter(([,v])=>v==='knew').map(([k])=>k));
   /* Only cards that are not ALREADY in the queue. This used to append every
      mastered card in the deck unconditionally, on the assumption that
@@ -6853,6 +6942,7 @@ function rateRecallCard(knewIt){
    all N cards"; auto-filtering here would just show that same screen
    again with nothing to do. */
 function restartRecallSession(){
+  flashRecallIgnoreMastery = true; // survives a reload -- see the flag's own comment
   flashRecallQueue = [...flashcards];
   flashRecallMissed = [];
   flashRecallPos = 0;
@@ -9750,6 +9840,7 @@ function buildDeckFromMissedList(){
   shuffleArrayInPlace(flashcards);
   flashIndex = 0;
   flashSelectedOption = null;
+  flashRecallIgnoreMastery = false; // a different deck starts from its own mastered state
   currentSetId = null;   // a fresh build replaces whatever saved set was loaded
   currentSetName = null;
   flashGeneratorOpen = false;
